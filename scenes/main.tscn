@@ -45,16 +45,19 @@ text = "Admin"
 offset_left = 640.0
 offset_top = 300.0
 offset_right = 900.0
-offset_bottom = 480.0
+offset_bottom = 520.0
 
 [node name="VBox" type="VBoxContainer" parent="UI/MoneyPanel"]
 offset_left = 16.0
 offset_top = 16.0
 offset_right = 244.0
-offset_bottom = 164.0
+offset_bottom = 204.0
 
 [node name="Title" type="Label" parent="UI/MoneyPanel/VBox"]
 text = "Money"
+
+[node name="FreeParkingLabel" type="Label" parent="UI/MoneyPanel/VBox"]
+text = "Free Parking: $0"
 
 [node name="Player0Money" type="Label" parent="UI/MoneyPanel/VBox"]
 text = "Player 1: $1500"

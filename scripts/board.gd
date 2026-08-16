@@ -12,6 +12,7 @@ const SPACE_VISUAL_SIZE: float = 54.0
 const SPACE_DATA: Dictionary = {
 	0: {"name": "GO"},
 	4: {"name": "Income Tax", "type": "tax", "value": 200},
+	20: {"name": "Free Parking", "type": "free_parking"},
 	(TOTAL_SPACES - 2): {"name": "Luxury Tax", "type": "tax", "value": 100},
 }
 

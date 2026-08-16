@@ -23,6 +23,7 @@ const MARKER_OFFSETS: Array[Vector2] = [
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
 @onready var dice_label: Label = $UI/Panel/VBox/DiceLabel
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
+@onready var free_parking_label: Label = $UI/MoneyPanel/VBox/FreeParkingLabel
 @onready var money_labels: Array[Label] = [
 	$UI/MoneyPanel/VBox/Player0Money,
 	$UI/MoneyPanel/VBox/Player1Money,
@@ -33,6 +34,7 @@ const MARKER_OFFSETS: Array[Vector2] = [
 var players: Array[Node2D] = []
 var current_player: int = 0
 var _admin_die1: int = 0
+var free_parking_amount: int = 0
 
 
 func _ready() -> void:
@@ -103,7 +105,15 @@ func _perform_roll(die1: int, die2: int) -> void:
 	if landed_info.get("type", "") == "tax":
 		var tax_value: int = landed_info.get("value", 0)
 		player.money -= tax_value
-		dice_label.text += "\nLanded on %s! -%d Money" % [landed_info.get("name", ""), tax_value]
+		free_parking_amount += tax_value
+		dice_label.text += "\nLanded on %s! -%d Money (added to Free Parking)" % [landed_info.get("name", ""), tax_value]
+	elif landed_info.get("type", "") == "free_parking":
+		if free_parking_amount > 0:
+			player.money += free_parking_amount
+			dice_label.text += "\nLanded on Free Parking! +%d Money" % free_parking_amount
+			free_parking_amount = 0
+		else:
+			dice_label.text += "\nLanded on Free Parking!"
 
 	if not is_double:
 		current_player = (current_player + 1) % players.size()
@@ -116,5 +126,6 @@ func _update_turn_label() -> void:
 
 
 func _update_money_labels() -> void:
+	free_parking_label.text = "Free Parking: $%d" % free_parking_amount
 	for i in players.size():
 		money_labels[i].text = "%s: $%d" % [PLAYER_NAMES[i], players[i].money]
