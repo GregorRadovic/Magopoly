@@ -7,6 +7,14 @@ const TOTAL_SPACES: int = SPACES_PER_SIDE * 4
 const CELL_SIZE: float = 60.0
 const SPACE_VISUAL_SIZE: float = 54.0
 
+# Keys are resolved board indices (0..39). "-2" in the design spec counts
+# backward from Go, i.e. TOTAL_SPACES - 2 == 38.
+const SPACE_DATA: Dictionary = {
+	0: {"name": "GO"},
+	4: {"name": "Income Tax", "type": "tax", "value": 200},
+	(TOTAL_SPACES - 2): {"name": "Luxury Tax", "type": "tax", "value": 100},
+}
+
 var spaces: Array[Node2D] = []
 
 
@@ -19,10 +27,15 @@ func get_space_center(index: int) -> Vector2:
 	return space.position + Vector2(SPACE_VISUAL_SIZE, SPACE_VISUAL_SIZE) / 2.0
 
 
+func get_space_info(index: int) -> Dictionary:
+	return SPACE_DATA.get(index, {})
+
+
 func _generate_board() -> void:
 	for i in TOTAL_SPACES:
 		var space: Node2D = SPACE_SCENE.instantiate()
 		space.index = i
+		space.label_text = get_space_info(i).get("name", "")
 		space.position = _grid_to_position(_index_to_grid(i))
 		add_child(space)
 		spaces.append(space)

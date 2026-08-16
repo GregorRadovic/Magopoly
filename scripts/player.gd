@@ -1,10 +1,12 @@
 extends Node2D
 
 const RADIUS: float = 10.0
+const STARTING_MONEY: int = 1500
 
 var player_id: int = 0
 var player_color: Color = Color.WHITE
 var current_space: int = 0
+var money: int = STARTING_MONEY
 
 
 func setup(id: int, color: Color) -> void:
