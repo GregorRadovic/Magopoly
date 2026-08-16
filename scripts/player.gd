@@ -9,6 +9,7 @@ var current_space: int = 0
 var money: int = STARTING_MONEY
 var in_jail: bool = false
 var jail_turns_left: int = 0
+var consecutive_doubles: int = 0
 
 
 func setup(id: int, color: Color) -> void:

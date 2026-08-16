@@ -17,6 +17,7 @@ const MARKER_OFFSETS: Array[Vector2] = [
 ]
 const JAIL_SPACE_INDEX: int = 10
 const JAIL_SENTENCE_TURNS: int = 3
+const DOUBLES_JAIL_THRESHOLD: int = 3
 
 @onready var board: Node2D = $Board
 @onready var players_container: Node2D = $Players
@@ -97,6 +98,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	if player.in_jail:
 		if is_double:
 			player.in_jail = false
+			player.consecutive_doubles = 0
 			dice_label.text += "\nRolled doubles! Released from Jail."
 			grants_extra_turn = false
 			_move_player(player, roll)
@@ -109,8 +111,15 @@ func _perform_roll(die1: int, die2: int) -> void:
 				dice_label.text += "\nSentence served, paid $50 to Free Parking."
 			else:
 				dice_label.text += "\nStill in Jail. %d turn(s) left." % player.jail_turns_left
-	elif _move_player(player, roll):
-		grants_extra_turn = false
+	else:
+		player.consecutive_doubles = (player.consecutive_doubles + 1) if is_double else 0
+
+		if player.consecutive_doubles >= DOUBLES_JAIL_THRESHOLD:
+			_send_to_jail(player)
+			dice_label.text += "\nRolled doubles %d times in a row! Sent to Jail." % DOUBLES_JAIL_THRESHOLD
+			grants_extra_turn = false
+		elif _move_player(player, roll):
+			grants_extra_turn = false
 
 	if grants_extra_turn:
 		dice_label.text += "\nExtra turn!"
@@ -146,14 +155,19 @@ func _move_player(player: Node2D, roll: int) -> bool:
 		else:
 			dice_label.text += "\nLanded on Free Parking!"
 	elif landed_info.get("type", "") == "go_to_jail":
-		player.current_space = JAIL_SPACE_INDEX
-		player.position = board.get_space_center(JAIL_SPACE_INDEX) + MARKER_OFFSETS[player.player_id]
-		player.in_jail = true
-		player.jail_turns_left = JAIL_SENTENCE_TURNS
+		_send_to_jail(player)
 		dice_label.text += "\nLanded on Go To Jail! Sent to Jail."
 		return true
 
 	return false
+
+
+func _send_to_jail(player: Node2D) -> void:
+	player.current_space = JAIL_SPACE_INDEX
+	player.position = board.get_space_center(JAIL_SPACE_INDEX) + MARKER_OFFSETS[player.player_id]
+	player.in_jail = true
+	player.jail_turns_left = JAIL_SENTENCE_TURNS
+	player.consecutive_doubles = 0
 
 
 func _update_turn_label() -> void:
