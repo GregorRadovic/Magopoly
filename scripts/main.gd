@@ -15,6 +15,7 @@ const MARKER_OFFSETS: Array[Vector2] = [
 	Vector2(-14, 14),
 	Vector2(14, 14),
 ]
+const JAIL_SPACE_INDEX: int = 10
 
 @onready var board: Node2D = $Board
 @onready var players_container: Node2D = $Players
@@ -88,7 +89,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	var roll: int = die1 + die2
 	var is_double: bool = die1 == die2
 	var player: Node2D = players[current_player]
-	dice_label.text = "%s rolled: %d + %d = %d" % [PLAYER_NAMES[current_player], die1, die2, roll]
+	dice_label.text = "%s rolled: %d + %d = %d" % [_player_display_name(current_player), die1, die2, roll]
 
 	var new_space_raw: int = player.current_space + roll
 	var passed_go: bool = new_space_raw >= board.TOTAL_SPACES
@@ -114,6 +115,11 @@ func _perform_roll(die1: int, die2: int) -> void:
 			free_parking_amount = 0
 		else:
 			dice_label.text += "\nLanded on Free Parking!"
+	elif landed_info.get("type", "") == "go_to_jail":
+		player.current_space = JAIL_SPACE_INDEX
+		player.position = board.get_space_center(JAIL_SPACE_INDEX) + MARKER_OFFSETS[current_player]
+		player.in_jail = true
+		dice_label.text += "\nLanded on Go To Jail! Sent to Jail."
 
 	if not is_double:
 		current_player = (current_player + 1) % players.size()
@@ -122,10 +128,15 @@ func _perform_roll(die1: int, die2: int) -> void:
 
 
 func _update_turn_label() -> void:
-	turn_label.text = "%s's turn" % PLAYER_NAMES[current_player]
+	turn_label.text = "%s's turn" % _player_display_name(current_player)
 
 
 func _update_money_labels() -> void:
 	free_parking_label.text = "Free Parking: $%d" % free_parking_amount
 	for i in players.size():
-		money_labels[i].text = "%s: $%d" % [PLAYER_NAMES[i], players[i].money]
+		money_labels[i].text = "%s: $%d" % [_player_display_name(i), players[i].money]
+
+
+func _player_display_name(index: int) -> String:
+	var suffix: String = " (In Jail)" if players[index].in_jail else ""
+	return PLAYER_NAMES[index] + suffix

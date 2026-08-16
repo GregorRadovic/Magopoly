@@ -7,6 +7,7 @@ var player_id: int = 0
 var player_color: Color = Color.WHITE
 var current_space: int = 0
 var money: int = STARTING_MONEY
+var in_jail: bool = false
 
 
 func setup(id: int, color: Color) -> void:
