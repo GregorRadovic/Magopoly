@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/board.tscn" id="2"]
 [ext_resource type="PackedScene" path="res://scenes/number_prompt.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/confirm_prompt.tscn" id="4"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1")
@@ -41,6 +42,8 @@ text = "Admin"
 
 [node name="NumberPrompt" parent="UI" instance=ExtResource("3")]
 
+[node name="ConfirmPrompt" parent="UI" instance=ExtResource("4")]
+
 [node name="MoneyPanel" type="Panel" parent="UI"]
 offset_left = 640.0
 offset_top = 300.0
@@ -70,3 +73,34 @@ text = "Player 3: $1500"
 
 [node name="Player3Money" type="Label" parent="UI/MoneyPanel/VBox"]
 text = "Player 4: $1500"
+
+[node name="PropertiesPanel" type="Panel" parent="UI"]
+offset_left = 920.0
+offset_top = 40.0
+offset_right = 1150.0
+offset_bottom = 520.0
+
+[node name="VBox" type="VBoxContainer" parent="UI/PropertiesPanel"]
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 214.0
+offset_bottom = 464.0
+
+[node name="Title" type="Label" parent="UI/PropertiesPanel/VBox"]
+text = "Properties"
+
+[node name="Player0Properties" type="Label" parent="UI/PropertiesPanel/VBox"]
+autowrap_mode = 2
+text = "Player 1: (none)"
+
+[node name="Player1Properties" type="Label" parent="UI/PropertiesPanel/VBox"]
+autowrap_mode = 2
+text = "Player 2: (none)"
+
+[node name="Player2Properties" type="Label" parent="UI/PropertiesPanel/VBox"]
+autowrap_mode = 2
+text = "Player 3: (none)"
+
+[node name="Player3Properties" type="Label" parent="UI/PropertiesPanel/VBox"]
+autowrap_mode = 2
+text = "Player 4: (none)"

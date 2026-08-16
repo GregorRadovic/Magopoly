@@ -26,12 +26,19 @@ const DOUBLES_JAIL_THRESHOLD: int = 3
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
 @onready var dice_label: Label = $UI/Panel/VBox/DiceLabel
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
+@onready var confirm_prompt: PopupPanel = $UI/ConfirmPrompt
 @onready var free_parking_label: Label = $UI/MoneyPanel/VBox/FreeParkingLabel
 @onready var money_labels: Array[Label] = [
 	$UI/MoneyPanel/VBox/Player0Money,
 	$UI/MoneyPanel/VBox/Player1Money,
 	$UI/MoneyPanel/VBox/Player2Money,
 	$UI/MoneyPanel/VBox/Player3Money,
+]
+@onready var property_labels: Array[Label] = [
+	$UI/PropertiesPanel/VBox/Player0Properties,
+	$UI/PropertiesPanel/VBox/Player1Properties,
+	$UI/PropertiesPanel/VBox/Player2Properties,
+	$UI/PropertiesPanel/VBox/Player3Properties,
 ]
 
 var players: Array[Node2D] = []
@@ -46,6 +53,7 @@ func _ready() -> void:
 	admin_button.pressed.connect(_on_admin_pressed)
 	_update_turn_label()
 	_update_money_labels()
+	_update_property_labels()
 
 
 func _spawn_players() -> void:
@@ -57,6 +65,7 @@ func _spawn_players() -> void:
 		player.position = board.get_space_center(0) + MARKER_OFFSETS[i]
 		players.append(player)
 		money_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
+		property_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
 
 
 func _on_roll_pressed() -> void:
@@ -88,6 +97,9 @@ func _on_admin_die2_entered(value: int) -> void:
 
 
 func _perform_roll(die1: int, die2: int) -> void:
+	roll_button.disabled = true
+	admin_button.disabled = true
+
 	var roll: int = die1 + die2
 	var is_double: bool = die1 == die2
 	var player: Node2D = players[current_player]
@@ -101,7 +113,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 			player.consecutive_doubles = 0
 			dice_label.text += "\nRolled doubles! Released from Jail."
 			grants_extra_turn = false
-			_move_player(player, roll)
+			await _move_player(player, roll)
 		else:
 			player.jail_turns_left -= 1
 			if player.jail_turns_left <= 0:
@@ -118,7 +130,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 			_send_to_jail(player)
 			dice_label.text += "\nRolled doubles %d times in a row! Sent to Jail." % DOUBLES_JAIL_THRESHOLD
 			grants_extra_turn = false
-		elif _move_player(player, roll):
+		elif await _move_player(player, roll):
 			grants_extra_turn = false
 
 	if grants_extra_turn:
@@ -127,6 +139,10 @@ func _perform_roll(die1: int, die2: int) -> void:
 		current_player = (current_player + 1) % players.size()
 	_update_turn_label()
 	_update_money_labels()
+	_update_property_labels()
+
+	roll_button.disabled = false
+	admin_button.disabled = false
 
 
 # Returns true if this move sent the player to Jail (which cancels any
@@ -158,8 +174,28 @@ func _move_player(player: Node2D, roll: int) -> bool:
 		_send_to_jail(player)
 		dice_label.text += "\nLanded on Go To Jail! Sent to Jail."
 		return true
+	elif landed_info.get("type", "") == "property":
+		var space: Node2D = board.spaces[player.current_space]
+		var property_name: String = landed_info.get("name", "")
+		var price: int = landed_info.get("price", 0)
+		if space.owner_id == -1:
+			dice_label.text += "\nLanded on %s ($%d)." % [property_name, price]
+			var wants_to_buy: bool = await _ask_buy_property(property_name, price)
+			if wants_to_buy:
+				player.money -= price
+				space.owner_id = player.player_id
+				player.owned_properties.append({"name": property_name, "price": price})
+				dice_label.text += "\nBought %s for $%d!" % [property_name, price]
+			else:
+				dice_label.text += "\nDeclined to buy %s." % property_name
 
 	return false
+
+
+func _ask_buy_property(property_name: String, price: int) -> bool:
+	confirm_prompt.open("Buy %s for $%d?" % [property_name, price])
+	var yes: bool = await confirm_prompt.answered
+	return yes
 
 
 func _send_to_jail(player: Node2D) -> void:
@@ -186,3 +222,15 @@ func _player_display_name(index: int) -> String:
 		return PLAYER_NAMES[index]
 	var turn_word: String = "turn" if player.jail_turns_left == 1 else "turns"
 	return "%s (In Jail, %d %s left)" % [PLAYER_NAMES[index], player.jail_turns_left, turn_word]
+
+
+func _update_property_labels() -> void:
+	for i in players.size():
+		var owned: Array[Dictionary] = players[i].owned_properties
+		var summary: String = "(none)"
+		if not owned.is_empty():
+			var entries: Array[String] = []
+			for card in owned:
+				entries.append("%s ($%d)" % [card["name"], card["price"]])
+			summary = ", ".join(entries)
+		property_labels[i].text = "%s: %s" % [PLAYER_NAMES[i], summary]
