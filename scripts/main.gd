@@ -16,6 +16,7 @@ const MARKER_OFFSETS: Array[Vector2] = [
 	Vector2(14, 14),
 ]
 const JAIL_SPACE_INDEX: int = 10
+const JAIL_SENTENCE_TURNS: int = 3
 
 @onready var board: Node2D = $Board
 @onready var players_container: Node2D = $Players
@@ -91,16 +92,45 @@ func _perform_roll(die1: int, die2: int) -> void:
 	var player: Node2D = players[current_player]
 	dice_label.text = "%s rolled: %d + %d = %d" % [_player_display_name(current_player), die1, die2, roll]
 
+	var grants_extra_turn: bool = is_double
+
+	if player.in_jail:
+		if is_double:
+			player.in_jail = false
+			dice_label.text += "\nRolled doubles! Released from Jail."
+			grants_extra_turn = false
+			_move_player(player, roll)
+		else:
+			player.jail_turns_left -= 1
+			if player.jail_turns_left <= 0:
+				player.money -= 50
+				free_parking_amount += 50
+				player.in_jail = false
+				dice_label.text += "\nSentence served, paid $50 to Free Parking."
+			else:
+				dice_label.text += "\nStill in Jail. %d turn(s) left." % player.jail_turns_left
+	elif _move_player(player, roll):
+		grants_extra_turn = false
+
+	if grants_extra_turn:
+		dice_label.text += "\nExtra turn!"
+	else:
+		current_player = (current_player + 1) % players.size()
+	_update_turn_label()
+	_update_money_labels()
+
+
+# Returns true if this move sent the player to Jail (which cancels any
+# doubles-triggered extra turn).
+func _move_player(player: Node2D, roll: int) -> bool:
 	var new_space_raw: int = player.current_space + roll
 	var passed_go: bool = new_space_raw >= board.TOTAL_SPACES
 	if passed_go:
 		player.money += 200
 		dice_label.text += "\nYou passed Go! (+200 Money)"
-	if is_double:
-		dice_label.text += "\nExtra turn!"
 
 	player.current_space = new_space_raw % board.TOTAL_SPACES
-	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[current_player]
+	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
 
 	var landed_info: Dictionary = board.get_space_info(player.current_space)
 	if landed_info.get("type", "") == "tax":
@@ -117,14 +147,13 @@ func _perform_roll(die1: int, die2: int) -> void:
 			dice_label.text += "\nLanded on Free Parking!"
 	elif landed_info.get("type", "") == "go_to_jail":
 		player.current_space = JAIL_SPACE_INDEX
-		player.position = board.get_space_center(JAIL_SPACE_INDEX) + MARKER_OFFSETS[current_player]
+		player.position = board.get_space_center(JAIL_SPACE_INDEX) + MARKER_OFFSETS[player.player_id]
 		player.in_jail = true
+		player.jail_turns_left = JAIL_SENTENCE_TURNS
 		dice_label.text += "\nLanded on Go To Jail! Sent to Jail."
+		return true
 
-	if not is_double:
-		current_player = (current_player + 1) % players.size()
-	_update_turn_label()
-	_update_money_labels()
+	return false
 
 
 func _update_turn_label() -> void:
@@ -138,5 +167,8 @@ func _update_money_labels() -> void:
 
 
 func _player_display_name(index: int) -> String:
-	var suffix: String = " (In Jail)" if players[index].in_jail else ""
-	return PLAYER_NAMES[index] + suffix
+	var player: Node2D = players[index]
+	if not player.in_jail:
+		return PLAYER_NAMES[index]
+	var turn_word: String = "turn" if player.jail_turns_left == 1 else "turns"
+	return "%s (In Jail, %d %s left)" % [PLAYER_NAMES[index], player.jail_turns_left, turn_word]
