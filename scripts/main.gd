@@ -8,7 +8,7 @@ const PLAYER_COLORS: Array[Color] = [
 	Color(0.2, 0.75, 0.3),
 	Color(0.9, 0.8, 0.15),
 ]
-const PLAYER_NAMES: Array[String] = ["asd", "dsa 2", "dsa 3", "asd 4"]
+const PLAYER_NAMES: Array[String] = ["Player 1", "Player 2", "Player 3", "Player 4"]
 const MARKER_OFFSETS: Array[Vector2] = [
 	Vector2(-14, -14),
 	Vector2(14, -14),
