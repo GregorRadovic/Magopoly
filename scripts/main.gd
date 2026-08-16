@@ -8,7 +8,7 @@ const PLAYER_COLORS: Array[Color] = [
 	Color(0.2, 0.75, 0.3),
 	Color(0.9, 0.8, 0.15),
 ]
-const PLAYER_NAMES: Array[String] = ["TESTTESTTEST", "Player 2", "Player 3", "Player 4"]
+const PLAYER_NAMES: Array[String] = ["Player 1", "Player 2", "Player 3", "Player 4"]
 const MARKER_OFFSETS: Array[Vector2] = [
 	Vector2(-14, -14),
 	Vector2(14, -14),
@@ -49,10 +49,15 @@ func _on_roll_pressed() -> void:
 	var is_double: bool = die1 == die2
 	var player: Node2D = players[current_player]
 	dice_label.text = "%s rolled: %d + %d = %d" % [PLAYER_NAMES[current_player], die1, die2, roll]
+
+	var new_space_raw: int = player.current_space + roll
+	var passed_go: bool = new_space_raw >= board.TOTAL_SPACES
+	if passed_go:
+		dice_label.text += "\nYou passed Go!"
 	if is_double:
 		dice_label.text += "\nExtra turn!"
 
-	player.current_space = (player.current_space + roll) % board.TOTAL_SPACES
+	player.current_space = new_space_raw % board.TOTAL_SPACES
 	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[current_player]
 
 	if not is_double:

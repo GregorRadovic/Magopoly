@@ -15,4 +15,4 @@ func _ready() -> void:
 
 func _update_label() -> void:
 	if label:
-		label.text = str(index)
+		label.text = "GO" if index == 0 else str(index)
