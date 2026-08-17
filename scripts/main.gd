@@ -190,6 +190,18 @@ func _move_player(player: Node2D, roll: int) -> bool:
 				dice_label.text += "\nBought %s for $%d!" % [property_name, price]
 			else:
 				dice_label.text += "\nDeclined to buy %s." % property_name
+		elif space.owner_id != player.player_id:
+			var rents: Array = landed_info.get("rents", [])
+			if not rents.is_empty():
+				var rent_amount: int = rents[0]
+				var monopoly: bool = _owns_full_color_group(space.owner_id, landed_info.get("color", ""))
+				if monopoly:
+					rent_amount *= 2
+				var owner: Node2D = players[space.owner_id]
+				player.money -= rent_amount
+				owner.money += rent_amount
+				var monopoly_note: String = " (monopoly, doubled)" if monopoly else ""
+				dice_label.text += "\nLanded on %s (owned by %s)! Paid $%d rent%s." % [property_name, PLAYER_NAMES[space.owner_id], rent_amount, monopoly_note]
 
 	return false
 
@@ -198,6 +210,16 @@ func _ask_buy_property(property_name: String, price: int) -> bool:
 	confirm_prompt.open("Buy %s for $%d?" % [property_name, price])
 	var yes: bool = await confirm_prompt.answered
 	return yes
+
+
+func _owns_full_color_group(player_id: int, color_name: String) -> bool:
+	if color_name == "":
+		return false
+	var group: Array = board.get_color_group(color_name)
+	for space_index in group:
+		if board.spaces[space_index].owner_id != player_id:
+			return false
+	return true
 
 
 func _on_space_clicked(index: int) -> void:
