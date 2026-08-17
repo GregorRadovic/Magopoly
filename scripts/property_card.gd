@@ -1,5 +1,9 @@
 extends PopupPanel
 
+# Shared with asset_card.gd so every card (property, railroad, utility)
+# renders at the same normalized size regardless of its own content length.
+const CARD_SIZE: Vector2i = Vector2i(440, 540)
+
 @onready var header_panel: ColorRect = $VBox/HeaderPanel
 @onready var name_label: Label = $VBox/HeaderPanel/HeaderVBox/NameLabel
 @onready var rent_label: Label = $VBox/RentLabel
@@ -28,4 +32,4 @@ func show_card(property_name: String, header_color: Color, rents: Array, house_c
 	rent4_label.text = "Rent with 4 Houses: $%d" % rents[4]
 	rent5_label.text = "Rent with 5 Houses: $%d" % rents[5]
 	house_cost_label.text = "Houses cost: $%d each" % house_cost
-	popup_centered(Vector2i(440, 740))
+	popup_centered(CARD_SIZE)

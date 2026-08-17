@@ -1,6 +1,7 @@
 extends Node2D
 
 const PLAYER_SCENE: PackedScene = preload("res://scenes/player.tscn")
+const MINI_CARD_SCENE: PackedScene = preload("res://scenes/mini_property_card.tscn")
 
 const PLAYER_COLORS: Array[Color] = [
 	Color(0.85, 0.2, 0.2),
@@ -30,6 +31,7 @@ const DOUBLES_JAIL_THRESHOLD: int = 3
 @onready var quit_confirm_prompt: PopupPanel = $UI/QuitConfirmPrompt
 @onready var info_prompt: PopupPanel = $UI/InfoPrompt
 @onready var property_card: PopupPanel = $UI/PropertyCard
+@onready var asset_card: PopupPanel = $UI/AssetCard
 @onready var free_parking_label: Label = $UI/PlayersPanel/VBox/FreeParkingLabel
 @onready var player_header_labels: Array[Label] = [
 	$UI/PlayersPanel/VBox/Player0/HeaderLabel,
@@ -37,11 +39,11 @@ const DOUBLES_JAIL_THRESHOLD: int = 3
 	$UI/PlayersPanel/VBox/Player2/HeaderLabel,
 	$UI/PlayersPanel/VBox/Player3/HeaderLabel,
 ]
-@onready var player_properties_labels: Array[Label] = [
-	$UI/PlayersPanel/VBox/Player0/PropertiesLabel,
-	$UI/PlayersPanel/VBox/Player1/PropertiesLabel,
-	$UI/PlayersPanel/VBox/Player2/PropertiesLabel,
-	$UI/PlayersPanel/VBox/Player3/PropertiesLabel,
+@onready var player_properties_flows: Array[HFlowContainer] = [
+	$UI/PlayersPanel/VBox/Player0/PropertiesFlow,
+	$UI/PlayersPanel/VBox/Player1/PropertiesFlow,
+	$UI/PlayersPanel/VBox/Player2/PropertiesFlow,
+	$UI/PlayersPanel/VBox/Player3/PropertiesFlow,
 ]
 
 var players: Array[Node2D] = []
@@ -83,7 +85,6 @@ func _spawn_players() -> void:
 		player.position = board.get_space_center(0) + MARKER_OFFSETS[i]
 		players.append(player)
 		player_header_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
-		player_properties_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
 
 
 func _on_roll_pressed() -> void:
@@ -201,7 +202,7 @@ func _move_player(player: Node2D, roll: int) -> bool:
 			if wants_to_buy:
 				player.money -= price
 				space.owner_id = player.player_id
-				player.owned_properties.append({"name": property_name, "price": price})
+				player.owned_property_indices.append(player.current_space)
 				dice_label.text += "\nBought %s for $%d!" % [property_name, price]
 			else:
 				dice_label.text += "\nDeclined to buy %s." % property_name
@@ -282,20 +283,30 @@ func _on_space_clicked(index: int) -> void:
 		property_card.show_card(info.get("name", ""), header_color, info["rents"], house_cost)
 		return
 
+	if color_name == "railroad" and info.has("rents"):
+		var rents: Array = info["rents"]
+		var lines: Array[String] = [
+			"Rent: $%d" % rents[0],
+			"If 2 Railroads are owned: $%d" % rents[1],
+			"If 3 Railroads are owned: $%d" % rents[2],
+			"If 4 Railroads are owned: $%d" % rents[3],
+		]
+		asset_card.show_card(info.get("name", ""), load(info.get("icon", "")), lines)
+		return
+
+	if color_name == "utility" and info.has("rent_multipliers"):
+		var multipliers: Array = info["rent_multipliers"]
+		var lines: Array[String] = [
+			"If one Utility is owned, rent is %d times amount shown on dice." % multipliers[0],
+			"If both Utilities are owned, rent is %d times amount shown on dice." % multipliers[1],
+		]
+		asset_card.show_card(info.get("name", ""), load(info.get("icon", "")), lines)
+		return
+
 	var space_name: String = info.get("name", "Space %d" % index)
 	var lines: Array[String] = [space_name]
 	if info.has("price"):
 		lines.append("Cost: $%d" % info["price"])
-	if color_name == "railroad" and info.has("rents"):
-		var rents: Array = info["rents"]
-		for i in rents.size():
-			var railroad_count: int = i + 1
-			lines.append("%d Railroad%s: $%d" % [railroad_count, "" if railroad_count == 1 else "s", rents[i]])
-	elif color_name == "utility" and info.has("rent_multipliers"):
-		var multipliers: Array = info["rent_multipliers"]
-		for i in multipliers.size():
-			var utility_count: int = i + 1
-			lines.append("%d Utilit%s: %dx dice roll" % [utility_count, "y" if utility_count == 1 else "ies", multipliers[i]])
 	info_prompt.open("\n".join(lines))
 
 
@@ -324,11 +335,14 @@ func _update_player_panels() -> void:
 	for i in players.size():
 		player_header_labels[i].text = "%s -- $%d" % [_player_display_name(i), players[i].money]
 
-		var owned: Array[Dictionary] = players[i].owned_properties
-		var properties_summary: String = "(none)"
-		if not owned.is_empty():
-			var entries: Array[String] = []
-			for card in owned:
-				entries.append("%s ($%d)" % [card["name"], card["price"]])
-			properties_summary = ", ".join(entries)
-		player_properties_labels[i].text = "Properties: %s" % properties_summary
+		var flow: HFlowContainer = player_properties_flows[i]
+		for child in flow.get_children():
+			child.queue_free()
+		for space_index in players[i].owned_property_indices:
+			var info: Dictionary = board.get_space_info(space_index)
+			var color_name: String = info.get("color", "")
+			var color: Color = board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY)
+			var mini_card: Control = MINI_CARD_SCENE.instantiate()
+			flow.add_child(mini_card)
+			mini_card.setup(space_index, info.get("name", ""), color)
+			mini_card.card_clicked.connect(_on_space_clicked)

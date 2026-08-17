@@ -1,0 +1,27 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/mini_property_card.gd" id="1"]
+
+[node name="MiniPropertyCard" type="Control"]
+custom_minimum_size = Vector2(80, 56)
+script = ExtResource("1")
+
+[node name="Background" type="ColorRect" parent="."]
+offset_right = 80.0
+offset_bottom = 56.0
+color = Color(0.5, 0.5, 0.5, 1)
+
+[node name="NameLabel" type="Label" parent="."]
+offset_right = 80.0
+offset_bottom = 56.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 2
+text = "Name"
+
+[node name="ClickArea" type="Control" parent="."]
+offset_right = 80.0
+offset_bottom = 56.0
+mouse_default_cursor_shape = 2

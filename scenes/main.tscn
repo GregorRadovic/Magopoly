@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/board.tscn" id="2"]
@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" path="res://scenes/confirm_prompt.tscn" id="4"]
 [ext_resource type="PackedScene" path="res://scenes/info_prompt.tscn" id="5"]
 [ext_resource type="PackedScene" path="res://scenes/property_card.tscn" id="6"]
+[ext_resource type="PackedScene" path="res://scenes/asset_card.tscn" id="7"]
 
 [sub_resource type="StyleBoxFlat" id="OpaquePanelStyle"]
 bg_color = Color(0.145, 0.145, 0.161, 1)
@@ -61,6 +62,8 @@ text = "Admin"
 
 [node name="PropertyCard" parent="UI" instance=ExtResource("6")]
 
+[node name="AssetCard" parent="UI" instance=ExtResource("7")]
+
 [node name="PlayersPanel" type="Panel" parent="UI"]
 theme_override_styles/panel = SubResource("OpaquePanelStyle")
 offset_left = 968.0
@@ -89,9 +92,7 @@ text = "Free Parking: $0"
 autowrap_mode = 2
 text = "Player 1 -- $1500"
 
-[node name="PropertiesLabel" type="Label" parent="UI/PlayersPanel/VBox/Player0"]
-autowrap_mode = 2
-text = "Properties: (none)"
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0"]
 
 [node name="HSeparator1" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 
@@ -101,9 +102,7 @@ text = "Properties: (none)"
 autowrap_mode = 2
 text = "Player 2 -- $1500"
 
-[node name="PropertiesLabel" type="Label" parent="UI/PlayersPanel/VBox/Player1"]
-autowrap_mode = 2
-text = "Properties: (none)"
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1"]
 
 [node name="HSeparator2" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 
@@ -113,9 +112,7 @@ text = "Properties: (none)"
 autowrap_mode = 2
 text = "Player 3 -- $1500"
 
-[node name="PropertiesLabel" type="Label" parent="UI/PlayersPanel/VBox/Player2"]
-autowrap_mode = 2
-text = "Properties: (none)"
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2"]
 
 [node name="HSeparator3" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 
@@ -125,6 +122,4 @@ text = "Properties: (none)"
 autowrap_mode = 2
 text = "Player 4 -- $1500"
 
-[node name="PropertiesLabel" type="Label" parent="UI/PlayersPanel/VBox/Player3"]
-autowrap_mode = 2
-text = "Properties: (none)"
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3"]
