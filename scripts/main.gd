@@ -193,15 +193,23 @@ func _move_player(player: Node2D, roll: int) -> bool:
 		elif space.owner_id != player.player_id:
 			var rents: Array = landed_info.get("rents", [])
 			if not rents.is_empty():
-				var rent_amount: int = rents[0]
-				var monopoly: bool = _owns_full_color_group(space.owner_id, landed_info.get("color", ""))
-				if monopoly:
-					rent_amount *= 2
+				var color_name: String = landed_info.get("color", "")
+				var rent_amount: int
+				var note: String = ""
+				if color_name == "railroad":
+					var owned_railroads: int = _count_owned_in_group(space.owner_id, "railroad")
+					var tier: int = clampi(owned_railroads, 1, rents.size()) - 1
+					rent_amount = rents[tier]
+					note = " (%d railroad%s owned)" % [owned_railroads, "" if owned_railroads == 1 else "s"]
+				else:
+					rent_amount = rents[0]
+					if _owns_full_color_group(space.owner_id, color_name):
+						rent_amount *= 2
+						note = " (monopoly, doubled)"
 				var owner: Node2D = players[space.owner_id]
 				player.money -= rent_amount
 				owner.money += rent_amount
-				var monopoly_note: String = " (monopoly, doubled)" if monopoly else ""
-				dice_label.text += "\nLanded on %s (owned by %s)! Paid $%d rent%s." % [property_name, PLAYER_NAMES[space.owner_id], rent_amount, monopoly_note]
+				dice_label.text += "\nLanded on %s (owned by %s)! Paid $%d rent%s." % [property_name, PLAYER_NAMES[space.owner_id], rent_amount, note]
 
 	return false
 
@@ -222,6 +230,15 @@ func _owns_full_color_group(player_id: int, color_name: String) -> bool:
 	return true
 
 
+func _count_owned_in_group(player_id: int, color_name: String) -> int:
+	var group: Array = board.get_color_group(color_name)
+	var count: int = 0
+	for space_index in group:
+		if board.spaces[space_index].owner_id == player_id:
+			count += 1
+	return count
+
+
 func _on_space_clicked(index: int) -> void:
 	var info: Dictionary = board.get_space_info(index)
 	var space_name: String = info.get("name", "Space %d" % index)
@@ -230,9 +247,14 @@ func _on_space_clicked(index: int) -> void:
 		lines.append("Cost: $%d" % info["price"])
 	if info.has("rents"):
 		var rents: Array = info["rents"]
-		lines.append("Rent: $%d" % rents[0])
-		for house_count in range(1, 6):
-			lines.append("%d House%s: $%d" % [house_count, "" if house_count == 1 else "s", rents[house_count]])
+		if info.get("color", "") == "railroad":
+			for i in rents.size():
+				var railroad_count: int = i + 1
+				lines.append("%d Railroad%s: $%d" % [railroad_count, "" if railroad_count == 1 else "s", rents[i]])
+		else:
+			lines.append("Rent: $%d" % rents[0])
+			for house_count in range(1, 6):
+				lines.append("%d House%s: $%d" % [house_count, "" if house_count == 1 else "s", rents[house_count]])
 	info_prompt.open("\n".join(lines))
 
 
