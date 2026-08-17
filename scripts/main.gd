@@ -10,10 +10,10 @@ const PLAYER_COLORS: Array[Color] = [
 ]
 const PLAYER_NAMES: Array[String] = ["Player 1", "Player 2", "Player 3", "Player 4"]
 const MARKER_OFFSETS: Array[Vector2] = [
-	Vector2(-14, -14),
-	Vector2(14, -14),
-	Vector2(-14, 14),
-	Vector2(14, 14),
+	Vector2(-20, -20),
+	Vector2(20, -20),
+	Vector2(-20, 20),
+	Vector2(20, 20),
 ]
 const JAIL_SPACE_INDEX: int = 10
 const JAIL_SENTENCE_TURNS: int = 3
@@ -27,25 +27,28 @@ const DOUBLES_JAIL_THRESHOLD: int = 3
 @onready var dice_label: Label = $UI/Panel/VBox/DiceLabel
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
 @onready var confirm_prompt: PopupPanel = $UI/ConfirmPrompt
+@onready var quit_confirm_prompt: PopupPanel = $UI/QuitConfirmPrompt
 @onready var info_prompt: PopupPanel = $UI/InfoPrompt
-@onready var free_parking_label: Label = $UI/MoneyPanel/VBox/FreeParkingLabel
-@onready var money_labels: Array[Label] = [
-	$UI/MoneyPanel/VBox/Player0Money,
-	$UI/MoneyPanel/VBox/Player1Money,
-	$UI/MoneyPanel/VBox/Player2Money,
-	$UI/MoneyPanel/VBox/Player3Money,
+@onready var property_card: PopupPanel = $UI/PropertyCard
+@onready var free_parking_label: Label = $UI/PlayersPanel/VBox/FreeParkingLabel
+@onready var player_header_labels: Array[Label] = [
+	$UI/PlayersPanel/VBox/Player0/HeaderLabel,
+	$UI/PlayersPanel/VBox/Player1/HeaderLabel,
+	$UI/PlayersPanel/VBox/Player2/HeaderLabel,
+	$UI/PlayersPanel/VBox/Player3/HeaderLabel,
 ]
-@onready var property_labels: Array[Label] = [
-	$UI/PropertiesPanel/VBox/Player0Properties,
-	$UI/PropertiesPanel/VBox/Player1Properties,
-	$UI/PropertiesPanel/VBox/Player2Properties,
-	$UI/PropertiesPanel/VBox/Player3Properties,
+@onready var player_properties_labels: Array[Label] = [
+	$UI/PlayersPanel/VBox/Player0/PropertiesLabel,
+	$UI/PlayersPanel/VBox/Player1/PropertiesLabel,
+	$UI/PlayersPanel/VBox/Player2/PropertiesLabel,
+	$UI/PlayersPanel/VBox/Player3/PropertiesLabel,
 ]
 
 var players: Array[Node2D] = []
 var current_player: int = 0
 var _admin_die1: int = 0
 var free_parking_amount: int = 0
+var _quit_prompt_open: bool = false
 
 
 func _ready() -> void:
@@ -54,8 +57,21 @@ func _ready() -> void:
 	admin_button.pressed.connect(_on_admin_pressed)
 	board.space_clicked.connect(_on_space_clicked)
 	_update_turn_label()
-	_update_money_labels()
-	_update_property_labels()
+	_update_player_panels()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and not _quit_prompt_open:
+		_confirm_quit()
+
+
+func _confirm_quit() -> void:
+	_quit_prompt_open = true
+	quit_confirm_prompt.open("Are you sure you want to quit?")
+	var yes: bool = await quit_confirm_prompt.answered
+	_quit_prompt_open = false
+	if yes:
+		get_tree().quit()
 
 
 func _spawn_players() -> void:
@@ -66,8 +82,8 @@ func _spawn_players() -> void:
 		player.current_space = 0
 		player.position = board.get_space_center(0) + MARKER_OFFSETS[i]
 		players.append(player)
-		money_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
-		property_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
+		player_header_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
+		player_properties_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
 
 
 func _on_roll_pressed() -> void:
@@ -140,8 +156,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	else:
 		current_player = (current_player + 1) % players.size()
 	_update_turn_label()
-	_update_money_labels()
-	_update_property_labels()
+	_update_player_panels()
 
 	roll_button.disabled = false
 	admin_button.disabled = false
@@ -256,11 +271,21 @@ func _count_owned_in_group(player_id: int, color_name: String) -> int:
 
 func _on_space_clicked(index: int) -> void:
 	var info: Dictionary = board.get_space_info(index)
+	var color_name: String = info.get("color", "")
+
+	# Standard color-group properties get the visual card; railroads,
+	# utilities, and everything else fall back to the plain text popup,
+	# since their rent structures don't fit the 6-tier house-rent card.
+	if info.has("rents") and color_name != "railroad" and color_name != "utility":
+		var header_color: Color = board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY)
+		var house_cost: int = board.HOUSE_COSTS_BY_COLOR.get(color_name, 0)
+		property_card.show_card(info.get("name", ""), header_color, info["rents"], house_cost)
+		return
+
 	var space_name: String = info.get("name", "Space %d" % index)
 	var lines: Array[String] = [space_name]
 	if info.has("price"):
 		lines.append("Cost: $%d" % info["price"])
-	var color_name: String = info.get("color", "")
 	if color_name == "railroad" and info.has("rents"):
 		var rents: Array = info["rents"]
 		for i in rents.size():
@@ -271,11 +296,6 @@ func _on_space_clicked(index: int) -> void:
 		for i in multipliers.size():
 			var utility_count: int = i + 1
 			lines.append("%d Utilit%s: %dx dice roll" % [utility_count, "y" if utility_count == 1 else "ies", multipliers[i]])
-	elif info.has("rents"):
-		var rents: Array = info["rents"]
-		lines.append("Rent: $%d" % rents[0])
-		for house_count in range(1, 6):
-			lines.append("%d House%s: $%d" % [house_count, "" if house_count == 1 else "s", rents[house_count]])
 	info_prompt.open("\n".join(lines))
 
 
@@ -291,12 +311,6 @@ func _update_turn_label() -> void:
 	turn_label.text = "%s's turn" % _player_display_name(current_player)
 
 
-func _update_money_labels() -> void:
-	free_parking_label.text = "Free Parking: $%d" % free_parking_amount
-	for i in players.size():
-		money_labels[i].text = "%s: $%d" % [_player_display_name(i), players[i].money]
-
-
 func _player_display_name(index: int) -> String:
 	var player: Node2D = players[index]
 	if not player.in_jail:
@@ -305,13 +319,16 @@ func _player_display_name(index: int) -> String:
 	return "%s (In Jail, %d %s left)" % [PLAYER_NAMES[index], player.jail_turns_left, turn_word]
 
 
-func _update_property_labels() -> void:
+func _update_player_panels() -> void:
+	free_parking_label.text = "Free Parking: $%d" % free_parking_amount
 	for i in players.size():
+		player_header_labels[i].text = "%s -- $%d" % [_player_display_name(i), players[i].money]
+
 		var owned: Array[Dictionary] = players[i].owned_properties
-		var summary: String = "(none)"
+		var properties_summary: String = "(none)"
 		if not owned.is_empty():
 			var entries: Array[String] = []
 			for card in owned:
 				entries.append("%s ($%d)" % [card["name"], card["price"]])
-			summary = ", ".join(entries)
-		property_labels[i].text = "%s: %s" % [PLAYER_NAMES[i], summary]
+			properties_summary = ", ".join(entries)
+		player_properties_labels[i].text = "Properties: %s" % properties_summary

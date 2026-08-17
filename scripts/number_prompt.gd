@@ -15,7 +15,7 @@ func _ready() -> void:
 func open(prompt: String) -> void:
 	prompt_label.text = prompt
 	value_edit.text = ""
-	popup_centered(Vector2i(260, 120))
+	popup_centered(Vector2i(430, 200))
 	value_edit.grab_focus()
 
 

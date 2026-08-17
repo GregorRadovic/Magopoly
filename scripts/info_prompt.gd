@@ -10,4 +10,4 @@ func _ready() -> void:
 
 func open(text: String) -> void:
 	content_label.text = text
-	popup_centered(Vector2i(260, 220))
+	popup_centered(Vector2i(480, 500))

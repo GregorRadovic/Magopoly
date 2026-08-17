@@ -1,6 +1,6 @@
 extends Node2D
 
-const RADIUS: float = 10.0
+const RADIUS: float = 15.0
 const STARTING_MONEY: int = 1500
 
 var player_id: int = 0

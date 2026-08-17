@@ -6,8 +6,8 @@ const SPACE_SCENE: PackedScene = preload("res://scenes/board_space.tscn")
 
 const SPACES_PER_SIDE: int = 10
 const TOTAL_SPACES: int = SPACES_PER_SIDE * 4
-const CELL_SIZE: float = 60.0
-const SPACE_VISUAL_SIZE: float = 54.0
+const CELL_SIZE: float = 84.0
+const SPACE_VISUAL_SIZE: float = 78.0
 
 # Keys are resolved board indices (0..39). "-2" in the design spec counts
 # backward from Go, i.e. TOTAL_SPACES - 2 == 38.
@@ -60,6 +60,19 @@ const COLOR_GROUP_COLORS: Dictionary = {
 	"ocean_blue": Color(0.0, 0.447, 0.733),
 	"railroad": Color.BLACK,
 	"utility": Color(0.6, 0.6, 0.6),
+}
+
+# Cost to build one house on a property, by its color group. Railroads and
+# utilities don't build houses, so they have no entry here.
+const HOUSE_COSTS_BY_COLOR: Dictionary = {
+	"brown": 50,
+	"sky_blue": 50,
+	"pink": 100,
+	"orange": 100,
+	"red": 150,
+	"yellow": 150,
+	"green": 200,
+	"ocean_blue": 200,
 }
 
 # Color group name -> Array[int] of the property indices in that group.

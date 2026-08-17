@@ -6,35 +6,35 @@
 script = ExtResource("1")
 
 [node name="Border" type="ColorRect" parent="."]
-offset_right = 54.0
-offset_bottom = 54.0
+offset_right = 78.0
+offset_bottom = 78.0
 color = Color(0.25, 0.25, 0.25, 1)
 
 [node name="Background" type="ColorRect" parent="."]
 offset_left = 2.0
 offset_top = 2.0
-offset_right = 52.0
-offset_bottom = 52.0
+offset_right = 76.0
+offset_bottom = 76.0
 color = Color(0.92, 0.92, 0.88, 1)
 
 [node name="ColorBanner" type="ColorRect" parent="."]
 offset_left = 2.0
 offset_top = 2.0
-offset_right = 52.0
-offset_bottom = 14.0
+offset_right = 76.0
+offset_bottom = 20.0
 color = Color(0, 0, 0, 0)
 
 [node name="IndexLabel" type="Label" parent="."]
-offset_right = 54.0
-offset_bottom = 54.0
+offset_right = 78.0
+offset_bottom = 78.0
 theme_override_colors/font_color = Color(0, 0, 0, 1)
-theme_override_font_sizes/font_size = 10
+theme_override_font_sizes/font_size = 15
 autowrap_mode = 2
 horizontal_alignment = 1
 vertical_alignment = 1
 text = "0"
 
 [node name="ClickArea" type="Control" parent="."]
-offset_right = 54.0
-offset_bottom = 54.0
+offset_right = 78.0
+offset_bottom = 78.0
 mouse_default_cursor_shape = 2
