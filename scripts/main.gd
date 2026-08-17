@@ -191,21 +191,36 @@ func _move_player(player: Node2D, roll: int) -> bool:
 			else:
 				dice_label.text += "\nDeclined to buy %s." % property_name
 		elif space.owner_id != player.player_id:
+			var color_name: String = landed_info.get("color", "")
 			var rents: Array = landed_info.get("rents", [])
-			if not rents.is_empty():
-				var color_name: String = landed_info.get("color", "")
-				var rent_amount: int
-				var note: String = ""
-				if color_name == "railroad":
-					var owned_railroads: int = _count_owned_in_group(space.owner_id, "railroad")
-					var tier: int = clampi(owned_railroads, 1, rents.size()) - 1
-					rent_amount = rents[tier]
-					note = " (%d railroad%s owned)" % [owned_railroads, "" if owned_railroads == 1 else "s"]
-				else:
-					rent_amount = rents[0]
-					if _owns_full_color_group(space.owner_id, color_name):
-						rent_amount *= 2
-						note = " (monopoly, doubled)"
+			var rent_amount: int = 0
+			var note: String = ""
+			var charged: bool = false
+
+			if color_name == "railroad" and not rents.is_empty():
+				var owned_railroads: int = _count_owned_in_group(space.owner_id, "railroad")
+				var tier: int = clampi(owned_railroads, 1, rents.size()) - 1
+				rent_amount = rents[tier]
+				note = " (%d railroad%s owned)" % [owned_railroads, "" if owned_railroads == 1 else "s"]
+				charged = true
+			elif color_name == "utility":
+				var multipliers: Array = landed_info.get("rent_multipliers", [])
+				if not multipliers.is_empty():
+					var owned_utilities: int = _count_owned_in_group(space.owner_id, "utility")
+					var multiplier_tier: int = clampi(owned_utilities, 1, multipliers.size()) - 1
+					var multiplier: int = multipliers[multiplier_tier]
+					rent_amount = multiplier * roll
+					var utility_word: String = "utility" if owned_utilities == 1 else "utilities"
+					note = " (%d %s owned, %dx dice roll of %d)" % [owned_utilities, utility_word, multiplier, roll]
+					charged = true
+			elif not rents.is_empty():
+				rent_amount = rents[0]
+				if _owns_full_color_group(space.owner_id, color_name):
+					rent_amount *= 2
+					note = " (monopoly, doubled)"
+				charged = true
+
+			if charged:
 				var owner: Node2D = players[space.owner_id]
 				player.money -= rent_amount
 				owner.money += rent_amount
@@ -245,16 +260,22 @@ func _on_space_clicked(index: int) -> void:
 	var lines: Array[String] = [space_name]
 	if info.has("price"):
 		lines.append("Cost: $%d" % info["price"])
-	if info.has("rents"):
+	var color_name: String = info.get("color", "")
+	if color_name == "railroad" and info.has("rents"):
 		var rents: Array = info["rents"]
-		if info.get("color", "") == "railroad":
-			for i in rents.size():
-				var railroad_count: int = i + 1
-				lines.append("%d Railroad%s: $%d" % [railroad_count, "" if railroad_count == 1 else "s", rents[i]])
-		else:
-			lines.append("Rent: $%d" % rents[0])
-			for house_count in range(1, 6):
-				lines.append("%d House%s: $%d" % [house_count, "" if house_count == 1 else "s", rents[house_count]])
+		for i in rents.size():
+			var railroad_count: int = i + 1
+			lines.append("%d Railroad%s: $%d" % [railroad_count, "" if railroad_count == 1 else "s", rents[i]])
+	elif color_name == "utility" and info.has("rent_multipliers"):
+		var multipliers: Array = info["rent_multipliers"]
+		for i in multipliers.size():
+			var utility_count: int = i + 1
+			lines.append("%d Utilit%s: %dx dice roll" % [utility_count, "y" if utility_count == 1 else "ies", multipliers[i]])
+	elif info.has("rents"):
+		var rents: Array = info["rents"]
+		lines.append("Rent: $%d" % rents[0])
+		for house_count in range(1, 6):
+			lines.append("%d House%s: $%d" % [house_count, "" if house_count == 1 else "s", rents[house_count]])
 	info_prompt.open("\n".join(lines))
 
 
