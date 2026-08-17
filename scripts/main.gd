@@ -27,6 +27,7 @@ const DOUBLES_JAIL_THRESHOLD: int = 3
 @onready var dice_label: Label = $UI/Panel/VBox/DiceLabel
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
 @onready var confirm_prompt: PopupPanel = $UI/ConfirmPrompt
+@onready var info_prompt: PopupPanel = $UI/InfoPrompt
 @onready var free_parking_label: Label = $UI/MoneyPanel/VBox/FreeParkingLabel
 @onready var money_labels: Array[Label] = [
 	$UI/MoneyPanel/VBox/Player0Money,
@@ -51,6 +52,7 @@ func _ready() -> void:
 	_spawn_players()
 	roll_button.pressed.connect(_on_roll_pressed)
 	admin_button.pressed.connect(_on_admin_pressed)
+	board.space_clicked.connect(_on_space_clicked)
 	_update_turn_label()
 	_update_money_labels()
 	_update_property_labels()
@@ -196,6 +198,20 @@ func _ask_buy_property(property_name: String, price: int) -> bool:
 	confirm_prompt.open("Buy %s for $%d?" % [property_name, price])
 	var yes: bool = await confirm_prompt.answered
 	return yes
+
+
+func _on_space_clicked(index: int) -> void:
+	var info: Dictionary = board.get_space_info(index)
+	var space_name: String = info.get("name", "Space %d" % index)
+	var lines: Array[String] = [space_name]
+	if info.has("price"):
+		lines.append("Cost: $%d" % info["price"])
+	if info.has("rents"):
+		var rents: Array = info["rents"]
+		lines.append("Rent: $%d" % rents[0])
+		for house_count in range(1, 6):
+			lines.append("%d House%s: $%d" % [house_count, "" if house_count == 1 else "s", rents[house_count]])
+	info_prompt.open("\n".join(lines))
 
 
 func _send_to_jail(player: Node2D) -> void:
