@@ -1,10 +1,19 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/board.tscn" id="2"]
 [ext_resource type="PackedScene" path="res://scenes/number_prompt.tscn" id="3"]
 [ext_resource type="PackedScene" path="res://scenes/confirm_prompt.tscn" id="4"]
 [ext_resource type="PackedScene" path="res://scenes/info_prompt.tscn" id="5"]
+[ext_resource type="PackedScene" path="res://scenes/property_card.tscn" id="6"]
+[ext_resource type="PackedScene" path="res://scenes/asset_card.tscn" id="7"]
+
+[sub_resource type="StyleBoxFlat" id="OpaquePanelStyle"]
+bg_color = Color(0.145, 0.145, 0.161, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_left = 8
+corner_radius_bottom_right = 8
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1")
@@ -14,18 +23,20 @@ script = ExtResource("1")
 [node name="Players" type="Node2D" parent="."]
 
 [node name="UI" type="CanvasLayer" parent="."]
+layer = 10
 
 [node name="Panel" type="Panel" parent="UI"]
-offset_left = 640.0
-offset_top = 40.0
-offset_right = 900.0
-offset_bottom = 280.0
+theme_override_styles/panel = SubResource("OpaquePanelStyle")
+offset_left = 229.0
+offset_top = 224.0
+offset_right = 689.0
+offset_bottom = 694.0
 
 [node name="VBox" type="VBoxContainer" parent="UI/Panel"]
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 244.0
-offset_bottom = 224.0
+offset_left = 22.0
+offset_top = 22.0
+offset_right = 438.0
+offset_bottom = 448.0
 
 [node name="TurnLabel" type="Label" parent="UI/Panel/VBox"]
 text = "Player 1's turn"
@@ -34,76 +45,93 @@ text = "Player 1's turn"
 text = "Roll: -"
 
 [node name="RollButton" type="Button" parent="UI/Panel/VBox"]
-custom_minimum_size = Vector2(120, 40)
+custom_minimum_size = Vector2(200, 60)
 text = "Roll"
 
 [node name="AdminButton" type="Button" parent="UI/Panel/VBox"]
-custom_minimum_size = Vector2(120, 40)
+custom_minimum_size = Vector2(200, 60)
 text = "Admin"
+
+[node name="AdminPropertiesButton" type="Button" parent="UI/Panel/VBox"]
+custom_minimum_size = Vector2(200, 60)
+text = "Admin Properties"
+
+[node name="BuyHouseButton" type="Button" parent="UI/Panel/VBox"]
+custom_minimum_size = Vector2(200, 60)
+text = "Buy House"
+
+[node name="SellHousesButton" type="Button" parent="UI/Panel/VBox"]
+custom_minimum_size = Vector2(200, 60)
+text = "Sell Houses"
 
 [node name="NumberPrompt" parent="UI" instance=ExtResource("3")]
 
 [node name="ConfirmPrompt" parent="UI" instance=ExtResource("4")]
 
+[node name="QuitConfirmPrompt" parent="UI" instance=ExtResource("4")]
+
 [node name="InfoPrompt" parent="UI" instance=ExtResource("5")]
 
-[node name="MoneyPanel" type="Panel" parent="UI"]
-offset_left = 640.0
-offset_top = 300.0
-offset_right = 900.0
-offset_bottom = 520.0
+[node name="PropertyCard" parent="UI" instance=ExtResource("6")]
 
-[node name="VBox" type="VBoxContainer" parent="UI/MoneyPanel"]
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 244.0
-offset_bottom = 204.0
+[node name="AssetCard" parent="UI" instance=ExtResource("7")]
 
-[node name="Title" type="Label" parent="UI/MoneyPanel/VBox"]
-text = "Money"
+[node name="PlayersPanel" type="Panel" parent="UI"]
+theme_override_styles/panel = SubResource("OpaquePanelStyle")
+offset_left = 968.0
+offset_top = 25.0
+offset_right = 1870.0
+offset_bottom = 943.0
 
-[node name="FreeParkingLabel" type="Label" parent="UI/MoneyPanel/VBox"]
+[node name="VBox" type="VBoxContainer" parent="UI/PlayersPanel"]
+offset_left = 28.0
+offset_top = 28.0
+offset_right = 874.0
+offset_bottom = 890.0
+
+[node name="Title" type="Label" parent="UI/PlayersPanel/VBox"]
+theme_override_font_sizes/font_size = 34
+text = "Players"
+
+[node name="FreeParkingLabel" type="Label" parent="UI/PlayersPanel/VBox"]
 text = "Free Parking: $0"
 
-[node name="Player0Money" type="Label" parent="UI/MoneyPanel/VBox"]
-text = "Player 1: $1500"
+[node name="HSeparator0" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 
-[node name="Player1Money" type="Label" parent="UI/MoneyPanel/VBox"]
-text = "Player 2: $1500"
+[node name="Player0" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
 
-[node name="Player2Money" type="Label" parent="UI/MoneyPanel/VBox"]
-text = "Player 3: $1500"
-
-[node name="Player3Money" type="Label" parent="UI/MoneyPanel/VBox"]
-text = "Player 4: $1500"
-
-[node name="PropertiesPanel" type="Panel" parent="UI"]
-offset_left = 920.0
-offset_top = 40.0
-offset_right = 1150.0
-offset_bottom = 520.0
-
-[node name="VBox" type="VBoxContainer" parent="UI/PropertiesPanel"]
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 214.0
-offset_bottom = 464.0
-
-[node name="Title" type="Label" parent="UI/PropertiesPanel/VBox"]
-text = "Properties"
-
-[node name="Player0Properties" type="Label" parent="UI/PropertiesPanel/VBox"]
+[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player0"]
 autowrap_mode = 2
-text = "Player 1: (none)"
+text = "Player 1 -- $1500"
 
-[node name="Player1Properties" type="Label" parent="UI/PropertiesPanel/VBox"]
-autowrap_mode = 2
-text = "Player 2: (none)"
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0"]
 
-[node name="Player2Properties" type="Label" parent="UI/PropertiesPanel/VBox"]
-autowrap_mode = 2
-text = "Player 3: (none)"
+[node name="HSeparator1" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 
-[node name="Player3Properties" type="Label" parent="UI/PropertiesPanel/VBox"]
+[node name="Player1" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
+
+[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player1"]
 autowrap_mode = 2
-text = "Player 4: (none)"
+text = "Player 2 -- $1500"
+
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1"]
+
+[node name="HSeparator2" type="HSeparator" parent="UI/PlayersPanel/VBox"]
+
+[node name="Player2" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
+
+[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player2"]
+autowrap_mode = 2
+text = "Player 3 -- $1500"
+
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2"]
+
+[node name="HSeparator3" type="HSeparator" parent="UI/PlayersPanel/VBox"]
+
+[node name="Player3" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
+
+[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player3"]
+autowrap_mode = 2
+text = "Player 4 -- $1500"
+
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3"]

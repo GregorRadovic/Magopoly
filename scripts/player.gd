@@ -1,6 +1,6 @@
 extends Node2D
 
-const RADIUS: float = 10.0
+const RADIUS: float = 15.0
 const STARTING_MONEY: int = 1500
 
 var player_id: int = 0
@@ -10,7 +10,7 @@ var money: int = STARTING_MONEY
 var in_jail: bool = false
 var jail_turns_left: int = 0
 var consecutive_doubles: int = 0
-var owned_properties: Array[Dictionary] = []
+var owned_property_indices: Array[int] = []
 
 
 func setup(id: int, color: Color) -> void:

@@ -6,10 +6,10 @@
 script = ExtResource("1")
 
 [node name="VBox" type="VBoxContainer" parent="."]
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 264.0
-offset_bottom = 114.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 436.0
+offset_bottom = 206.0
 
 [node name="PromptLabel" type="Label" parent="VBox"]
 autowrap_mode = 2
@@ -19,9 +19,9 @@ text = "Buy this property?"
 layout_mode = 2
 
 [node name="YesButton" type="Button" parent="VBox/Buttons"]
-custom_minimum_size = Vector2(100, 36)
+custom_minimum_size = Vector2(168, 58)
 text = "Yes"
 
 [node name="NoButton" type="Button" parent="VBox/Buttons"]
-custom_minimum_size = Vector2(100, 36)
+custom_minimum_size = Vector2(168, 58)
 text = "No"

@@ -14,7 +14,7 @@ func _ready() -> void:
 
 func open(prompt: String) -> void:
 	prompt_label.text = prompt
-	popup_centered(Vector2i(280, 130))
+	popup_centered(Vector2i(460, 230))
 
 
 func _on_yes() -> void:

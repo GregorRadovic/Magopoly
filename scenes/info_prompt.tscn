@@ -6,15 +6,15 @@
 script = ExtResource("1")
 
 [node name="VBox" type="VBoxContainer" parent="."]
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 244.0
-offset_bottom = 204.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 456.0
+offset_bottom = 476.0
 
 [node name="ContentLabel" type="Label" parent="VBox"]
 autowrap_mode = 2
 text = "Space"
 
 [node name="CloseButton" type="Button" parent="VBox"]
-custom_minimum_size = Vector2(100, 36)
+custom_minimum_size = Vector2(0, 58)
 text = "Close"

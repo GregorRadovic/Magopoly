@@ -1,40 +1,65 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/board_space.gd" id="1"]
+[ext_resource type="Texture2D" path="res://Magopoly Assets/House.png" id="2"]
 
 [node name="BoardSpace" type="Node2D"]
 script = ExtResource("1")
 
 [node name="Border" type="ColorRect" parent="."]
-offset_right = 54.0
-offset_bottom = 54.0
+offset_right = 78.0
+offset_bottom = 78.0
 color = Color(0.25, 0.25, 0.25, 1)
 
 [node name="Background" type="ColorRect" parent="."]
 offset_left = 2.0
 offset_top = 2.0
-offset_right = 52.0
-offset_bottom = 52.0
+offset_right = 76.0
+offset_bottom = 76.0
 color = Color(0.92, 0.92, 0.88, 1)
 
 [node name="ColorBanner" type="ColorRect" parent="."]
 offset_left = 2.0
 offset_top = 2.0
-offset_right = 52.0
-offset_bottom = 14.0
+offset_right = 76.0
+offset_bottom = 20.0
 color = Color(0, 0, 0, 0)
 
+[node name="HouseIcon" type="TextureRect" parent="ColorBanner"]
+visible = false
+offset_left = 29.0
+offset_top = 1.0
+offset_right = 45.0
+offset_bottom = 17.0
+texture = ExtResource("2")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="HouseCountLabel" type="Label" parent="ColorBanner"]
+visible = false
+offset_left = 29.0
+offset_top = 1.0
+offset_right = 45.0
+offset_bottom = 17.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 3
+theme_override_font_sizes/font_size = 12
+horizontal_alignment = 1
+vertical_alignment = 1
+text = "0"
+
 [node name="IndexLabel" type="Label" parent="."]
-offset_right = 54.0
-offset_bottom = 54.0
+offset_right = 78.0
+offset_bottom = 78.0
 theme_override_colors/font_color = Color(0, 0, 0, 1)
-theme_override_font_sizes/font_size = 10
+theme_override_font_sizes/font_size = 15
 autowrap_mode = 2
 horizontal_alignment = 1
 vertical_alignment = 1
 text = "0"
 
 [node name="ClickArea" type="Control" parent="."]
-offset_right = 54.0
-offset_bottom = 54.0
+offset_right = 78.0
+offset_bottom = 78.0
 mouse_default_cursor_shape = 2

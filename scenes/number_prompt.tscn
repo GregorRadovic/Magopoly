@@ -6,15 +6,17 @@
 script = ExtResource("1")
 
 [node name="VBox" type="VBoxContainer" parent="."]
-offset_left = 16.0
-offset_top = 16.0
-offset_right = 244.0
-offset_bottom = 104.0
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 406.0
+offset_bottom = 176.0
 
 [node name="PromptLabel" type="Label" parent="VBox"]
 text = "Enter a number:"
 
 [node name="ValueEdit" type="LineEdit" parent="VBox"]
+custom_minimum_size = Vector2(0, 54)
 
 [node name="ConfirmButton" type="Button" parent="VBox"]
+custom_minimum_size = Vector2(0, 58)
 text = "OK"

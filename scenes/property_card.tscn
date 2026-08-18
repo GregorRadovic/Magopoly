@@ -1,0 +1,89 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/property_card.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="WhiteCardStyle"]
+bg_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_left = 14
+corner_radius_bottom_right = 14
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.1, 0.1, 0.1, 1)
+
+[node name="PropertyCard" type="PopupPanel"]
+theme_override_styles/panel = SubResource("WhiteCardStyle")
+script = ExtResource("1")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+custom_minimum_size = Vector2(400, 0)
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+theme_override_constants/separation = 14
+
+[node name="HeaderPanel" type="ColorRect" parent="VBox"]
+custom_minimum_size = Vector2(0, 100)
+color = Color(0.5, 0.5, 0.5, 1)
+
+[node name="HeaderVBox" type="VBoxContainer" parent="VBox/HeaderPanel"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+alignment = 1
+
+[node name="TitleDeedLabel" type="Label" parent="VBox/HeaderPanel/HeaderVBox"]
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 14
+horizontal_alignment = 1
+text = "TITLE DEED"
+
+[node name="NameLabel" type="Label" parent="VBox/HeaderPanel/HeaderVBox"]
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 26
+horizontal_alignment = 1
+autowrap_mode = 2
+text = "Property Name"
+
+[node name="RentLabel" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Rent: $0"
+
+[node name="RentColorSetLabel" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Rent with Color Set: $0"
+
+[node name="Rent1Label" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Rent with 1 House: $0"
+
+[node name="Rent2Label" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Rent with 2 Houses: $0"
+
+[node name="Rent3Label" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Rent with 3 Houses: $0"
+
+[node name="Rent4Label" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Rent with 4 Houses: $0"
+
+[node name="Rent5Label" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Rent with 5 Houses: $0"
+
+[node name="HSeparator" type="HSeparator" parent="VBox"]
+
+[node name="HouseCostLabel" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Houses cost: $0 each"
+
+[node name="CloseButton" type="Button" parent="VBox"]
+custom_minimum_size = Vector2(0, 58)
+text = "Close"
