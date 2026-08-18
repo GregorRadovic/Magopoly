@@ -27,6 +27,9 @@ signal clicked(index: int)
 # (Named owner_id, not "owner" -- that name collides with Node.owner.)
 var owner_id: int = -1
 
+# Only meaningful for color-group properties (not railroads/utilities).
+var house_count: int = 0
+
 
 func _ready() -> void:
 	_update_label()

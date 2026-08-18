@@ -13,9 +13,9 @@ func _ready() -> void:
 	click_area.gui_input.connect(_on_click_area_gui_input)
 
 
-func setup(index: int, property_name: String, color: Color) -> void:
+func setup(index: int, property_name: String, color: Color, house_count: int = 0) -> void:
 	space_index = index
-	name_label.text = property_name
+	name_label.text = "%s (%dH)" % [property_name, house_count] if house_count > 0 else property_name
 	background.color = color
 
 

@@ -19,11 +19,16 @@ const MARKER_OFFSETS: Array[Vector2] = [
 const JAIL_SPACE_INDEX: int = 10
 const JAIL_SENTENCE_TURNS: int = 3
 const DOUBLES_JAIL_THRESHOLD: int = 3
+const PROPERTY_COLOR_ORDER: Array[String] = [
+	"brown", "sky_blue", "pink", "orange", "red", "yellow", "green", "ocean_blue", "railroad", "utility",
+]
 
 @onready var board: Node2D = $Board
 @onready var players_container: Node2D = $Players
 @onready var roll_button: Button = $UI/Panel/VBox/RollButton
 @onready var admin_button: Button = $UI/Panel/VBox/AdminButton
+@onready var admin_properties_button: Button = $UI/Panel/VBox/AdminPropertiesButton
+@onready var buy_house_button: Button = $UI/Panel/VBox/BuyHouseButton
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
 @onready var dice_label: Label = $UI/Panel/VBox/DiceLabel
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
@@ -51,12 +56,16 @@ var current_player: int = 0
 var _admin_die1: int = 0
 var free_parking_amount: int = 0
 var _quit_prompt_open: bool = false
+var _admin_picking_property: bool = false
+var _buying_house: bool = false
 
 
 func _ready() -> void:
 	_spawn_players()
 	roll_button.pressed.connect(_on_roll_pressed)
 	admin_button.pressed.connect(_on_admin_pressed)
+	admin_properties_button.pressed.connect(_on_admin_properties_pressed)
+	buy_house_button.pressed.connect(_on_buy_house_pressed)
 	board.space_clicked.connect(_on_space_clicked)
 	_update_turn_label()
 	_update_player_panels()
@@ -96,13 +105,19 @@ func _on_roll_pressed() -> void:
 func _on_admin_pressed() -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
+	admin_properties_button.disabled = true
+	buy_house_button.disabled = true
 	number_prompt.value_confirmed.connect(_on_admin_die1_entered, CONNECT_ONE_SHOT)
+	number_prompt.cancelled.connect(_on_admin_number_prompt_cancelled, CONNECT_ONE_SHOT)
 	number_prompt.open("Enter first dice value:")
 
 
 func _on_admin_die1_entered(value: int) -> void:
+	if number_prompt.cancelled.is_connected(_on_admin_number_prompt_cancelled):
+		number_prompt.cancelled.disconnect(_on_admin_number_prompt_cancelled)
 	_admin_die1 = value
 	number_prompt.value_confirmed.connect(_on_admin_die2_entered, CONNECT_ONE_SHOT)
+	number_prompt.cancelled.connect(_on_admin_number_prompt_cancelled, CONNECT_ONE_SHOT)
 	# Deferred: this handler runs while the first popup's own OK button is
 	# still processing its "pressed" event, so reopening the popup here
 	# immediately (same call frame) silently fails to show it.
@@ -110,14 +125,128 @@ func _on_admin_die1_entered(value: int) -> void:
 
 
 func _on_admin_die2_entered(value: int) -> void:
+	if number_prompt.cancelled.is_connected(_on_admin_number_prompt_cancelled):
+		number_prompt.cancelled.disconnect(_on_admin_number_prompt_cancelled)
 	roll_button.disabled = false
 	admin_button.disabled = false
+	admin_properties_button.disabled = false
+	buy_house_button.disabled = false
 	_perform_roll(_admin_die1, value)
+
+
+func _on_admin_number_prompt_cancelled() -> void:
+	# The number prompt was dismissed without a value being confirmed (e.g.
+	# the player clicked a board tile behind it instead of Confirm). Clean
+	# up whichever one-shot connection was still pending so it can't fire
+	# later on an unrelated prompt use, and unlock the dice buttons.
+	if number_prompt.value_confirmed.is_connected(_on_admin_die1_entered):
+		number_prompt.value_confirmed.disconnect(_on_admin_die1_entered)
+	if number_prompt.value_confirmed.is_connected(_on_admin_die2_entered):
+		number_prompt.value_confirmed.disconnect(_on_admin_die2_entered)
+	roll_button.disabled = false
+	admin_button.disabled = false
+	admin_properties_button.disabled = false
+	buy_house_button.disabled = false
+
+
+func _on_admin_properties_pressed() -> void:
+	roll_button.disabled = true
+	admin_button.disabled = true
+	admin_properties_button.disabled = true
+	buy_house_button.disabled = true
+	# Armed immediately (not after awaiting the popup's close signal): a
+	# player clicking a tile directly, per the popup's own instruction,
+	# dismisses the popup via Godot's default outside-click behavior
+	# without ever emitting "closed", which used to leave pick mode
+	# unarmed and the buttons disabled forever.
+	_admin_picking_property = true
+	info_prompt.open("Click the property you want to gain.")
+
+
+func _admin_assign_property(index: int) -> void:
+	var info: Dictionary = board.get_space_info(index)
+	if info.get("type", "") != "property":
+		dice_label.text = "Space %d is not a property." % index
+	else:
+		var space: Node2D = board.spaces[index]
+		if space.owner_id != -1:
+			players[space.owner_id].owned_property_indices.erase(index)
+
+		var player: Node2D = players[current_player]
+		space.owner_id = player.player_id
+		space.house_count = 0
+		player.owned_property_indices.append(index)
+		_sort_owned_properties(player)
+		dice_label.text = "%s is now the admin-assigned owner of %s." % [_player_display_name(current_player), info.get("name", "")]
+		_update_player_panels()
+
+	roll_button.disabled = false
+	admin_button.disabled = false
+	admin_properties_button.disabled = false
+	buy_house_button.disabled = false
+
+
+func _on_buy_house_pressed() -> void:
+	roll_button.disabled = true
+	admin_button.disabled = true
+	admin_properties_button.disabled = true
+	buy_house_button.disabled = true
+	# Armed immediately, same as Admin Properties: clicking a tile directly
+	# dismisses the popup via Godot's default outside-click behavior without
+	# emitting "closed", so pick mode can't be left waiting on that signal.
+	_buying_house = true
+	info_prompt.open("Click the property you want to build a house on.")
+
+
+func _buy_house(index: int) -> void:
+	var info: Dictionary = board.get_space_info(index)
+	var color_name: String = info.get("color", "")
+	var space: Node2D = board.spaces[index]
+	var player: Node2D = players[current_player]
+	var house_cost: int = board.HOUSE_COSTS_BY_COLOR.get(color_name, 0)
+	var property_name: String = info.get("name", "")
+
+	if info.get("type", "") != "property" or not board.HOUSE_COSTS_BY_COLOR.has(color_name):
+		dice_label.text = "You can't build houses on that space."
+	elif space.owner_id != player.player_id:
+		dice_label.text = "You don't own %s." % property_name
+	elif not _owns_full_color_group(player.player_id, color_name):
+		dice_label.text = "You need the full color set to build a house on %s." % property_name
+	elif space.house_count >= 5:
+		dice_label.text = "%s already has the maximum of 5 houses." % property_name
+	elif space.house_count > _min_houses_in_group(color_name):
+		dice_label.text = "You must build evenly -- other properties in the color set have fewer houses than %s." % property_name
+	elif player.money < house_cost:
+		dice_label.text = "%s can't afford a house on %s ($%d)." % [_player_display_name(current_player), property_name, house_cost]
+	else:
+		player.money -= house_cost
+		space.house_count += 1
+		var house_word: String = "house" if space.house_count == 1 else "houses"
+		dice_label.text = "%s built a house on %s for $%d (now %d %s)." % [_player_display_name(current_player), property_name, house_cost, space.house_count, house_word]
+		_update_player_panels()
+
+	roll_button.disabled = false
+	admin_button.disabled = false
+	admin_properties_button.disabled = false
+	buy_house_button.disabled = false
+
+
+# The minimum house count among all properties in a color group, used to
+# enforce even building: a property can only gain a house while it's tied
+# for the fewest houses in its group.
+func _min_houses_in_group(color_name: String) -> int:
+	var group: Array = board.get_color_group(color_name)
+	var min_houses: int = 5
+	for space_index in group:
+		min_houses = mini(min_houses, board.spaces[space_index].house_count)
+	return min_houses
 
 
 func _perform_roll(die1: int, die2: int) -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
+	admin_properties_button.disabled = true
+	buy_house_button.disabled = true
 
 	var roll: int = die1 + die2
 	var is_double: bool = die1 == die2
@@ -161,6 +290,8 @@ func _perform_roll(die1: int, die2: int) -> void:
 
 	roll_button.disabled = false
 	admin_button.disabled = false
+	admin_properties_button.disabled = false
+	buy_house_button.disabled = false
 
 
 # Returns true if this move sent the player to Jail (which cancels any
@@ -203,6 +334,7 @@ func _move_player(player: Node2D, roll: int) -> bool:
 				player.money -= price
 				space.owner_id = player.player_id
 				player.owned_property_indices.append(player.current_space)
+				_sort_owned_properties(player)
 				dice_label.text += "\nBought %s for $%d!" % [property_name, price]
 			else:
 				dice_label.text += "\nDeclined to buy %s." % property_name
@@ -230,10 +362,14 @@ func _move_player(player: Node2D, roll: int) -> bool:
 					note = " (%d %s owned, %dx dice roll of %d)" % [owned_utilities, utility_word, multiplier, roll]
 					charged = true
 			elif not rents.is_empty():
-				rent_amount = rents[0]
-				if _owns_full_color_group(space.owner_id, color_name):
-					rent_amount *= 2
-					note = " (monopoly, doubled)"
+				if space.house_count > 0:
+					rent_amount = rents[space.house_count]
+					note = " (%d house%s)" % [space.house_count, "" if space.house_count == 1 else "s"]
+				else:
+					rent_amount = rents[0]
+					if _owns_full_color_group(space.owner_id, color_name):
+						rent_amount *= 2
+						note = " (monopoly, doubled)"
 				charged = true
 
 			if charged:
@@ -249,6 +385,27 @@ func _ask_buy_property(property_name: String, price: int) -> bool:
 	confirm_prompt.open("Buy %s for $%d?" % [property_name, price])
 	var yes: bool = await confirm_prompt.answered
 	return yes
+
+
+func _sort_owned_properties(player: Node2D) -> void:
+	player.owned_property_indices.sort_custom(_compare_property_order)
+
+
+# Orders by color group (per PROPERTY_COLOR_ORDER), then by board index
+# within a group. Unlisted colors (shouldn't happen -- only owned property
+# spaces get sorted) fall to the end rather than crashing on find()'s -1.
+func _compare_property_order(a: int, b: int) -> bool:
+	var color_a: String = board.get_space_info(a).get("color", "")
+	var color_b: String = board.get_space_info(b).get("color", "")
+	var rank_a: int = PROPERTY_COLOR_ORDER.find(color_a)
+	var rank_b: int = PROPERTY_COLOR_ORDER.find(color_b)
+	if rank_a == -1:
+		rank_a = PROPERTY_COLOR_ORDER.size()
+	if rank_b == -1:
+		rank_b = PROPERTY_COLOR_ORDER.size()
+	if rank_a != rank_b:
+		return rank_a < rank_b
+	return a < b
 
 
 func _owns_full_color_group(player_id: int, color_name: String) -> bool:
@@ -271,6 +428,20 @@ func _count_owned_in_group(player_id: int, color_name: String) -> int:
 
 
 func _on_space_clicked(index: int) -> void:
+	if _buying_house:
+		_buying_house = false
+		if info_prompt.visible:
+			info_prompt.hide()
+		_buy_house(index)
+		return
+
+	if _admin_picking_property:
+		_admin_picking_property = false
+		if info_prompt.visible:
+			info_prompt.hide()
+		_admin_assign_property(index)
+		return
+
 	var info: Dictionary = board.get_space_info(index)
 	var color_name: String = info.get("color", "")
 
@@ -344,5 +515,5 @@ func _update_player_panels() -> void:
 			var color: Color = board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY)
 			var mini_card: Control = MINI_CARD_SCENE.instantiate()
 			flow.add_child(mini_card)
-			mini_card.setup(space_index, info.get("name", ""), color)
+			mini_card.setup(space_index, info.get("name", ""), color, board.spaces[space_index].house_count)
 			mini_card.card_clicked.connect(_on_space_clicked)
