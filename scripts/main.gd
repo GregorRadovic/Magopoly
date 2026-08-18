@@ -29,6 +29,7 @@ const PROPERTY_COLOR_ORDER: Array[String] = [
 @onready var admin_button: Button = $UI/Panel/VBox/AdminButton
 @onready var admin_properties_button: Button = $UI/Panel/VBox/AdminPropertiesButton
 @onready var buy_house_button: Button = $UI/Panel/VBox/BuyHouseButton
+@onready var sell_houses_button: Button = $UI/Panel/VBox/SellHousesButton
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
 @onready var dice_label: Label = $UI/Panel/VBox/DiceLabel
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
@@ -58,6 +59,7 @@ var free_parking_amount: int = 0
 var _quit_prompt_open: bool = false
 var _admin_picking_property: bool = false
 var _buying_house: bool = false
+var _selling_house: bool = false
 
 
 func _ready() -> void:
@@ -66,6 +68,7 @@ func _ready() -> void:
 	admin_button.pressed.connect(_on_admin_pressed)
 	admin_properties_button.pressed.connect(_on_admin_properties_pressed)
 	buy_house_button.pressed.connect(_on_buy_house_pressed)
+	sell_houses_button.pressed.connect(_on_sell_houses_pressed)
 	board.space_clicked.connect(_on_space_clicked)
 	_update_turn_label()
 	_update_player_panels()
@@ -107,6 +110,7 @@ func _on_admin_pressed() -> void:
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
 	buy_house_button.disabled = true
+	sell_houses_button.disabled = true
 	number_prompt.value_confirmed.connect(_on_admin_die1_entered, CONNECT_ONE_SHOT)
 	number_prompt.cancelled.connect(_on_admin_number_prompt_cancelled, CONNECT_ONE_SHOT)
 	number_prompt.open("Enter first dice value:")
@@ -131,6 +135,7 @@ func _on_admin_die2_entered(value: int) -> void:
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
 	buy_house_button.disabled = false
+	sell_houses_button.disabled = false
 	_perform_roll(_admin_die1, value)
 
 
@@ -147,6 +152,7 @@ func _on_admin_number_prompt_cancelled() -> void:
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
 	buy_house_button.disabled = false
+	sell_houses_button.disabled = false
 
 
 func _on_admin_properties_pressed() -> void:
@@ -154,6 +160,7 @@ func _on_admin_properties_pressed() -> void:
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
 	buy_house_button.disabled = true
+	sell_houses_button.disabled = true
 	# Armed immediately (not after awaiting the popup's close signal): a
 	# player clicking a tile directly, per the popup's own instruction,
 	# dismisses the popup via Godot's default outside-click behavior
@@ -184,6 +191,7 @@ func _admin_assign_property(index: int) -> void:
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
 	buy_house_button.disabled = false
+	sell_houses_button.disabled = false
 
 
 func _on_buy_house_pressed() -> void:
@@ -191,6 +199,7 @@ func _on_buy_house_pressed() -> void:
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
 	buy_house_button.disabled = true
+	sell_houses_button.disabled = true
 	# Armed immediately, same as Admin Properties: clicking a tile directly
 	# dismisses the popup via Godot's default outside-click behavior without
 	# emitting "closed", so pick mode can't be left waiting on that signal.
@@ -229,6 +238,7 @@ func _buy_house(index: int) -> void:
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
 	buy_house_button.disabled = false
+	sell_houses_button.disabled = false
 
 
 # The minimum house count among all properties in a color group, used to
@@ -242,11 +252,65 @@ func _min_houses_in_group(color_name: String) -> int:
 	return min_houses
 
 
+func _on_sell_houses_pressed() -> void:
+	roll_button.disabled = true
+	admin_button.disabled = true
+	admin_properties_button.disabled = true
+	buy_house_button.disabled = true
+	sell_houses_button.disabled = true
+	# Armed immediately, same reasoning as Buy House / Admin Properties.
+	_selling_house = true
+	info_prompt.open("Click the property you want to sell a house from.")
+
+
+func _sell_house(index: int) -> void:
+	var info: Dictionary = board.get_space_info(index)
+	var color_name: String = info.get("color", "")
+	var space: Node2D = board.spaces[index]
+	var player: Node2D = players[current_player]
+	var house_cost: int = board.HOUSE_COSTS_BY_COLOR.get(color_name, 0)
+	var property_name: String = info.get("name", "")
+	var sale_price: int = house_cost / 2
+
+	if info.get("type", "") != "property" or not board.HOUSE_COSTS_BY_COLOR.has(color_name):
+		dice_label.text = "That space doesn't have houses to sell."
+	elif space.owner_id != player.player_id:
+		dice_label.text = "You don't own %s." % property_name
+	elif space.house_count <= 0:
+		dice_label.text = "%s has no houses to sell." % property_name
+	elif space.house_count < _max_houses_in_group(color_name):
+		dice_label.text = "You must sell evenly -- other properties in the color set have more houses than %s." % property_name
+	else:
+		space.house_count -= 1
+		player.money += sale_price
+		var house_word: String = "house" if space.house_count == 1 else "houses"
+		dice_label.text = "%s sold a house on %s for $%d (now %d %s)." % [_player_display_name(current_player), property_name, sale_price, space.house_count, house_word]
+		_update_player_panels()
+
+	roll_button.disabled = false
+	admin_button.disabled = false
+	admin_properties_button.disabled = false
+	buy_house_button.disabled = false
+	sell_houses_button.disabled = false
+
+
+# The maximum house count among all properties in a color group, used to
+# enforce even selling: a property can only lose a house while it's tied
+# for the most houses in its group.
+func _max_houses_in_group(color_name: String) -> int:
+	var group: Array = board.get_color_group(color_name)
+	var max_houses: int = 0
+	for space_index in group:
+		max_houses = maxi(max_houses, board.spaces[space_index].house_count)
+	return max_houses
+
+
 func _perform_roll(die1: int, die2: int) -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
 	buy_house_button.disabled = true
+	sell_houses_button.disabled = true
 
 	var roll: int = die1 + die2
 	var is_double: bool = die1 == die2
@@ -292,6 +356,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
 	buy_house_button.disabled = false
+	sell_houses_button.disabled = false
 
 
 # Returns true if this move sent the player to Jail (which cancels any
@@ -433,6 +498,13 @@ func _on_space_clicked(index: int) -> void:
 		if info_prompt.visible:
 			info_prompt.hide()
 		_buy_house(index)
+		return
+
+	if _selling_house:
+		_selling_house = false
+		if info_prompt.visible:
+			info_prompt.hide()
+		_sell_house(index)
 		return
 
 	if _admin_picking_property:

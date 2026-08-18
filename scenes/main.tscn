@@ -60,6 +60,10 @@ text = "Admin Properties"
 custom_minimum_size = Vector2(200, 60)
 text = "Buy House"
 
+[node name="SellHousesButton" type="Button" parent="UI/Panel/VBox"]
+custom_minimum_size = Vector2(200, 60)
+text = "Sell Houses"
+
 [node name="NumberPrompt" parent="UI" instance=ExtResource("3")]
 
 [node name="ConfirmPrompt" parent="UI" instance=ExtResource("4")]
