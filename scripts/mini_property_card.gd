@@ -3,6 +3,7 @@ extends Control
 signal card_clicked(space_index: int)
 
 @onready var background: ColorRect = $Background
+@onready var inner: ColorRect = $Inner
 @onready var name_label: Label = $NameLabel
 @onready var click_area: Control = $ClickArea
 
@@ -13,10 +14,17 @@ func _ready() -> void:
 	click_area.gui_input.connect(_on_click_area_gui_input)
 
 
-func setup(index: int, property_name: String, color: Color, house_count: int = 0) -> void:
+func setup(index: int, property_name: String, color: Color, house_count: int = 0, is_mortgaged: bool = false) -> void:
 	space_index = index
-	name_label.text = "%s (%dH)" % [property_name, house_count] if house_count > 0 else property_name
+	var suffix: String = ""
+	if house_count > 0:
+		suffix += " (%dH)" % house_count
+	if is_mortgaged:
+		suffix += " (mortgaged)"
+	name_label.text = property_name + suffix
 	background.color = color
+	inner.color = Color.WHITE if is_mortgaged else color
+	name_label.add_theme_color_override("font_color", Color.BLACK if is_mortgaged else Color.WHITE)
 
 
 func _on_click_area_gui_input(event: InputEvent) -> void:

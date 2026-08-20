@@ -35,6 +35,8 @@ var house_count: int = 0:
 		house_count = value
 		_update_house_display()
 
+var is_mortgaged: bool = false
+
 
 func _ready() -> void:
 	_update_label()
