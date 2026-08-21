@@ -28,10 +28,8 @@ const PROPERTY_COLOR_ORDER: Array[String] = [
 @onready var roll_button: Button = $UI/Panel/VBox/RollButton
 @onready var admin_button: Button = $UI/Panel/VBox/AdminButton
 @onready var admin_properties_button: Button = $UI/Panel/VBox/AdminPropertiesButton
-@onready var buy_house_button: Button = $UI/Panel/VBox/BuyHouseButton
-@onready var sell_houses_button: Button = $UI/Panel/VBox/SellHousesButton
-@onready var mortgage_button: Button = $UI/Panel/VBox/MortgageButton
-@onready var unmortgage_button: Button = $UI/Panel/VBox/UnmortgageButton
+@onready var buy_house_unmortgage_button: Button = $UI/Panel/VBox/BuyHouseUnmortgageButton
+@onready var sell_house_mortgage_button: Button = $UI/Panel/VBox/SellHouseMortgageButton
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
 @onready var dice_label: Label = $UI/Panel/VBox/DiceLabel
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
@@ -60,10 +58,8 @@ var _admin_die1: int = 0
 var free_parking_amount: int = 0
 var _quit_prompt_open: bool = false
 var _admin_picking_property: bool = false
-var _buying_house: bool = false
-var _selling_house: bool = false
-var _mortgaging: bool = false
-var _unmortgaging: bool = false
+var _buying_house_or_unmortgaging: bool = false
+var _selling_house_or_mortgaging: bool = false
 
 
 func _ready() -> void:
@@ -71,10 +67,8 @@ func _ready() -> void:
 	roll_button.pressed.connect(_on_roll_pressed)
 	admin_button.pressed.connect(_on_admin_pressed)
 	admin_properties_button.pressed.connect(_on_admin_properties_pressed)
-	buy_house_button.pressed.connect(_on_buy_house_pressed)
-	sell_houses_button.pressed.connect(_on_sell_houses_pressed)
-	mortgage_button.pressed.connect(_on_mortgage_pressed)
-	unmortgage_button.pressed.connect(_on_unmortgage_pressed)
+	buy_house_unmortgage_button.pressed.connect(_on_buy_house_unmortgage_pressed)
+	sell_house_mortgage_button.pressed.connect(_on_sell_house_mortgage_pressed)
 	board.space_clicked.connect(_on_space_clicked)
 	_update_turn_label()
 	_update_player_panels()
@@ -115,10 +109,8 @@ func _on_admin_pressed() -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
-	buy_house_button.disabled = true
-	sell_houses_button.disabled = true
-	mortgage_button.disabled = true
-	unmortgage_button.disabled = true
+	buy_house_unmortgage_button.disabled = true
+	sell_house_mortgage_button.disabled = true
 	number_prompt.value_confirmed.connect(_on_admin_die1_entered, CONNECT_ONE_SHOT)
 	number_prompt.cancelled.connect(_on_admin_number_prompt_cancelled, CONNECT_ONE_SHOT)
 	number_prompt.open("Enter first dice value:")
@@ -142,10 +134,8 @@ func _on_admin_die2_entered(value: int) -> void:
 	roll_button.disabled = false
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
-	buy_house_button.disabled = false
-	sell_houses_button.disabled = false
-	mortgage_button.disabled = false
-	unmortgage_button.disabled = false
+	buy_house_unmortgage_button.disabled = false
+	sell_house_mortgage_button.disabled = false
 	_perform_roll(_admin_die1, value)
 
 
@@ -161,20 +151,16 @@ func _on_admin_number_prompt_cancelled() -> void:
 	roll_button.disabled = false
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
-	buy_house_button.disabled = false
-	sell_houses_button.disabled = false
-	mortgage_button.disabled = false
-	unmortgage_button.disabled = false
+	buy_house_unmortgage_button.disabled = false
+	sell_house_mortgage_button.disabled = false
 
 
 func _on_admin_properties_pressed() -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
-	buy_house_button.disabled = true
-	sell_houses_button.disabled = true
-	mortgage_button.disabled = true
-	unmortgage_button.disabled = true
+	buy_house_unmortgage_button.disabled = true
+	sell_house_mortgage_button.disabled = true
 	# Armed immediately (not after awaiting the popup's close signal): a
 	# player clicking a tile directly, per the popup's own instruction,
 	# dismisses the popup via Godot's default outside-click behavior
@@ -205,25 +191,31 @@ func _admin_assign_property(index: int) -> void:
 	roll_button.disabled = false
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
-	buy_house_button.disabled = false
-	sell_houses_button.disabled = false
-	mortgage_button.disabled = false
-	unmortgage_button.disabled = false
+	buy_house_unmortgage_button.disabled = false
+	sell_house_mortgage_button.disabled = false
 
 
-func _on_buy_house_pressed() -> void:
+func _on_buy_house_unmortgage_pressed() -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
-	buy_house_button.disabled = true
-	sell_houses_button.disabled = true
-	mortgage_button.disabled = true
-	unmortgage_button.disabled = true
+	buy_house_unmortgage_button.disabled = true
+	sell_house_mortgage_button.disabled = true
 	# Armed immediately, same as Admin Properties: clicking a tile directly
 	# dismisses the popup via Godot's default outside-click behavior without
 	# emitting "closed", so pick mode can't be left waiting on that signal.
-	_buying_house = true
-	info_prompt.open("Click the property you want to build a house on.")
+	_buying_house_or_unmortgaging = true
+	info_prompt.open("Click a property to build a house on it, or to unmortgage it if it's mortgaged.")
+
+
+# Dispatches to unmortgaging or house-building depending on the clicked
+# property's current mortgage status, per the combined button's behavior.
+func _buy_house_or_unmortgage(index: int) -> void:
+	var space: Node2D = board.spaces[index]
+	if space.is_mortgaged:
+		_unmortgage_property(index)
+	else:
+		_buy_house(index)
 
 
 func _buy_house(index: int) -> void:
@@ -238,8 +230,8 @@ func _buy_house(index: int) -> void:
 		dice_label.text = "You can't build houses on that space."
 	elif space.owner_id != player.player_id:
 		dice_label.text = "You don't own %s." % property_name
-	elif space.is_mortgaged:
-		dice_label.text = "%s is mortgaged -- you can't build houses on it." % property_name
+	elif _group_has_mortgaged(color_name):
+		dice_label.text = "You can't build houses on %s while a property in its color set is mortgaged." % property_name
 	elif not _owns_full_color_group(player.player_id, color_name):
 		dice_label.text = "You need the full color set to build a house on %s." % property_name
 	elif space.house_count >= 5:
@@ -258,10 +250,8 @@ func _buy_house(index: int) -> void:
 	roll_button.disabled = false
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
-	buy_house_button.disabled = false
-	sell_houses_button.disabled = false
-	mortgage_button.disabled = false
-	unmortgage_button.disabled = false
+	buy_house_unmortgage_button.disabled = false
+	sell_house_mortgage_button.disabled = false
 
 
 # The minimum house count among all properties in a color group, used to
@@ -275,17 +265,25 @@ func _min_houses_in_group(color_name: String) -> int:
 	return min_houses
 
 
-func _on_sell_houses_pressed() -> void:
+func _on_sell_house_mortgage_pressed() -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
-	buy_house_button.disabled = true
-	sell_houses_button.disabled = true
-	mortgage_button.disabled = true
-	unmortgage_button.disabled = true
+	buy_house_unmortgage_button.disabled = true
+	sell_house_mortgage_button.disabled = true
 	# Armed immediately, same reasoning as Buy House / Admin Properties.
-	_selling_house = true
-	info_prompt.open("Click the property you want to sell a house from.")
+	_selling_house_or_mortgaging = true
+	info_prompt.open("Click a property to sell a house from it, or to mortgage it if it has no houses.")
+
+
+# Dispatches to house-selling or mortgaging depending on whether the clicked
+# property currently has any houses, per the combined button's behavior.
+func _sell_house_or_mortgage(index: int) -> void:
+	var space: Node2D = board.spaces[index]
+	if space.house_count > 0:
+		_sell_house(index)
+	else:
+		_mortgage_property(index)
 
 
 func _sell_house(index: int) -> void:
@@ -315,10 +313,8 @@ func _sell_house(index: int) -> void:
 	roll_button.disabled = false
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
-	buy_house_button.disabled = false
-	sell_houses_button.disabled = false
-	mortgage_button.disabled = false
-	unmortgage_button.disabled = false
+	buy_house_unmortgage_button.disabled = false
+	sell_house_mortgage_button.disabled = false
 
 
 # The maximum house count among all properties in a color group, used to
@@ -332,17 +328,12 @@ func _max_houses_in_group(color_name: String) -> int:
 	return max_houses
 
 
-func _on_mortgage_pressed() -> void:
-	roll_button.disabled = true
-	admin_button.disabled = true
-	admin_properties_button.disabled = true
-	buy_house_button.disabled = true
-	sell_houses_button.disabled = true
-	mortgage_button.disabled = true
-	unmortgage_button.disabled = true
-	# Armed immediately, same reasoning as Buy House / Admin Properties.
-	_mortgaging = true
-	info_prompt.open("Click the property you want to mortgage.")
+func _group_has_mortgaged(color_name: String) -> bool:
+	var group: Array = board.get_color_group(color_name)
+	for space_index in group:
+		if board.spaces[space_index].is_mortgaged:
+			return true
+	return false
 
 
 func _mortgage_property(index: int) -> void:
@@ -370,23 +361,8 @@ func _mortgage_property(index: int) -> void:
 	roll_button.disabled = false
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
-	buy_house_button.disabled = false
-	sell_houses_button.disabled = false
-	mortgage_button.disabled = false
-	unmortgage_button.disabled = false
-
-
-func _on_unmortgage_pressed() -> void:
-	roll_button.disabled = true
-	admin_button.disabled = true
-	admin_properties_button.disabled = true
-	buy_house_button.disabled = true
-	sell_houses_button.disabled = true
-	mortgage_button.disabled = true
-	unmortgage_button.disabled = true
-	# Armed immediately, same reasoning as Buy House / Admin Properties.
-	_unmortgaging = true
-	info_prompt.open("Click the mortgaged property you want to unmortgage.")
+	buy_house_unmortgage_button.disabled = false
+	sell_house_mortgage_button.disabled = false
 
 
 func _unmortgage_property(index: int) -> void:
@@ -413,20 +389,16 @@ func _unmortgage_property(index: int) -> void:
 	roll_button.disabled = false
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
-	buy_house_button.disabled = false
-	sell_houses_button.disabled = false
-	mortgage_button.disabled = false
-	unmortgage_button.disabled = false
+	buy_house_unmortgage_button.disabled = false
+	sell_house_mortgage_button.disabled = false
 
 
 func _perform_roll(die1: int, die2: int) -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
-	buy_house_button.disabled = true
-	sell_houses_button.disabled = true
-	mortgage_button.disabled = true
-	unmortgage_button.disabled = true
+	buy_house_unmortgage_button.disabled = true
+	sell_house_mortgage_button.disabled = true
 
 	var roll: int = die1 + die2
 	var is_double: bool = die1 == die2
@@ -471,10 +443,8 @@ func _perform_roll(die1: int, die2: int) -> void:
 	roll_button.disabled = false
 	admin_button.disabled = false
 	admin_properties_button.disabled = false
-	buy_house_button.disabled = false
-	sell_houses_button.disabled = false
-	mortgage_button.disabled = false
-	unmortgage_button.disabled = false
+	buy_house_unmortgage_button.disabled = false
+	sell_house_mortgage_button.disabled = false
 
 
 # Returns true if this move sent the player to Jail (which cancels any
@@ -621,32 +591,18 @@ func _count_owned_in_group(player_id: int, color_name: String) -> int:
 
 
 func _on_space_clicked(index: int) -> void:
-	if _buying_house:
-		_buying_house = false
+	if _buying_house_or_unmortgaging:
+		_buying_house_or_unmortgaging = false
 		if info_prompt.visible:
 			info_prompt.hide()
-		_buy_house(index)
+		_buy_house_or_unmortgage(index)
 		return
 
-	if _selling_house:
-		_selling_house = false
+	if _selling_house_or_mortgaging:
+		_selling_house_or_mortgaging = false
 		if info_prompt.visible:
 			info_prompt.hide()
-		_sell_house(index)
-		return
-
-	if _mortgaging:
-		_mortgaging = false
-		if info_prompt.visible:
-			info_prompt.hide()
-		_mortgage_property(index)
-		return
-
-	if _unmortgaging:
-		_unmortgaging = false
-		if info_prompt.visible:
-			info_prompt.hide()
-		_unmortgage_property(index)
+		_sell_house_or_mortgage(index)
 		return
 
 	if _admin_picking_property:
@@ -669,7 +625,7 @@ func _on_space_clicked(index: int) -> void:
 	if info.has("rents") and color_name != "railroad" and color_name != "utility":
 		var header_color: Color = board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY)
 		var house_cost: int = board.HOUSE_COSTS_BY_COLOR.get(color_name, 0)
-		property_card.show_card(info.get("name", ""), header_color, info["rents"], house_cost, mortgage_value, unmortgage_value)
+		property_card.show_card(info.get("name", ""), header_color, info["rents"], price, house_cost, mortgage_value, unmortgage_value)
 		return
 
 	if color_name == "railroad" and info.has("rents"):
