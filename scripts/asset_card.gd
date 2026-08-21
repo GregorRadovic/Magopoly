@@ -2,7 +2,7 @@ extends PopupPanel
 
 # Shared with property_card.gd so every card (property, railroad, utility)
 # renders at the same normalized size regardless of its own content length.
-const CARD_SIZE: Vector2i = Vector2i(440, 540)
+const CARD_SIZE: Vector2i = Vector2i(440, 660)
 
 @onready var icon_rect: TextureRect = $VBox/IconRect
 @onready var name_label: Label = $VBox/NameLabel

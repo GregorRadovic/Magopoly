@@ -48,21 +48,27 @@ text = "Roll: -"
 custom_minimum_size = Vector2(200, 60)
 text = "Roll"
 
-[node name="AdminButton" type="Button" parent="UI/Panel/VBox"]
+[node name="AdminRow" type="HBoxContainer" parent="UI/Panel/VBox"]
+
+[node name="AdminButton" type="Button" parent="UI/Panel/VBox/AdminRow"]
 custom_minimum_size = Vector2(200, 60)
 text = "Admin"
 
-[node name="AdminPropertiesButton" type="Button" parent="UI/Panel/VBox"]
+[node name="AdminPropertiesButton" type="Button" parent="UI/Panel/VBox/AdminRow"]
 custom_minimum_size = Vector2(200, 60)
 text = "Admin Properties"
 
-[node name="BuyHouseButton" type="Button" parent="UI/Panel/VBox"]
+[node name="BuyHouseUnmortgageButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
-text = "Buy House"
+text = "Buy houses / unmortgage"
 
-[node name="SellHousesButton" type="Button" parent="UI/Panel/VBox"]
+[node name="SellHouseMortgageButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
-text = "Sell Houses"
+text = "Sell houses / mortgage"
+
+[node name="DeclareBankruptcyButton" type="Button" parent="UI/Panel/VBox"]
+custom_minimum_size = Vector2(200, 60)
+text = "Declare Bankruptcy"
 
 [node name="NumberPrompt" parent="UI" instance=ExtResource("3")]
 

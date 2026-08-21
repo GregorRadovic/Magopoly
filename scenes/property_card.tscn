@@ -80,6 +80,18 @@ text = "Rent with 5 Houses: $0"
 
 [node name="HSeparator" type="HSeparator" parent="VBox"]
 
+[node name="PriceLabel" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Property Cost: $0"
+
+[node name="MortgageLabel" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Mortgage Value: $0"
+
+[node name="UnmortgageLabel" type="Label" parent="VBox"]
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+text = "Unmortgage Value: $0"
+
 [node name="HouseCostLabel" type="Label" parent="VBox"]
 theme_override_colors/font_color = Color(0, 0, 0, 1)
 text = "Houses cost: $0 each"
