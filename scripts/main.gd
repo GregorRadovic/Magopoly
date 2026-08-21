@@ -23,13 +23,16 @@ const PROPERTY_COLOR_ORDER: Array[String] = [
 	"brown", "sky_blue", "pink", "orange", "red", "yellow", "green", "ocean_blue", "railroad", "utility",
 ]
 
+signal debt_resolved
+
 @onready var board: Node2D = $Board
 @onready var players_container: Node2D = $Players
 @onready var roll_button: Button = $UI/Panel/VBox/RollButton
-@onready var admin_button: Button = $UI/Panel/VBox/AdminButton
-@onready var admin_properties_button: Button = $UI/Panel/VBox/AdminPropertiesButton
+@onready var admin_button: Button = $UI/Panel/VBox/AdminRow/AdminButton
+@onready var admin_properties_button: Button = $UI/Panel/VBox/AdminRow/AdminPropertiesButton
 @onready var buy_house_unmortgage_button: Button = $UI/Panel/VBox/BuyHouseUnmortgageButton
 @onready var sell_house_mortgage_button: Button = $UI/Panel/VBox/SellHouseMortgageButton
+@onready var declare_bankruptcy_button: Button = $UI/Panel/VBox/DeclareBankruptcyButton
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
 @onready var dice_label: Label = $UI/Panel/VBox/DiceLabel
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
@@ -61,6 +64,21 @@ var _admin_picking_property: bool = false
 var _buying_house_or_unmortgaging: bool = false
 var _selling_house_or_mortgaging: bool = false
 
+# Set while the current player owes more money than they have on hand and is
+# being given a chance to raise it (selling houses / mortgaging) before
+# bankruptcy. See _collect_debt().
+var _in_debt: bool = false
+var _debt_amount: int = 0
+var _debt_creditor: Node2D = null
+
+# Set while the current player is deciding whether to buy the property they
+# landed on, so they can sell houses / mortgage to raise the price first
+# rather than the game pre-judging whether they can afford it. The pending_*
+# fields let _sell_house_or_mortgage() reopen the same buy prompt afterward.
+var _awaiting_buy_decision: bool = false
+var _pending_buy_property_name: String = ""
+var _pending_buy_price: int = 0
+
 
 func _ready() -> void:
 	_spawn_players()
@@ -69,6 +87,7 @@ func _ready() -> void:
 	admin_properties_button.pressed.connect(_on_admin_properties_pressed)
 	buy_house_unmortgage_button.pressed.connect(_on_buy_house_unmortgage_pressed)
 	sell_house_mortgage_button.pressed.connect(_on_sell_house_mortgage_pressed)
+	declare_bankruptcy_button.pressed.connect(_on_declare_bankruptcy_pressed)
 	board.space_clicked.connect(_on_space_clicked)
 	_update_turn_label()
 	_update_player_panels()
@@ -111,6 +130,7 @@ func _on_admin_pressed() -> void:
 	admin_properties_button.disabled = true
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
+	declare_bankruptcy_button.disabled = true
 	number_prompt.value_confirmed.connect(_on_admin_die1_entered, CONNECT_ONE_SHOT)
 	number_prompt.cancelled.connect(_on_admin_number_prompt_cancelled, CONNECT_ONE_SHOT)
 	number_prompt.open("Enter first dice value:")
@@ -131,11 +151,7 @@ func _on_admin_die1_entered(value: int) -> void:
 func _on_admin_die2_entered(value: int) -> void:
 	if number_prompt.cancelled.is_connected(_on_admin_number_prompt_cancelled):
 		number_prompt.cancelled.disconnect(_on_admin_number_prompt_cancelled)
-	roll_button.disabled = false
-	admin_button.disabled = false
-	admin_properties_button.disabled = false
-	buy_house_unmortgage_button.disabled = false
-	sell_house_mortgage_button.disabled = false
+	_refresh_action_buttons()
 	_perform_roll(_admin_die1, value)
 
 
@@ -148,11 +164,7 @@ func _on_admin_number_prompt_cancelled() -> void:
 		number_prompt.value_confirmed.disconnect(_on_admin_die1_entered)
 	if number_prompt.value_confirmed.is_connected(_on_admin_die2_entered):
 		number_prompt.value_confirmed.disconnect(_on_admin_die2_entered)
-	roll_button.disabled = false
-	admin_button.disabled = false
-	admin_properties_button.disabled = false
-	buy_house_unmortgage_button.disabled = false
-	sell_house_mortgage_button.disabled = false
+	_refresh_action_buttons()
 
 
 func _on_admin_properties_pressed() -> void:
@@ -161,6 +173,7 @@ func _on_admin_properties_pressed() -> void:
 	admin_properties_button.disabled = true
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
+	declare_bankruptcy_button.disabled = true
 	# Armed immediately (not after awaiting the popup's close signal): a
 	# player clicking a tile directly, per the popup's own instruction,
 	# dismisses the popup via Godot's default outside-click behavior
@@ -188,11 +201,7 @@ func _admin_assign_property(index: int) -> void:
 		dice_label.text = "%s is now the admin-assigned owner of %s." % [_player_display_name(current_player), info.get("name", "")]
 		_update_player_panels()
 
-	roll_button.disabled = false
-	admin_button.disabled = false
-	admin_properties_button.disabled = false
-	buy_house_unmortgage_button.disabled = false
-	sell_house_mortgage_button.disabled = false
+	_refresh_action_buttons()
 
 
 func _on_buy_house_unmortgage_pressed() -> void:
@@ -201,6 +210,7 @@ func _on_buy_house_unmortgage_pressed() -> void:
 	admin_properties_button.disabled = true
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
+	declare_bankruptcy_button.disabled = true
 	# Armed immediately, same as Admin Properties: clicking a tile directly
 	# dismisses the popup via Godot's default outside-click behavior without
 	# emitting "closed", so pick mode can't be left waiting on that signal.
@@ -216,6 +226,7 @@ func _buy_house_or_unmortgage(index: int) -> void:
 		_unmortgage_property(index)
 	else:
 		_buy_house(index)
+	_refresh_action_buttons()
 
 
 func _buy_house(index: int) -> void:
@@ -247,12 +258,6 @@ func _buy_house(index: int) -> void:
 		dice_label.text = "%s built a house on %s for $%d (now %d %s)." % [_player_display_name(current_player), property_name, house_cost, space.house_count, house_word]
 		_update_player_panels()
 
-	roll_button.disabled = false
-	admin_button.disabled = false
-	admin_properties_button.disabled = false
-	buy_house_unmortgage_button.disabled = false
-	sell_house_mortgage_button.disabled = false
-
 
 # The minimum house count among all properties in a color group, used to
 # enforce even building: a property can only gain a house while it's tied
@@ -271,6 +276,7 @@ func _on_sell_house_mortgage_pressed() -> void:
 	admin_properties_button.disabled = true
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
+	declare_bankruptcy_button.disabled = true
 	# Armed immediately, same reasoning as Buy House / Admin Properties.
 	_selling_house_or_mortgaging = true
 	info_prompt.open("Click a property to sell a house from it, or to mortgage it if it has no houses.")
@@ -278,12 +284,20 @@ func _on_sell_house_mortgage_pressed() -> void:
 
 # Dispatches to house-selling or mortgaging depending on whether the clicked
 # property currently has any houses, per the combined button's behavior.
+# Also checks whether this raised enough money to cover an outstanding debt
+# (see _collect_debt()), since this is the only action allowed while in debt.
 func _sell_house_or_mortgage(index: int) -> void:
 	var space: Node2D = board.spaces[index]
 	if space.house_count > 0:
 		_sell_house(index)
 	else:
 		_mortgage_property(index)
+	_maybe_resolve_debt()
+	# Debt not yet cleared -- restate how much is still owed so the reminder
+	# doesn't get lost behind whatever this action's own message said.
+	if _in_debt:
+		dice_label.text += "\nSell houses or properties? Need to raise $%d" % _debt_amount
+	_refresh_action_buttons()
 
 
 func _sell_house(index: int) -> void:
@@ -309,12 +323,6 @@ func _sell_house(index: int) -> void:
 		var house_word: String = "house" if space.house_count == 1 else "houses"
 		dice_label.text = "%s sold a house on %s for $%d (now %d %s)." % [_player_display_name(current_player), property_name, sale_price, space.house_count, house_word]
 		_update_player_panels()
-
-	roll_button.disabled = false
-	admin_button.disabled = false
-	admin_properties_button.disabled = false
-	buy_house_unmortgage_button.disabled = false
-	sell_house_mortgage_button.disabled = false
 
 
 # The maximum house count among all properties in a color group, used to
@@ -358,12 +366,6 @@ func _mortgage_property(index: int) -> void:
 		dice_label.text = "%s mortgaged %s for $%d." % [_player_display_name(current_player), property_name, mortgage_value]
 		_update_player_panels()
 
-	roll_button.disabled = false
-	admin_button.disabled = false
-	admin_properties_button.disabled = false
-	buy_house_unmortgage_button.disabled = false
-	sell_house_mortgage_button.disabled = false
-
 
 func _unmortgage_property(index: int) -> void:
 	var info: Dictionary = board.get_space_info(index)
@@ -386,12 +388,6 @@ func _unmortgage_property(index: int) -> void:
 		dice_label.text = "%s unmortgaged %s for $%d." % [_player_display_name(current_player), property_name, unmortgage_value]
 		_update_player_panels()
 
-	roll_button.disabled = false
-	admin_button.disabled = false
-	admin_properties_button.disabled = false
-	buy_house_unmortgage_button.disabled = false
-	sell_house_mortgage_button.disabled = false
-
 
 func _perform_roll(die1: int, die2: int) -> void:
 	roll_button.disabled = true
@@ -399,6 +395,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	admin_properties_button.disabled = true
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
+	declare_bankruptcy_button.disabled = true
 
 	var roll: int = die1 + die2
 	var is_double: bool = die1 == die2
@@ -436,19 +433,18 @@ func _perform_roll(die1: int, die2: int) -> void:
 	if grants_extra_turn:
 		dice_label.text += "\nExtra turn!"
 	else:
-		current_player = (current_player + 1) % players.size()
+		_advance_to_next_active_player()
 	_update_turn_label()
 	_update_player_panels()
 
-	roll_button.disabled = false
-	admin_button.disabled = false
-	admin_properties_button.disabled = false
-	buy_house_unmortgage_button.disabled = false
-	sell_house_mortgage_button.disabled = false
+	_refresh_action_buttons()
 
 
-# Returns true if this move sent the player to Jail (which cancels any
-# doubles-triggered extra turn).
+# Returns true if this move sent the player to Jail or ended in bankruptcy
+# (including bankruptcy reached via debt collection), canceling a
+# doubles-triggered extra turn. Debt collection that ends in the player
+# successfully paying off what they owed does NOT cancel the extra turn --
+# they're still in the game, so a rolled double still earns another go.
 func _move_player(player: Node2D, roll: int) -> bool:
 	var new_space_raw: int = player.current_space + roll
 	var passed_go: bool = new_space_raw >= board.TOTAL_SPACES
@@ -462,6 +458,10 @@ func _move_player(player: Node2D, roll: int) -> bool:
 	var landed_info: Dictionary = board.get_space_info(player.current_space)
 	if landed_info.get("type", "") == "tax":
 		var tax_value: int = landed_info.get("value", 0)
+		if tax_value > player.money:
+			dice_label.text += "\nLanded on %s! Owes $%d." % [landed_info.get("name", ""), tax_value]
+			await _collect_debt(player, tax_value, null)
+			return player.is_bankrupt
 		player.money -= tax_value
 		free_parking_amount += tax_value
 		dice_label.text += "\nLanded on %s! -%d Money (added to Free Parking)" % [landed_info.get("name", ""), tax_value]
@@ -482,6 +482,10 @@ func _move_player(player: Node2D, roll: int) -> bool:
 		var price: int = landed_info.get("price", 0)
 		if space.owner_id == -1:
 			dice_label.text += "\nLanded on %s ($%d)." % [property_name, price]
+			# _ask_buy_property() only returns true once the player both said
+			# yes AND actually has the money -- it keeps re-asking (letting
+			# them sell houses / mortgage in between) until either that's
+			# true or they say no.
 			var wants_to_buy: bool = await _ask_buy_property(property_name, price)
 			if wants_to_buy:
 				player.money -= price
@@ -529,6 +533,10 @@ func _move_player(player: Node2D, roll: int) -> bool:
 
 			if charged:
 				var owner: Node2D = players[space.owner_id]
+				if rent_amount > player.money:
+					dice_label.text += "\nLanded on %s (owned by %s)! Owes $%d rent." % [property_name, PLAYER_NAMES[space.owner_id], rent_amount]
+					await _collect_debt(player, rent_amount, owner)
+					return player.is_bankrupt
 				player.money -= rent_amount
 				owner.money += rent_amount
 				dice_label.text += "\nLanded on %s (owned by %s)! Paid $%d rent%s." % [property_name, PLAYER_NAMES[space.owner_id], rent_amount, note]
@@ -536,10 +544,179 @@ func _move_player(player: Node2D, roll: int) -> bool:
 	return false
 
 
-func _ask_buy_property(property_name: String, price: int) -> bool:
-	confirm_prompt.open("Buy %s for $%d?" % [property_name, price])
+# Gives the current player a chance to raise money (selling houses /
+# mortgaging properties) before being forced into bankruptcy. Restricts the
+# action buttons to just Sell Houses/Mortgage and Declare Bankruptcy until
+# either they raise enough to cover `amount` (auto-paid, see
+# _maybe_resolve_debt()) or they declare bankruptcy (see
+# _on_declare_bankruptcy_pressed()) -- both of which emit debt_resolved.
+# `creditor` is who they owe (null for a tax debt owed to the bank).
+func _collect_debt(player: Node2D, amount: int, creditor: Node2D) -> void:
+	_in_debt = true
+	_debt_amount = amount
+	_debt_creditor = creditor
+	dice_label.text += "\nSell houses or properties? Need to raise $%d" % amount
+	_refresh_action_buttons()
+	await debt_resolved
+
+
+# Called after every sell-house/mortgage action. If it raised enough to cover
+# the outstanding debt, pays it automatically and lets the player continue.
+func _maybe_resolve_debt() -> void:
+	if not _in_debt:
+		return
+	var player: Node2D = players[current_player]
+	if player.money < _debt_amount:
+		return
+
+	player.money -= _debt_amount
+	if _debt_creditor:
+		_debt_creditor.money += _debt_amount
+	else:
+		free_parking_amount += _debt_amount
+	dice_label.text += "\n%s raised enough money and paid the $%d owed." % [_player_display_name(current_player), _debt_amount]
+
+	_in_debt = false
+	_debt_amount = 0
+	_debt_creditor = null
+	_update_player_panels()
+	debt_resolved.emit()
+
+
+# Sets each action button's enabled state for the current situation: while a
+# debt is outstanding, only Sell Houses/Mortgage and Declare Bankruptcy are
+# usable. While deciding whether to buy a just-landed-on property, the same
+# restriction applies except Declare Bankruptcy stays off -- there's nothing
+# to forfeit over, they can simply decline the purchase. Otherwise everything
+# is usable.
+func _refresh_action_buttons() -> void:
+	var limited_to_selling: bool = _in_debt or _awaiting_buy_decision
+	roll_button.disabled = limited_to_selling
+	admin_button.disabled = limited_to_selling
+	admin_properties_button.disabled = limited_to_selling
+	buy_house_unmortgage_button.disabled = limited_to_selling
+	sell_house_mortgage_button.disabled = false
+	declare_bankruptcy_button.disabled = _awaiting_buy_decision
+
+
+# Liquidates a bankrupt player: all their houses are sold back for half cost,
+# then their remaining money and properties pass to `creditor` (the player
+# they couldn't pay) or, if there is no creditor, their money is simply lost
+# and their properties become unowned. The player stops taking turns and
+# their board marker is hidden.
+func _bankrupt_player(player: Node2D, creditor: Node2D) -> void:
+	for space_index in player.owned_property_indices:
+		var space: Node2D = board.spaces[space_index]
+		if space.house_count > 0:
+			var info: Dictionary = board.get_space_info(space_index)
+			var house_cost: int = board.HOUSE_COSTS_BY_COLOR.get(info.get("color", ""), 0)
+			player.money += (house_cost / 2) * space.house_count
+			space.house_count = 0
+
+	if creditor:
+		creditor.money += player.money
+		for space_index in player.owned_property_indices:
+			var space: Node2D = board.spaces[space_index]
+			space.owner_id = creditor.player_id
+			creditor.owned_property_indices.append(space_index)
+		_sort_owned_properties(creditor)
+	else:
+		for space_index in player.owned_property_indices:
+			var space: Node2D = board.spaces[space_index]
+			space.owner_id = -1
+			space.is_mortgaged = false
+
+	player.money = 0
+	player.owned_property_indices.clear()
+	player.is_bankrupt = true
+	player.visible = false
+
+
+# Called after a bankruptcy resolves. If it left exactly one player still in
+# the game, announce them as the winner. Nothing further is done about it --
+# the game just keeps working normally from here (only one active player
+# means turns will simply keep cycling back to them); players are expected
+# to close and start a new game if they want to play again.
+func _check_for_winner() -> void:
+	var remaining: Array[Node2D] = []
+	for player in players:
+		if not player.is_bankrupt:
+			remaining.append(player)
+	if remaining.size() == 1:
+		dice_label.text += "\n%s wins!" % PLAYER_NAMES[remaining[0].player_id]
+
+
+func _on_declare_bankruptcy_pressed() -> void:
+	roll_button.disabled = true
+	admin_button.disabled = true
+	admin_properties_button.disabled = true
+	buy_house_unmortgage_button.disabled = true
+	sell_house_mortgage_button.disabled = true
+	declare_bankruptcy_button.disabled = true
+
+	confirm_prompt.open("Are you sure you want to declare bankruptcy?")
 	var yes: bool = await confirm_prompt.answered
-	return yes
+	if yes:
+		var player: Node2D = players[current_player]
+		var forfeiting_name: String = _player_display_name(current_player)
+		# If this happened while trying to raise money for a specific debt,
+		# that creditor gets everything, per the debt-collection rules;
+		# otherwise this is a plain voluntary forfeit with no one to credit.
+		var creditor: Node2D = _debt_creditor if _in_debt else null
+		_bankrupt_player(player, creditor)
+		dice_label.text = "%s declared bankruptcy and forfeits the game." % forfeiting_name
+		_check_for_winner()
+		if _in_debt:
+			_in_debt = false
+			_debt_amount = 0
+			_debt_creditor = null
+			debt_resolved.emit()
+		else:
+			_advance_to_next_active_player()
+			_update_turn_label()
+		_update_player_panels()
+
+	_refresh_action_buttons()
+
+
+# Always offers the purchase, regardless of whether the player currently has
+# enough money -- they get to judge that for themselves. While deciding, the
+# Sell Houses/Mortgage button stays usable so they can raise the price first.
+# Clicking it (or clicking anything else) dismisses this popup as a side
+# effect (Godot closes popups on any outside click), so auto-decline-on-
+# dismiss is suppressed here and _reassert_buy_prompt_if_needed() reopens it
+# after every board click while still awaiting a decision.
+#
+# Saying yes without enough money doesn't end the decision -- it's reported
+# and the prompt comes right back, so the player can keep raising money and
+# try again. Only an explicit "No", or an explicit "Yes" that they can
+# actually afford, returns.
+func _ask_buy_property(property_name: String, price: int) -> bool:
+	_awaiting_buy_decision = true
+	_pending_buy_property_name = property_name
+	_pending_buy_price = price
+	_refresh_action_buttons()
+	confirm_prompt.suppress_auto_decline = true
+	var player: Node2D = players[current_player]
+	var result: bool = false
+	while true:
+		confirm_prompt.open("Buy %s for $%d?" % [property_name, price])
+		var yes: bool = await confirm_prompt.answered
+		if not yes:
+			break
+		if player.money >= price:
+			result = true
+			break
+		dice_label.text += "\n%s doesn't have enough money to buy %s." % [_player_display_name(current_player), property_name]
+	confirm_prompt.suppress_auto_decline = false
+	_awaiting_buy_decision = false
+	_refresh_action_buttons()
+	return result
+
+
+func _reassert_buy_prompt_if_needed() -> void:
+	if _awaiting_buy_decision and not confirm_prompt.visible:
+		confirm_prompt.open("Buy %s for $%d?" % [_pending_buy_property_name, _pending_buy_price])
 
 
 func _sort_owned_properties(player: Node2D) -> void:
@@ -591,6 +768,15 @@ func _count_owned_in_group(player_id: int, color_name: String) -> int:
 
 
 func _on_space_clicked(index: int) -> void:
+	# Any tile click can dismiss the buy-confirmation popup as a side effect
+	# (Godot closes popups on any outside click, including whatever this
+	# click actually does), which would otherwise auto-decline the purchase;
+	# suppress_auto_decline on that popup stops that, so reassert it here
+	# -- deferred so it runs after this click's own handling below, however
+	# that handling resolves. A no-op if it's already showing or there's no
+	# buy decision pending.
+	_reassert_buy_prompt_if_needed.call_deferred()
+
 	if _buying_house_or_unmortgaging:
 		_buying_house_or_unmortgaging = false
 		if info_prompt.visible:
@@ -667,12 +853,23 @@ func _send_to_jail(player: Node2D) -> void:
 	player.consecutive_doubles = 0
 
 
+# Skips bankrupt players, who no longer take turns. Bounded by players.size()
+# so a table where every player is bankrupt can't spin forever.
+func _advance_to_next_active_player() -> void:
+	for i in players.size():
+		current_player = (current_player + 1) % players.size()
+		if not players[current_player].is_bankrupt:
+			return
+
+
 func _update_turn_label() -> void:
 	turn_label.text = "%s's turn" % _player_display_name(current_player)
 
 
 func _player_display_name(index: int) -> String:
 	var player: Node2D = players[index]
+	if player.is_bankrupt:
+		return "%s (bankrupt)" % PLAYER_NAMES[index]
 	if not player.in_jail:
 		return PLAYER_NAMES[index]
 	var turn_word: String = "turn" if player.jail_turns_left == 1 else "turns"
