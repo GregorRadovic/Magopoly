@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://scenes/info_prompt.tscn" id="5"]
 [ext_resource type="PackedScene" path="res://scenes/property_card.tscn" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/asset_card.tscn" id="7"]
+[ext_resource type="PackedScene" path="res://scenes/player_picker.tscn" id="8"]
 
 [sub_resource type="StyleBoxFlat" id="OpaquePanelStyle"]
 bg_color = Color(0.145, 0.145, 0.161, 1)
@@ -30,13 +31,13 @@ theme_override_styles/panel = SubResource("OpaquePanelStyle")
 offset_left = 229.0
 offset_top = 224.0
 offset_right = 689.0
-offset_bottom = 694.0
+offset_bottom = 764.0
 
 [node name="VBox" type="VBoxContainer" parent="UI/Panel"]
 offset_left = 22.0
 offset_top = 22.0
 offset_right = 438.0
-offset_bottom = 448.0
+offset_bottom = 518.0
 
 [node name="TurnLabel" type="Label" parent="UI/Panel/VBox"]
 text = "Player 1's turn"
@@ -70,6 +71,10 @@ text = "Sell houses / mortgage"
 custom_minimum_size = Vector2(200, 60)
 text = "Declare Bankruptcy"
 
+[node name="TradeButton" type="Button" parent="UI/Panel/VBox"]
+custom_minimum_size = Vector2(200, 60)
+text = "Trade"
+
 [node name="NumberPrompt" parent="UI" instance=ExtResource("3")]
 
 [node name="ConfirmPrompt" parent="UI" instance=ExtResource("4")]
@@ -81,6 +86,8 @@ text = "Declare Bankruptcy"
 [node name="PropertyCard" parent="UI" instance=ExtResource("6")]
 
 [node name="AssetCard" parent="UI" instance=ExtResource("7")]
+
+[node name="PlayerPicker" parent="UI" instance=ExtResource("8")]
 
 [node name="PlayersPanel" type="Panel" parent="UI"]
 theme_override_styles/panel = SubResource("OpaquePanelStyle")
@@ -141,3 +148,79 @@ autowrap_mode = 2
 text = "Player 4 -- $1500"
 
 [node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3"]
+
+[node name="HSeparatorTrade" type="HSeparator" parent="UI/PlayersPanel/VBox"]
+visible = false
+
+[node name="TradeDisplay" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
+visible = false
+theme_override_constants/separation = 10
+
+[node name="TradeHeader" type="HBoxContainer" parent="UI/PlayersPanel/VBox/TradeDisplay"]
+
+[node name="Trader1Label" type="Label" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeHeader"]
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 22
+horizontal_alignment = 1
+text = "Player 1"
+
+[node name="Trader2Label" type="Label" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeHeader"]
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 22
+horizontal_alignment = 1
+text = "Player 2"
+
+[node name="TradeColumns" type="HBoxContainer" parent="UI/PlayersPanel/VBox/TradeDisplay"]
+theme_override_constants/separation = 10
+
+[node name="Trader1Flow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeColumns"]
+custom_minimum_size = Vector2(0, 80)
+size_flags_horizontal = 3
+
+[node name="TradeVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeColumns"]
+
+[node name="Trader2Flow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeColumns"]
+custom_minimum_size = Vector2(0, 80)
+size_flags_horizontal = 3
+
+[node name="TradeMoneyRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/TradeDisplay"]
+theme_override_constants/separation = 10
+
+[node name="Trader1MoneyBox" type="HBoxContainer" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeMoneyRow"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="Trader1MoneyLabel" type="Label" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeMoneyRow/Trader1MoneyBox"]
+text = "Money:"
+
+[node name="Trader1MoneyEdit" type="LineEdit" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeMoneyRow/Trader1MoneyBox"]
+custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
+placeholder_text = "0"
+
+[node name="TradeMoneyVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeMoneyRow"]
+
+[node name="Trader2MoneyBox" type="HBoxContainer" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeMoneyRow"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="Trader2MoneyLabel" type="Label" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeMoneyRow/Trader2MoneyBox"]
+text = "Money:"
+
+[node name="Trader2MoneyEdit" type="LineEdit" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeMoneyRow/Trader2MoneyBox"]
+custom_minimum_size = Vector2(0, 40)
+size_flags_horizontal = 3
+placeholder_text = "0"
+
+[node name="TradeActions" type="HBoxContainer" parent="UI/PlayersPanel/VBox/TradeDisplay"]
+theme_override_constants/separation = 10
+
+[node name="OfferTradeButton" type="Button" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeActions"]
+custom_minimum_size = Vector2(0, 50)
+size_flags_horizontal = 3
+text = "Offer Trade"
+
+[node name="DeclineTradeButton" type="Button" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeActions"]
+custom_minimum_size = Vector2(0, 50)
+size_flags_horizontal = 3
+text = "Decline"

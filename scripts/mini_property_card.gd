@@ -1,6 +1,7 @@
 extends Control
 
 signal card_clicked(space_index: int)
+signal card_right_clicked(space_index: int)
 
 @onready var background: ColorRect = $Background
 @onready var inner: ColorRect = $Inner
@@ -28,5 +29,8 @@ func setup(index: int, property_name: String, color: Color, house_count: int = 0
 
 
 func _on_click_area_gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		card_clicked.emit(space_index)
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			card_clicked.emit(space_index)
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			card_right_clicked.emit(space_index)
