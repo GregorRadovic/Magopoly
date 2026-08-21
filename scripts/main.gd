@@ -69,6 +69,12 @@ signal debt_resolved
 
 var players: Array[Node2D] = []
 var current_player: int = 0
+# Set once the current player has rolled (and that roll's landing has fully
+# resolved) for a turn that isn't earning a doubles-driven extra roll. A
+# turn doesn't end just because you've rolled -- houses, unmortgaging,
+# trading, etc. are all still available -- so the Roll button turns into
+# End Turn and waits for an explicit click before play moves on.
+var _awaiting_end_turn: bool = false
 var _admin_die1: int = 0
 var free_parking_amount: int = 0
 var _quit_prompt_open: bool = false
@@ -157,9 +163,31 @@ func _spawn_players() -> void:
 
 
 func _on_roll_pressed() -> void:
+	if _awaiting_end_turn:
+		_end_turn()
+		return
 	var die1: int = randi_range(1, 6)
 	var die2: int = randi_range(1, 6)
 	_perform_roll(die1, die2)
+
+
+# Called when the button (showing "End Turn" at this point) is pressed after
+# a roll that didn't earn another one. Actually hands play to the next
+# active player -- until this, the current player can keep managing houses,
+# mortgages, and trades.
+func _end_turn() -> void:
+	_advance_turn()
+	_update_player_panels()
+	_refresh_action_buttons()
+
+
+# Shared by everywhere play moves to the next active player, so
+# _awaiting_end_turn always resets with it -- otherwise the next player
+# would inherit an "End Turn" button before ever rolling.
+func _advance_turn() -> void:
+	_awaiting_end_turn = false
+	_advance_to_next_active_player()
+	_update_turn_label()
 
 
 func _on_admin_pressed() -> void:
@@ -475,8 +503,12 @@ func _perform_roll(die1: int, die2: int) -> void:
 
 	if grants_extra_turn:
 		dice_label.text += "\nExtra turn!"
+	elif player.is_bankrupt:
+		# Nothing left for them to manage -- move straight on rather than
+		# pausing on an End Turn button they have no reason to see.
+		_advance_turn()
 	else:
-		_advance_to_next_active_player()
+		_awaiting_end_turn = true
 	_update_turn_label()
 	_update_player_panels()
 
@@ -634,11 +666,14 @@ func _maybe_resolve_debt() -> void:
 # Bankruptcy and Trade stay off -- there's nothing to forfeit or negotiate
 # over, they can simply decline the purchase. While trading, everything here
 # is off (the trade display's own buttons take over). Otherwise everything
-# is usable.
+# is usable -- including once the player has rolled: rolling doesn't end a
+# turn, so Roll turns into End Turn and stays enabled while Admin (a stand-in
+# for rolling) turns off until that's clicked.
 func _refresh_action_buttons() -> void:
 	var limited_to_selling: bool = _in_debt or _awaiting_buy_decision
 	roll_button.disabled = limited_to_selling or _trading
-	admin_button.disabled = limited_to_selling or _trading
+	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
+	admin_button.disabled = limited_to_selling or _trading or _awaiting_end_turn
 	admin_properties_button.disabled = limited_to_selling or _trading
 	buy_house_unmortgage_button.disabled = limited_to_selling or _trading
 	sell_house_mortgage_button.disabled = _trading
@@ -908,8 +943,7 @@ func _on_declare_bankruptcy_pressed() -> void:
 			_debt_creditor = null
 			debt_resolved.emit()
 		else:
-			_advance_to_next_active_player()
-			_update_turn_label()
+			_advance_turn()
 		_update_player_panels()
 
 	_refresh_action_buttons()
