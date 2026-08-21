@@ -33,6 +33,7 @@ signal debt_resolved
 @onready var buy_house_unmortgage_button: Button = $UI/Panel/VBox/BuyHouseUnmortgageButton
 @onready var sell_house_mortgage_button: Button = $UI/Panel/VBox/SellHouseMortgageButton
 @onready var declare_bankruptcy_button: Button = $UI/Panel/VBox/DeclareBankruptcyButton
+@onready var trade_button: Button = $UI/Panel/VBox/TradeButton
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
 @onready var dice_label: Label = $UI/Panel/VBox/DiceLabel
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
@@ -41,6 +42,7 @@ signal debt_resolved
 @onready var info_prompt: PopupPanel = $UI/InfoPrompt
 @onready var property_card: PopupPanel = $UI/PropertyCard
 @onready var asset_card: PopupPanel = $UI/AssetCard
+@onready var player_picker: PopupPanel = $UI/PlayerPicker
 @onready var free_parking_label: Label = $UI/PlayersPanel/VBox/FreeParkingLabel
 @onready var player_header_labels: Array[Label] = [
 	$UI/PlayersPanel/VBox/Player0/HeaderLabel,
@@ -54,9 +56,25 @@ signal debt_resolved
 	$UI/PlayersPanel/VBox/Player2/PropertiesFlow,
 	$UI/PlayersPanel/VBox/Player3/PropertiesFlow,
 ]
+@onready var trade_hseparator: HSeparator = $UI/PlayersPanel/VBox/HSeparatorTrade
+@onready var trade_display: VBoxContainer = $UI/PlayersPanel/VBox/TradeDisplay
+@onready var trader1_label: Label = $UI/PlayersPanel/VBox/TradeDisplay/TradeHeader/Trader1Label
+@onready var trader2_label: Label = $UI/PlayersPanel/VBox/TradeDisplay/TradeHeader/Trader2Label
+@onready var trader1_flow: HFlowContainer = $UI/PlayersPanel/VBox/TradeDisplay/TradeColumns/Trader1Flow
+@onready var trader2_flow: HFlowContainer = $UI/PlayersPanel/VBox/TradeDisplay/TradeColumns/Trader2Flow
+@onready var trader1_money_edit: LineEdit = $UI/PlayersPanel/VBox/TradeDisplay/TradeMoneyRow/Trader1MoneyBox/Trader1MoneyEdit
+@onready var trader2_money_edit: LineEdit = $UI/PlayersPanel/VBox/TradeDisplay/TradeMoneyRow/Trader2MoneyBox/Trader2MoneyEdit
+@onready var offer_trade_button: Button = $UI/PlayersPanel/VBox/TradeDisplay/TradeActions/OfferTradeButton
+@onready var decline_trade_button: Button = $UI/PlayersPanel/VBox/TradeDisplay/TradeActions/DeclineTradeButton
 
 var players: Array[Node2D] = []
 var current_player: int = 0
+# Set once the current player has rolled (and that roll's landing has fully
+# resolved) for a turn that isn't earning a doubles-driven extra roll. A
+# turn doesn't end just because you've rolled -- houses, unmortgaging,
+# trading, etc. are all still available -- so the Roll button turns into
+# End Turn and waits for an explicit click before play moves on.
+var _awaiting_end_turn: bool = false
 var _admin_die1: int = 0
 var free_parking_amount: int = 0
 var _quit_prompt_open: bool = false
@@ -79,6 +97,27 @@ var _awaiting_buy_decision: bool = false
 var _pending_buy_property_name: String = ""
 var _pending_buy_price: int = 0
 
+# Set while a trade is in progress. Trader1 is whoever clicked Trade (always
+# the player whose turn it is when a trade starts); Trader2 is who they
+# picked to trade with. CurrentPlayer is tracked separately and restored
+# when the trade ends, since -- however complicated a trade gets -- play
+# always resumes on whoever's turn it actually was.
+var _trading: bool = false
+var _trade_current_player: int = -1
+var _trader1: int = -1
+var _trader2: int = -1
+var _trade1_offered: Array[int] = []
+var _trade2_offered: Array[int] = []
+
+# Trade negotiation is a back-and-forth: whoever is _trade_proposer is the
+# one currently deciding what to do. If _trade_can_accept is true, the
+# proposal on screen is exactly what the other side last sent, so the
+# proposer can accept it as-is; any click or money edit invalidates that
+# (the offer button reverts to "Offer Trade") since it now needs to go back
+# to the other side before it can be accepted.
+var _trade_proposer: int = -1
+var _trade_can_accept: bool = false
+
 
 func _ready() -> void:
 	_spawn_players()
@@ -88,6 +127,11 @@ func _ready() -> void:
 	buy_house_unmortgage_button.pressed.connect(_on_buy_house_unmortgage_pressed)
 	sell_house_mortgage_button.pressed.connect(_on_sell_house_mortgage_pressed)
 	declare_bankruptcy_button.pressed.connect(_on_declare_bankruptcy_pressed)
+	trade_button.pressed.connect(_on_trade_pressed)
+	offer_trade_button.pressed.connect(_on_offer_trade_pressed)
+	decline_trade_button.pressed.connect(_on_decline_trade_pressed)
+	trader1_money_edit.text_changed.connect(_on_trade_money_changed)
+	trader2_money_edit.text_changed.connect(_on_trade_money_changed)
 	board.space_clicked.connect(_on_space_clicked)
 	_update_turn_label()
 	_update_player_panels()
@@ -119,9 +163,31 @@ func _spawn_players() -> void:
 
 
 func _on_roll_pressed() -> void:
+	if _awaiting_end_turn:
+		_end_turn()
+		return
 	var die1: int = randi_range(1, 6)
 	var die2: int = randi_range(1, 6)
 	_perform_roll(die1, die2)
+
+
+# Called when the button (showing "End Turn" at this point) is pressed after
+# a roll that didn't earn another one. Actually hands play to the next
+# active player -- until this, the current player can keep managing houses,
+# mortgages, and trades.
+func _end_turn() -> void:
+	_advance_turn()
+	_update_player_panels()
+	_refresh_action_buttons()
+
+
+# Shared by everywhere play moves to the next active player, so
+# _awaiting_end_turn always resets with it -- otherwise the next player
+# would inherit an "End Turn" button before ever rolling.
+func _advance_turn() -> void:
+	_awaiting_end_turn = false
+	_advance_to_next_active_player()
+	_update_turn_label()
 
 
 func _on_admin_pressed() -> void:
@@ -131,6 +197,7 @@ func _on_admin_pressed() -> void:
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
 	declare_bankruptcy_button.disabled = true
+	trade_button.disabled = true
 	number_prompt.value_confirmed.connect(_on_admin_die1_entered, CONNECT_ONE_SHOT)
 	number_prompt.cancelled.connect(_on_admin_number_prompt_cancelled, CONNECT_ONE_SHOT)
 	number_prompt.open("Enter first dice value:")
@@ -174,6 +241,7 @@ func _on_admin_properties_pressed() -> void:
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
 	declare_bankruptcy_button.disabled = true
+	trade_button.disabled = true
 	# Armed immediately (not after awaiting the popup's close signal): a
 	# player clicking a tile directly, per the popup's own instruction,
 	# dismisses the popup via Godot's default outside-click behavior
@@ -211,6 +279,7 @@ func _on_buy_house_unmortgage_pressed() -> void:
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
 	declare_bankruptcy_button.disabled = true
+	trade_button.disabled = true
 	# Armed immediately, same as Admin Properties: clicking a tile directly
 	# dismisses the popup via Godot's default outside-click behavior without
 	# emitting "closed", so pick mode can't be left waiting on that signal.
@@ -277,6 +346,7 @@ func _on_sell_house_mortgage_pressed() -> void:
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
 	declare_bankruptcy_button.disabled = true
+	trade_button.disabled = true
 	# Armed immediately, same reasoning as Buy House / Admin Properties.
 	_selling_house_or_mortgaging = true
 	info_prompt.open("Click a property to sell a house from it, or to mortgage it if it has no houses.")
@@ -396,6 +466,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
 	declare_bankruptcy_button.disabled = true
+	trade_button.disabled = true
 
 	var roll: int = die1 + die2
 	var is_double: bool = die1 == die2
@@ -432,8 +503,12 @@ func _perform_roll(die1: int, die2: int) -> void:
 
 	if grants_extra_turn:
 		dice_label.text += "\nExtra turn!"
+	elif player.is_bankrupt:
+		# Nothing left for them to manage -- move straight on rather than
+		# pausing on an End Turn button they have no reason to see.
+		_advance_turn()
 	else:
-		_advance_to_next_active_player()
+		_awaiting_end_turn = true
 	_update_turn_label()
 	_update_player_panels()
 
@@ -584,19 +659,214 @@ func _maybe_resolve_debt() -> void:
 
 
 # Sets each action button's enabled state for the current situation: while a
-# debt is outstanding, only Sell Houses/Mortgage and Declare Bankruptcy are
-# usable. While deciding whether to buy a just-landed-on property, the same
-# restriction applies except Declare Bankruptcy stays off -- there's nothing
-# to forfeit over, they can simply decline the purchase. Otherwise everything
-# is usable.
+# debt is outstanding, only Sell Houses/Mortgage, Declare Bankruptcy, and
+# Trade are usable -- trading lets the player try to raise money from an
+# opponent instead of just liquidating. While deciding whether to buy a
+# just-landed-on property, the same restriction applies except Declare
+# Bankruptcy and Trade stay off -- there's nothing to forfeit or negotiate
+# over, they can simply decline the purchase. While trading, everything here
+# is off (the trade display's own buttons take over). Otherwise everything
+# is usable -- including once the player has rolled: rolling doesn't end a
+# turn, so Roll turns into End Turn and stays enabled while Admin (a stand-in
+# for rolling) turns off until that's clicked.
 func _refresh_action_buttons() -> void:
 	var limited_to_selling: bool = _in_debt or _awaiting_buy_decision
-	roll_button.disabled = limited_to_selling
-	admin_button.disabled = limited_to_selling
-	admin_properties_button.disabled = limited_to_selling
-	buy_house_unmortgage_button.disabled = limited_to_selling
-	sell_house_mortgage_button.disabled = false
-	declare_bankruptcy_button.disabled = _awaiting_buy_decision
+	roll_button.disabled = limited_to_selling or _trading
+	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
+	admin_button.disabled = limited_to_selling or _trading or _awaiting_end_turn
+	admin_properties_button.disabled = limited_to_selling or _trading
+	buy_house_unmortgage_button.disabled = limited_to_selling or _trading
+	sell_house_mortgage_button.disabled = _trading
+	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading
+	trade_button.disabled = _awaiting_buy_decision or _trading
+
+
+func _on_trade_pressed() -> void:
+	roll_button.disabled = true
+	admin_button.disabled = true
+	admin_properties_button.disabled = true
+	buy_house_unmortgage_button.disabled = true
+	sell_house_mortgage_button.disabled = true
+	declare_bankruptcy_button.disabled = true
+	trade_button.disabled = true
+
+	var entries: Array = []
+	for i in players.size():
+		if i != current_player and not players[i].is_bankrupt:
+			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
+
+	if entries.is_empty():
+		dice_label.text += "\nThere's no one left to trade with."
+		_refresh_action_buttons()
+		return
+
+	player_picker.open("Trade with which player?", entries)
+	var chosen: int = await player_picker.player_chosen
+	if chosen == -1:
+		_refresh_action_buttons()
+		return
+
+	_start_trade(current_player, chosen)
+
+
+func _start_trade(p1_index: int, p2_index: int) -> void:
+	_trading = true
+	_trade_current_player = current_player
+	_trader1 = p1_index
+	_trader2 = p2_index
+	_trade1_offered.clear()
+	_trade2_offered.clear()
+	trader1_money_edit.text = ""
+	trader2_money_edit.text = ""
+	_trade_proposer = p1_index
+	_trade_can_accept = false
+
+	trader1_label.text = PLAYER_NAMES[p1_index]
+	trader1_label.add_theme_color_override("font_color", PLAYER_COLORS[p1_index])
+	trader2_label.text = PLAYER_NAMES[p2_index]
+	trader2_label.add_theme_color_override("font_color", PLAYER_COLORS[p2_index])
+	trade_hseparator.visible = true
+	trade_display.visible = true
+
+	dice_label.text += "\n%s is trading with %s. Click properties to offer them; houses can't be traded." % [PLAYER_NAMES[p1_index], PLAYER_NAMES[p2_index]]
+	_update_trade_action_button()
+	_update_player_panels()
+	_refresh_action_buttons()
+
+
+# Toggles a property in or out of whichever trader's offer it belongs to.
+# Reused for clicks both on a player's normal mini cards (offering it) and
+# on the trade display's own mini cards (taking it back).
+func _handle_trade_click(index: int) -> void:
+	var space: Node2D = board.spaces[index]
+	if space.owner_id != _trader1 and space.owner_id != _trader2:
+		dice_label.text = "That property isn't part of this trade."
+		return
+	var color_name: String = board.get_space_info(index).get("color", "")
+	if _max_houses_in_group(color_name) > 0:
+		dice_label.text = "That property can't be traded while a property in its color set has houses."
+		return
+
+	var offered: Array[int] = _trade1_offered if space.owner_id == _trader1 else _trade2_offered
+	if offered.has(index):
+		offered.erase(index)
+	else:
+		offered.append(index)
+	_mark_trade_modified()
+	_update_player_panels()
+
+
+func _on_trade_money_changed(_new_text: String) -> void:
+	_mark_trade_modified()
+
+
+# Any change to the terms -- a property clicked, a money box edited -- means
+# the current proposer's screen no longer matches what the other side last
+# sent, so it has to be offered again before it can be accepted.
+func _mark_trade_modified() -> void:
+	if _trade_can_accept:
+		_trade_can_accept = false
+		_update_trade_action_button()
+
+
+func _update_trade_action_button() -> void:
+	offer_trade_button.text = "Accept Trade" if _trade_can_accept else "Offer Trade"
+
+
+# The single action button does double duty: it sends the current terms to
+# the other side for a decision, or -- once they've sent back exactly what's
+# already on screen -- finalizes the trade.
+func _on_offer_trade_pressed() -> void:
+	if _trade_can_accept:
+		_finalize_trade()
+	else:
+		_send_trade_offer()
+
+
+func _send_trade_offer() -> void:
+	var sender: int = _trade_proposer
+	var responder: int = _trader2 if sender == _trader1 else _trader1
+	_trade_proposer = responder
+	_trade_can_accept = true
+	dice_label.text = "%s offered a trade to %s." % [PLAYER_NAMES[sender], PLAYER_NAMES[responder]]
+	_update_trade_action_button()
+
+
+func _finalize_trade() -> void:
+	var p1: Node2D = players[_trader1]
+	var p2: Node2D = players[_trader2]
+	var p1_money: int = max(0, int(trader1_money_edit.text))
+	var p2_money: int = max(0, int(trader2_money_edit.text))
+	if p1_money > p1.money:
+		dice_label.text = "%s doesn't have enough money to offer $%d." % [PLAYER_NAMES[_trader1], p1_money]
+		return
+	if p2_money > p2.money:
+		dice_label.text = "%s doesn't have enough money to offer $%d." % [PLAYER_NAMES[_trader2], p2_money]
+		return
+
+	for index in _trade1_offered:
+		p1.owned_property_indices.erase(index)
+		p2.owned_property_indices.append(index)
+		board.spaces[index].owner_id = _trader2
+	for index in _trade2_offered:
+		p2.owned_property_indices.erase(index)
+		p1.owned_property_indices.append(index)
+		board.spaces[index].owner_id = _trader1
+	p1.money -= p1_money
+	p2.money += p1_money
+	p2.money -= p2_money
+	p1.money += p2_money
+	_sort_owned_properties(p1)
+	_sort_owned_properties(p2)
+	dice_label.text = "%s and %s completed a trade!" % [PLAYER_NAMES[_trader1], PLAYER_NAMES[_trader2]]
+	_end_trade()
+
+
+func _on_decline_trade_pressed() -> void:
+	var decliner: int = _trade_proposer
+	var other: int = _trader2 if decliner == _trader1 else _trader1
+	dice_label.text = "%s declined to trade with %s." % [PLAYER_NAMES[decliner], PLAYER_NAMES[other]]
+	_end_trade()
+
+
+func _end_trade() -> void:
+	_trading = false
+	# However complicated the trade got, play always resumes on whoever's
+	# turn it actually was.
+	current_player = _trade_current_player
+	_trader1 = -1
+	_trader2 = -1
+	_trade_current_player = -1
+	_trade1_offered.clear()
+	_trade2_offered.clear()
+	trader1_money_edit.text = ""
+	trader2_money_edit.text = ""
+	_trade_proposer = -1
+	_trade_can_accept = false
+	trade_hseparator.visible = false
+	trade_display.visible = false
+	_update_turn_label()
+	_update_player_panels()
+	# A trade completed while in debt might have raised enough money to
+	# cover it, same as selling a house or mortgaging a property would.
+	_maybe_resolve_debt()
+	if _in_debt:
+		dice_label.text += "\nSell houses or properties? Need to raise $%d" % _debt_amount
+	_refresh_action_buttons()
+
+
+func _populate_trade_flow(flow: HFlowContainer, indices: Array[int]) -> void:
+	for child in flow.get_children():
+		child.queue_free()
+	for space_index in indices:
+		var info: Dictionary = board.get_space_info(space_index)
+		var color_name: String = info.get("color", "")
+		var color: Color = board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY)
+		var mini_card: Control = MINI_CARD_SCENE.instantiate()
+		flow.add_child(mini_card)
+		mini_card.setup(space_index, info.get("name", ""), color, board.spaces[space_index].house_count, board.spaces[space_index].is_mortgaged)
+		mini_card.card_clicked.connect(_on_space_clicked)
+		mini_card.card_right_clicked.connect(_show_property_details)
 
 
 # Liquidates a bankrupt player: all their houses are sold back for half cost,
@@ -653,6 +923,7 @@ func _on_declare_bankruptcy_pressed() -> void:
 	buy_house_unmortgage_button.disabled = true
 	sell_house_mortgage_button.disabled = true
 	declare_bankruptcy_button.disabled = true
+	trade_button.disabled = true
 
 	confirm_prompt.open("Are you sure you want to declare bankruptcy?")
 	var yes: bool = await confirm_prompt.answered
@@ -672,8 +943,7 @@ func _on_declare_bankruptcy_pressed() -> void:
 			_debt_creditor = null
 			debt_resolved.emit()
 		else:
-			_advance_to_next_active_player()
-			_update_turn_label()
+			_advance_turn()
 		_update_player_panels()
 
 	_refresh_action_buttons()
@@ -777,6 +1047,10 @@ func _on_space_clicked(index: int) -> void:
 	# buy decision pending.
 	_reassert_buy_prompt_if_needed.call_deferred()
 
+	if _trading:
+		_handle_trade_click(index)
+		return
+
 	if _buying_house_or_unmortgaging:
 		_buying_house_or_unmortgaging = false
 		if info_prompt.visible:
@@ -798,6 +1072,14 @@ func _on_space_clicked(index: int) -> void:
 		_admin_assign_property(index)
 		return
 
+	_show_property_details(index)
+
+
+# Shows the full property/asset card (or, for spaces without one, the plain
+# text popup) for a space. Used both for the normal left-click-on-a-tile
+# fallback above, and for right-clicking a mini card to inspect it without
+# disturbing whatever picking mode (e.g. a trade) is currently active.
+func _show_property_details(index: int) -> void:
 	var info: Dictionary = board.get_space_info(index)
 	var color_name: String = info.get("color", "")
 
@@ -885,6 +1167,10 @@ func _update_player_panels() -> void:
 		for child in flow.get_children():
 			child.queue_free()
 		for space_index in players[i].owned_property_indices:
+			# Properties currently staged in the trade display have "moved"
+			# there visually, so they're left out of the normal row.
+			if _trading and (_trade1_offered.has(space_index) or _trade2_offered.has(space_index)):
+				continue
 			var info: Dictionary = board.get_space_info(space_index)
 			var color_name: String = info.get("color", "")
 			var color: Color = board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY)
@@ -892,3 +1178,8 @@ func _update_player_panels() -> void:
 			flow.add_child(mini_card)
 			mini_card.setup(space_index, info.get("name", ""), color, board.spaces[space_index].house_count, board.spaces[space_index].is_mortgaged)
 			mini_card.card_clicked.connect(_on_space_clicked)
+			mini_card.card_right_clicked.connect(_show_property_details)
+
+	if _trading:
+		_populate_trade_flow(trader1_flow, _trade1_offered)
+		_populate_trade_flow(trader2_flow, _trade2_offered)
