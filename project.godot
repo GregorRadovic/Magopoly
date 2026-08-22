@@ -8,10 +8,14 @@
 
 config_version=5
 
+[autoload]
+
+GameState="*res://scripts/game_state.gd"
+
 [application]
 
 config/name="Magopoly"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/start_menu.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
 

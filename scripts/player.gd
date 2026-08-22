@@ -12,6 +12,7 @@ var jail_turns_left: int = 0
 var consecutive_doubles: int = 0
 var owned_property_indices: Array[int] = []
 var is_bankrupt: bool = false
+var is_ai: bool = false
 
 
 func setup(id: int, color: Color) -> void:
