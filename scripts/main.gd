@@ -520,6 +520,46 @@ func _unmortgage_property(index: int) -> void:
 		_update_player_panels()
 
 
+# Mortgages the AI's eligible properties (unmortgaged, and not blocked by
+# houses anywhere in their color group), priciest first, one at a time
+# until `needed` is covered or nothing more can be mortgaged.
+func _ai_mortgage_properties(player: Node2D, needed: int) -> void:
+	while player.money < needed:
+		var candidates: Array[int] = []
+		for space_index in player.owned_property_indices:
+			var space: Node2D = board.spaces[space_index]
+			if space.is_mortgaged:
+				continue
+			var color_name: String = board.get_space_info(space_index).get("color", "")
+			if _max_houses_in_group(color_name) > 0:
+				continue
+			candidates.append(space_index)
+		if candidates.is_empty():
+			return
+		candidates.sort_custom(func(a, b): return board.get_space_info(a).get("price", 0) > board.get_space_info(b).get("price", 0))
+		_mortgage_property(candidates[0])
+
+
+# Sells one house at a time from whichever of the AI's properties currently
+# has the most houses in its group (the only ones eligible, per the
+# even-selling rule), preferring the priciest property when there's a
+# choice, until `needed` is covered or no houses remain to sell.
+func _ai_sell_houses(player: Node2D, needed: int) -> void:
+	while player.money < needed:
+		var candidates: Array[int] = []
+		for space_index in player.owned_property_indices:
+			var space: Node2D = board.spaces[space_index]
+			if space.house_count <= 0:
+				continue
+			var color_name: String = board.get_space_info(space_index).get("color", "")
+			if space.house_count == _max_houses_in_group(color_name):
+				candidates.append(space_index)
+		if candidates.is_empty():
+			return
+		candidates.sort_custom(func(a, b): return board.get_space_info(a).get("price", 0) > board.get_space_info(b).get("price", 0))
+		_sell_house(candidates[0])
+
+
 func _perform_roll(die1: int, die2: int) -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
@@ -694,13 +734,23 @@ func _collect_debt(player: Node2D, amount: int, creditor: Node2D) -> void:
 	dice_label.text += "\nSell houses or properties? Need to raise $%d" % amount
 
 	if player.is_ai:
-		# It has no other way to raise money, so it forfeits immediately
-		# rather than sitting stuck waiting for a decision it can't make.
-		dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(player.player_id)
-		_forfeit_to_bankruptcy(player, creditor)
-		_in_debt = false
-		_debt_amount = 0
-		_debt_creditor = null
+		# Mortgage what it can first; if that's not enough, start selling
+		# houses (freeing up more properties to mortgage in the process),
+		# then take another pass at mortgaging. Forfeit only if all of that
+		# still isn't enough.
+		_ai_mortgage_properties(player, amount)
+		if player.money < amount:
+			_ai_sell_houses(player, amount)
+		if player.money < amount:
+			_ai_mortgage_properties(player, amount)
+		if player.money >= amount:
+			_maybe_resolve_debt()
+		else:
+			dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(player.player_id)
+			_forfeit_to_bankruptcy(player, creditor)
+			_in_debt = false
+			_debt_amount = 0
+			_debt_creditor = null
 		return
 
 	_refresh_action_buttons()
@@ -1050,7 +1100,13 @@ func _on_declare_bankruptcy_pressed() -> void:
 # actually afford, returns.
 func _ask_buy_property(property_name: String, price: int) -> bool:
 	if players[current_player].is_ai:
-		return false
+		# Always wants the property; mortgages (never sells houses) to
+		# cover the price if it's short, and gives up only if that's not
+		# enough either.
+		var player: Node2D = players[current_player]
+		if player.money < price:
+			_ai_mortgage_properties(player, price)
+		return player.money >= price
 	_awaiting_buy_decision = true
 	_pending_buy_property_name = property_name
 	_pending_buy_price = price
