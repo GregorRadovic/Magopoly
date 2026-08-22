@@ -24,6 +24,10 @@ const PROPERTY_COLOR_ORDER: Array[String] = [
 ]
 
 signal debt_resolved
+# Emitted whenever a trade negotiation reaches a conclusion (finalized or
+# declined), so an AI-initiated trade (see _ai_trade_check) can await the
+# outcome before moving on to its next check.
+signal trade_concluded
 
 @onready var board: Node2D = $Board
 @onready var players_container: Node2D = $Players
@@ -130,6 +134,10 @@ var _trade2_offered: Array[int] = []
 # to the other side before it can be accepted.
 var _trade_proposer: int = -1
 var _trade_can_accept: bool = false
+# True only for a trade _ai_trade_check() itself started, so _send_trade_offer()
+# knows to actually evaluate a counter-offer instead of just always declining
+# (that's still what happens for a trade an AI didn't ask for).
+var _ai_initiated_trade: bool = false
 
 
 func _ready() -> void:
@@ -247,8 +255,41 @@ func _run_ai_turn() -> void:
 			return
 		if _awaiting_end_turn:
 			await get_tree().create_timer(0.6).timeout
+			await _ai_run_end_of_turn_checks(players[ai_index])
+			if current_player != ai_index or players[ai_index].is_bankrupt:
+				return
 			_end_turn()
 			return
+
+
+# Runs once, right before a Computer player ends its turn: unmortgage what
+# it can afford, chase down any color set it's one property short of, then
+# spend what's safe to spend on houses. Order matters -- unmortgaging first
+# frees up cash and properties that the later checks see; a completed set
+# from trading is what the house check will actually build on.
+func _ai_run_end_of_turn_checks(player: Node2D) -> void:
+	_ai_mortgage_check(player)
+	await _ai_trade_check(player)
+	_ai_house_check(player)
+
+
+# a) MortgageCheck: unmortgages whatever it can afford, priciest first, for
+# as long as it can keep affording more.
+func _ai_mortgage_check(player: Node2D) -> void:
+	while true:
+		var candidates: Array[int] = []
+		for space_index in player.owned_property_indices:
+			var space: Node2D = board.spaces[space_index]
+			if not space.is_mortgaged:
+				continue
+			var price: int = board.get_space_info(space_index).get("price", 0)
+			if player.money < _unmortgage_value(price):
+				continue
+			candidates.append(space_index)
+		if candidates.is_empty():
+			return
+		candidates.sort_custom(func(a, b): return board.get_space_info(a).get("price", 0) > board.get_space_info(b).get("price", 0))
+		_unmortgage_property(candidates[0])
 
 
 func _on_admin_pressed() -> void:
@@ -558,6 +599,136 @@ func _ai_sell_houses(player: Node2D, needed: int) -> void:
 			return
 		candidates.sort_custom(func(a, b): return board.get_space_info(a).get("price", 0) > board.get_space_info(b).get("price", 0))
 		_sell_house(candidates[0])
+
+
+# The rent a property would charge right now if someone landed on it, given
+# its owner's current houses / monopoly / mortgage status. Used only for the
+# AI's Worst Case Scenario estimate below -- kept separate from the real
+# landing-resolution logic in _move_player() so this hypothetical math can
+# never affect an actual rent charge. Utilities use the maximum possible
+# roll (12), since there's no real roll to reference for a hypothetical --
+# fitting, since this feeds into a "worst case" figure.
+func _hypothetical_rent(space_index: int) -> int:
+	var space: Node2D = board.spaces[space_index]
+	if space.is_mortgaged or space.owner_id == -1:
+		return 0
+	var info: Dictionary = board.get_space_info(space_index)
+	var color_name: String = info.get("color", "")
+	var rents: Array = info.get("rents", [])
+	if color_name == "railroad" and not rents.is_empty():
+		var owned_railroads: int = _count_owned_in_group(space.owner_id, "railroad")
+		var tier: int = clampi(owned_railroads, 1, rents.size()) - 1
+		return rents[tier]
+	if color_name == "utility":
+		var multipliers: Array = info.get("rent_multipliers", [])
+		if multipliers.is_empty():
+			return 0
+		var owned_utilities: int = _count_owned_in_group(space.owner_id, "utility")
+		var multiplier_tier: int = clampi(owned_utilities, 1, multipliers.size()) - 1
+		return multipliers[multiplier_tier] * 12
+	if rents.is_empty():
+		return 0
+	if space.house_count > 0:
+		return rents[space.house_count]
+	var rent: int = rents[0]
+	if _owns_full_color_group(space.owner_id, color_name):
+		rent *= 2
+	return rent
+
+
+# c) "Worst Case Scenario": what the AI would pay landing on the single
+# most expensive property (by price) that an opponent currently owns.
+func _ai_worst_case_scenario(player: Node2D) -> int:
+	var priciest_index: int = -1
+	var priciest_price: int = -1
+	for space_index in board.spaces.size():
+		var space: Node2D = board.spaces[space_index]
+		if space.owner_id == -1 or space.owner_id == player.player_id:
+			continue
+		var price: int = board.get_space_info(space_index).get("price", 0)
+		if price > priciest_price:
+			priciest_price = price
+			priciest_index = space_index
+	if priciest_index == -1:
+		return 0
+	return _hypothetical_rent(priciest_index)
+
+
+# "Nest Egg": cash on hand plus the mortgage value of every unmortgaged,
+# houseless property the AI owns -- i.e. everything it could turn into cash
+# without having to sell a house.
+func _ai_nest_egg(player: Node2D) -> int:
+	var total: int = player.money
+	for space_index in player.owned_property_indices:
+		var space: Node2D = board.spaces[space_index]
+		if not space.is_mortgaged and space.house_count == 0:
+			total += _mortgage_value(board.get_space_info(space_index).get("price", 0))
+	return total
+
+
+# Finds the best legal house purchase that still leaves the Nest Egg
+# covering the Worst Case Scenario after paying for it: cheapest color set
+# first, and the most expensive (of whichever properties are currently tied
+# for fewest houses, per the even-building rule) within that set. Returns
+# -1 if nothing qualifies.
+func _ai_best_house_option(player: Node2D, worst_case: int) -> int:
+	for color_rank in PROPERTY_COLOR_ORDER.size():
+		var color_name: String = PROPERTY_COLOR_ORDER[color_rank]
+		if not board.HOUSE_COSTS_BY_COLOR.has(color_name):
+			continue
+		if not _owns_full_color_group(player.player_id, color_name):
+			continue
+		if _group_has_mortgaged(color_name):
+			continue
+		var house_cost: int = board.HOUSE_COSTS_BY_COLOR[color_name]
+		if player.money < house_cost:
+			continue
+		var min_houses: int = _min_houses_in_group(color_name)
+		if min_houses >= 5:
+			continue
+
+		var candidate_index: int = -1
+		var candidate_price: int = -1
+		for space_index in board.get_color_group(color_name):
+			var space: Node2D = board.spaces[space_index]
+			if space.house_count != min_houses:
+				continue
+			var price: int = board.get_space_info(space_index).get("price", 0)
+			if price > candidate_price:
+				candidate_price = price
+				candidate_index = space_index
+		if candidate_index == -1:
+			continue
+
+		# Simulate the purchase to see whether the Nest Egg still covers the
+		# Worst Case Scenario afterward, then undo it -- this is a check,
+		# not a commitment.
+		var candidate_space: Node2D = board.spaces[candidate_index]
+		player.money -= house_cost
+		candidate_space.house_count += 1
+		var nest_egg_after: int = _ai_nest_egg(player)
+		player.money += house_cost
+		candidate_space.house_count -= 1
+		if nest_egg_after < worst_case:
+			continue
+
+		# Ranks are checked cheapest-first, so the first one to qualify is
+		# already the answer -- nothing later could ever be preferred.
+		return candidate_index
+	return -1
+
+
+# c) HouseCheck: keeps buying houses -- cheapest color set first, priciest
+# eligible property within it -- for as long as doing so is legal and still
+# leaves the Nest Egg covering the Worst Case Scenario. Opponents' holdings
+# don't change during this, so the Worst Case Scenario is computed once.
+func _ai_house_check(player: Node2D) -> void:
+	var worst_case: int = _ai_worst_case_scenario(player)
+	while true:
+		var option: int = _ai_best_house_option(player, worst_case)
+		if option == -1:
+			return
+		_buy_house(option)
 
 
 func _perform_roll(die1: int, die2: int) -> void:
@@ -916,9 +1087,15 @@ func _send_trade_offer() -> void:
 	_trade_can_accept = true
 	dice_label.text = "%s offered a trade to %s." % [PLAYER_NAMES[sender], PLAYER_NAMES[responder]]
 	_update_trade_action_button()
-	# Computer players have no negotiation logic yet -- they just say no.
 	if players[responder].is_ai:
-		_on_decline_trade_pressed()
+		if _ai_initiated_trade:
+			# Evaluate whatever the other side just sent back -- see
+			# _ai_evaluate_trade_counter_offer() for what it'll accept.
+			_ai_evaluate_trade_counter_offer(responder)
+		else:
+			# A trade it didn't ask for itself; it has no negotiation logic
+			# for that yet, so it just says no.
+			_on_decline_trade_pressed()
 
 
 func _finalize_trade() -> void:
@@ -958,6 +1135,103 @@ func _on_decline_trade_pressed() -> void:
 	_end_trade()
 
 
+# b) TradeCheck: for every color set the AI is exactly one property short of
+# completing, offers a trade for the missing property if another player
+# owns it (does nothing if it's unowned). Only chases the sets that were
+# nearly complete at the start of the check -- a trade completed along the
+# way doesn't trigger re-scanning for newly-opened opportunities this turn.
+func _ai_trade_check(player: Node2D) -> void:
+	for color_name in _ai_nearly_completed_sets(player):
+		if player.is_bankrupt:
+			return
+		var group: Array = board.get_color_group(color_name)
+		var missing_index: int = -1
+		for space_index in group:
+			if board.spaces[space_index].owner_id != player.player_id:
+				missing_index = space_index
+				break
+		if missing_index == -1:
+			continue
+		var owner_id: int = board.spaces[missing_index].owner_id
+		if owner_id == -1 or owner_id == player.player_id or players[owner_id].is_bankrupt:
+			continue
+		var offer_index: int = _ai_pick_trade_offer(player, color_name)
+		if offer_index == -1:
+			continue
+		await _ai_propose_trade(player.player_id, owner_id, offer_index, missing_index)
+
+
+# Color sets where the AI owns every property but exactly one.
+func _ai_nearly_completed_sets(player: Node2D) -> Array[String]:
+	var result: Array[String] = []
+	for color_name in PROPERTY_COLOR_ORDER:
+		var group: Array = board.get_color_group(color_name)
+		if group.size() <= 1:
+			continue
+		var owned_count: int = 0
+		for space_index in group:
+			if board.spaces[space_index].owner_id == player.player_id:
+				owned_count += 1
+		if owned_count == group.size() - 1:
+			result.append(color_name)
+	return result
+
+
+# The most expensive property the AI can safely offer away in exchange for
+# `target_color`: never one from that same set (defeats the point of the
+# trade), never one from a set it already owns outright (protects its
+# monopolies), and never one with houses anywhere in its group (the trade
+# UI won't allow that anyway).
+func _ai_pick_trade_offer(player: Node2D, target_color: String) -> int:
+	var candidates: Array[int] = []
+	for space_index in player.owned_property_indices:
+		var color_name: String = board.get_space_info(space_index).get("color", "")
+		if color_name == target_color:
+			continue
+		if _owns_full_color_group(player.player_id, color_name):
+			continue
+		if _max_houses_in_group(color_name) > 0:
+			continue
+		candidates.append(space_index)
+	if candidates.is_empty():
+		return -1
+	candidates.sort_custom(func(a, b): return board.get_space_info(a).get("price", 0) > board.get_space_info(b).get("price", 0))
+	return candidates[0]
+
+
+func _ai_propose_trade(ai_id: int, target_id: int, offer_index: int, want_index: int) -> void:
+	_ai_initiated_trade = true
+	_start_trade(ai_id, target_id)
+	_trade1_offered.append(offer_index)
+	_trade2_offered.append(want_index)
+	_update_player_panels()
+	_send_trade_offer()
+	await trade_concluded
+
+
+# Called when a modified counter-offer comes back to an AI in a trade it
+# itself started (see _ai_trade_check). It only ever accepts a clean
+# one-for-one property swap with no money attached, and only if what it
+# would be giving away still respects the same rules that governed its
+# original offer. Anything else -- more properties, any money, or a
+# property from a protected set -- gets declined.
+func _ai_evaluate_trade_counter_offer(ai_index: int) -> void:
+	var ai_offered: Array[int] = _trade1_offered if ai_index == _trader1 else _trade2_offered
+	var other_offered: Array[int] = _trade2_offered if ai_index == _trader1 else _trade1_offered
+	var money1: int = int(trader1_money_edit.text)
+	var money2: int = int(trader2_money_edit.text)
+	var acceptable: bool = ai_offered.size() == 1 and other_offered.size() == 1 and money1 == 0 and money2 == 0
+	if acceptable:
+		var give_color: String = board.get_space_info(ai_offered[0]).get("color", "")
+		var get_color: String = board.get_space_info(other_offered[0]).get("color", "")
+		if give_color == get_color or _owns_full_color_group(players[ai_index].player_id, give_color):
+			acceptable = false
+	if acceptable:
+		_finalize_trade()
+	else:
+		_on_decline_trade_pressed()
+
+
 func _end_trade() -> void:
 	_trading = false
 	# However complicated the trade got, play always resumes on whoever's
@@ -972,6 +1246,7 @@ func _end_trade() -> void:
 	trader2_money_edit.text = ""
 	_trade_proposer = -1
 	_trade_can_accept = false
+	_ai_initiated_trade = false
 	trade_hseparator.visible = false
 	trade_display.visible = false
 	_update_turn_label()
@@ -982,6 +1257,7 @@ func _end_trade() -> void:
 	if _in_debt:
 		dice_label.text += "\nSell houses or properties? Need to raise $%d" % _debt_amount
 	_refresh_action_buttons()
+	trade_concluded.emit()
 
 
 func _populate_trade_flow(flow: HFlowContainer, indices: Array[int]) -> void:
