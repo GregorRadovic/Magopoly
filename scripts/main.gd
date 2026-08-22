@@ -28,6 +28,7 @@ signal debt_resolved
 @onready var board: Node2D = $Board
 @onready var players_container: Node2D = $Players
 @onready var roll_button: Button = $UI/Panel/VBox/RollButton
+@onready var admin_row: HBoxContainer = $UI/Panel/VBox/AdminRow
 @onready var admin_button: Button = $UI/Panel/VBox/AdminRow/AdminButton
 @onready var admin_properties_button: Button = $UI/Panel/VBox/AdminRow/AdminPropertiesButton
 @onready var buy_house_unmortgage_button: Button = $UI/Panel/VBox/BuyHouseUnmortgageButton
@@ -55,6 +56,18 @@ signal debt_resolved
 	$UI/PlayersPanel/VBox/Player1/PropertiesFlow,
 	$UI/PlayersPanel/VBox/Player2/PropertiesFlow,
 	$UI/PlayersPanel/VBox/Player3/PropertiesFlow,
+]
+@onready var player_rows: Array[VBoxContainer] = [
+	$UI/PlayersPanel/VBox/Player0,
+	$UI/PlayersPanel/VBox/Player1,
+	$UI/PlayersPanel/VBox/Player2,
+	$UI/PlayersPanel/VBox/Player3,
+]
+@onready var player_row_separators: Array[HSeparator] = [
+	$UI/PlayersPanel/VBox/HSeparator0,
+	$UI/PlayersPanel/VBox/HSeparator1,
+	$UI/PlayersPanel/VBox/HSeparator2,
+	$UI/PlayersPanel/VBox/HSeparator3,
 ]
 @onready var trade_hseparator: HSeparator = $UI/PlayersPanel/VBox/HSeparatorTrade
 @onready var trade_display: VBoxContainer = $UI/PlayersPanel/VBox/TradeDisplay
@@ -120,7 +133,9 @@ var _trade_can_accept: bool = false
 
 
 func _ready() -> void:
+	admin_row.visible = GameState.admin_mode
 	_spawn_players()
+	current_player = _first_active_player()
 	roll_button.pressed.connect(_on_roll_pressed)
 	admin_button.pressed.connect(_on_admin_pressed)
 	admin_properties_button.pressed.connect(_on_admin_properties_pressed)
@@ -135,6 +150,9 @@ func _ready() -> void:
 	board.space_clicked.connect(_on_space_clicked)
 	_update_turn_label()
 	_update_player_panels()
+	_refresh_action_buttons()
+	if players[current_player].is_ai:
+		_run_ai_turn()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -160,6 +178,27 @@ func _spawn_players() -> void:
 		player.position = board.get_space_center(0) + MARKER_OFFSETS[i]
 		players.append(player)
 		player_header_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
+
+		var type: GameState.PlayerType = GameState.player_types[i]
+		if type == GameState.PlayerType.DISABLED:
+			# Treated as already bankrupt so turn order, the trade picker,
+			# and the win check all just skip over them -- this slot was
+			# never really in the game.
+			player.is_bankrupt = true
+			player.visible = false
+			player_rows[i].visible = false
+			player_row_separators[i].visible = false
+		elif type == GameState.PlayerType.COMPUTER:
+			player.is_ai = true
+
+
+# The player order always starts at index 0, but that slot might be
+# Disabled, so find whoever's actually first in line.
+func _first_active_player() -> int:
+	for i in players.size():
+		if not players[i].is_bankrupt:
+			return i
+	return 0
 
 
 func _on_roll_pressed() -> void:
@@ -188,6 +227,28 @@ func _advance_turn() -> void:
 	_awaiting_end_turn = false
 	_advance_to_next_active_player()
 	_update_turn_label()
+	if players[current_player].is_ai:
+		_run_ai_turn()
+
+
+# Drives a Computer player's entire turn automatically: roll, decline any
+# purchase, and end turn -- rolling again first if that roll was doubles.
+# Debt it can't cover ends in an immediate forfeit, since it has no other
+# way to raise money. Deliberately simple; smarter play comes later.
+func _run_ai_turn() -> void:
+	var ai_index: int = current_player
+	while current_player == ai_index and not players[ai_index].is_bankrupt:
+		_refresh_action_buttons()
+		await get_tree().create_timer(0.6).timeout
+		var die1: int = randi_range(1, 6)
+		var die2: int = randi_range(1, 6)
+		await _perform_roll(die1, die2)
+		if current_player != ai_index or players[ai_index].is_bankrupt:
+			return
+		if _awaiting_end_turn:
+			await get_tree().create_timer(0.6).timeout
+			_end_turn()
+			return
 
 
 func _on_admin_pressed() -> void:
@@ -631,6 +692,17 @@ func _collect_debt(player: Node2D, amount: int, creditor: Node2D) -> void:
 	_debt_amount = amount
 	_debt_creditor = creditor
 	dice_label.text += "\nSell houses or properties? Need to raise $%d" % amount
+
+	if player.is_ai:
+		# It has no other way to raise money, so it forfeits immediately
+		# rather than sitting stuck waiting for a decision it can't make.
+		dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(player.player_id)
+		_forfeit_to_bankruptcy(player, creditor)
+		_in_debt = false
+		_debt_amount = 0
+		_debt_creditor = null
+		return
+
 	_refresh_action_buttons()
 	await debt_resolved
 
@@ -671,14 +743,18 @@ func _maybe_resolve_debt() -> void:
 # for rolling) turns off until that's clicked.
 func _refresh_action_buttons() -> void:
 	var limited_to_selling: bool = _in_debt or _awaiting_buy_decision
-	roll_button.disabled = limited_to_selling or _trading
+	# A Computer player's turn plays itself -- lock every button so the
+	# human at the keyboard can't act (or trade) on its behalf while it's
+	# "thinking".
+	var ai_turn: bool = players[current_player].is_ai
+	roll_button.disabled = limited_to_selling or _trading or ai_turn
 	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
-	admin_button.disabled = limited_to_selling or _trading or _awaiting_end_turn
-	admin_properties_button.disabled = limited_to_selling or _trading
-	buy_house_unmortgage_button.disabled = limited_to_selling or _trading
-	sell_house_mortgage_button.disabled = _trading
-	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading
-	trade_button.disabled = _awaiting_buy_decision or _trading
+	admin_button.disabled = limited_to_selling or _trading or _awaiting_end_turn or ai_turn
+	admin_properties_button.disabled = limited_to_selling or _trading or ai_turn
+	buy_house_unmortgage_button.disabled = limited_to_selling or _trading or ai_turn
+	sell_house_mortgage_button.disabled = _trading or ai_turn
+	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading or ai_turn
+	trade_button.disabled = _awaiting_buy_decision or _trading or ai_turn
 
 
 func _on_trade_pressed() -> void:
@@ -790,6 +866,9 @@ func _send_trade_offer() -> void:
 	_trade_can_accept = true
 	dice_label.text = "%s offered a trade to %s." % [PLAYER_NAMES[sender], PLAYER_NAMES[responder]]
 	_update_trade_action_button()
+	# Computer players have no negotiation logic yet -- they just say no.
+	if players[responder].is_ai:
+		_on_decline_trade_pressed()
 
 
 func _finalize_trade() -> void:
@@ -902,6 +981,16 @@ func _bankrupt_player(player: Node2D, creditor: Node2D) -> void:
 	player.visible = false
 
 
+# Shared tail of every bankruptcy path (voluntary or debt-forced, human or
+# AI): liquidate, check for a winner, and refresh the panels. Callers are
+# responsible for the dice_label message, since its wording differs and has
+# to be set before this runs -- _check_for_winner() appends to it.
+func _forfeit_to_bankruptcy(player: Node2D, creditor: Node2D) -> void:
+	_bankrupt_player(player, creditor)
+	_check_for_winner()
+	_update_player_panels()
+
+
 # Called after a bankruptcy resolves. If it left exactly one player still in
 # the game, announce them as the winner. Nothing further is done about it --
 # the game just keeps working normally from here (only one active player
@@ -934,9 +1023,8 @@ func _on_declare_bankruptcy_pressed() -> void:
 		# that creditor gets everything, per the debt-collection rules;
 		# otherwise this is a plain voluntary forfeit with no one to credit.
 		var creditor: Node2D = _debt_creditor if _in_debt else null
-		_bankrupt_player(player, creditor)
 		dice_label.text = "%s declared bankruptcy and forfeits the game." % forfeiting_name
-		_check_for_winner()
+		_forfeit_to_bankruptcy(player, creditor)
 		if _in_debt:
 			_in_debt = false
 			_debt_amount = 0
@@ -944,7 +1032,6 @@ func _on_declare_bankruptcy_pressed() -> void:
 			debt_resolved.emit()
 		else:
 			_advance_turn()
-		_update_player_panels()
 
 	_refresh_action_buttons()
 
@@ -962,6 +1049,8 @@ func _on_declare_bankruptcy_pressed() -> void:
 # try again. Only an explicit "No", or an explicit "Yes" that they can
 # actually afford, returns.
 func _ask_buy_property(property_name: String, price: int) -> bool:
+	if players[current_player].is_ai:
+		return false
 	_awaiting_buy_decision = true
 	_pending_buy_property_name = property_name
 	_pending_buy_price = price
