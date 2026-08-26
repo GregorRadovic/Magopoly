@@ -13,6 +13,11 @@ var consecutive_doubles: int = 0
 var owned_property_indices: Array[int] = []
 var is_bankrupt: bool = false
 var is_ai: bool = false
+# Spell names held in hand, one entry per copy (duplicates allowed, no limit).
+var spell_hand: Array[String] = []
+# Color name -> bonus Attunement from burning spells for it this turn. Wiped
+# at the start of this player's next turn.
+var temp_attunement: Dictionary = {}
 
 
 func setup(id: int, color: Color) -> void:
