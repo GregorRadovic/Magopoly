@@ -18,11 +18,21 @@ signal clicked(index: int)
 		banner_color = value
 		_update_banner()
 
+# "", "magic_forest" (purple star), or "spell_shop" (coin).
+@export var special_marker: String = "":
+	set(value):
+		special_marker = value
+		_update_special_marker()
+
+const MAGIC_FOREST_COLOR: Color = Color(0.6, 0.2, 0.85)
+const SPELL_SHOP_COIN_COLOR: Color = Color(0.9, 0.75, 0.15)
+
 @onready var label: Label = $IndexLabel
 @onready var click_area: Control = $ClickArea
 @onready var banner: ColorRect = $ColorBanner
 @onready var house_icon: TextureRect = $ColorBanner/HouseIcon
 @onready var house_count_label: Label = $ColorBanner/HouseCountLabel
+@onready var special_marker_label: Label = $SpecialMarker
 
 # Index into main.gd's `players` array; -1 means the property is unowned.
 # Only meaningful for spaces whose SPACE_DATA type is "property".
@@ -42,6 +52,7 @@ func _ready() -> void:
 	_update_label()
 	_update_banner()
 	_update_house_display()
+	_update_special_marker()
 	click_area.gui_input.connect(_on_click_area_gui_input)
 
 
@@ -66,3 +77,27 @@ func _update_house_display() -> void:
 	if house_count_label:
 		house_count_label.visible = house_count > 0
 		house_count_label.text = str(house_count)
+
+
+func _update_special_marker() -> void:
+	if not special_marker_label:
+		return
+	match special_marker:
+		"magic_forest":
+			special_marker_label.visible = true
+			special_marker_label.text = "★"  # star
+			special_marker_label.remove_theme_stylebox_override("normal")
+			special_marker_label.add_theme_color_override("font_color", MAGIC_FOREST_COLOR)
+		"spell_shop":
+			special_marker_label.visible = true
+			special_marker_label.text = "$"
+			special_marker_label.add_theme_color_override("font_color", Color.BLACK)
+			var coin_style := StyleBoxFlat.new()
+			coin_style.bg_color = SPELL_SHOP_COIN_COLOR
+			coin_style.corner_radius_top_left = 20
+			coin_style.corner_radius_top_right = 20
+			coin_style.corner_radius_bottom_left = 20
+			coin_style.corner_radius_bottom_right = 20
+			special_marker_label.add_theme_stylebox_override("normal", coin_style)
+		_:
+			special_marker_label.visible = false

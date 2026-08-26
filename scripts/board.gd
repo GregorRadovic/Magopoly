@@ -14,10 +14,12 @@ const SPACE_VISUAL_SIZE: float = 78.0
 const SPACE_DATA: Dictionary = {
 	0: {"name": "GO"},
 	1: {"name": "Mediterranean Avenue", "type": "property", "price": 60, "rents": [2, 10, 30, 90, 160, 250], "color": "brown"},
+	2: {"name": "Spell Shop", "type": "spell_shop"},
 	3: {"name": "Baltic Avenue", "type": "property", "price": 60, "rents": [4, 20, 60, 180, 320, 450], "color": "brown"},
 	4: {"name": "Income Tax", "type": "tax", "value": 200},
 	5: {"name": "Reading Railroad", "type": "property", "price": 200, "rents": [25, 50, 100, 200], "color": "railroad", "icon": "res://Magopoly Assets/Railroad.png"},
 	6: {"name": "Oriental Avenue", "type": "property", "price": 100, "rents": [6, 30, 90, 270, 400, 550], "color": "sky_blue"},
+	7: {"name": "Magic Forest", "type": "magic_forest"},
 	8: {"name": "Vermont Avenue", "type": "property", "price": 100, "rents": [6, 30, 90, 270, 400, 550], "color": "sky_blue"},
 	9: {"name": "Connecticut Avenue", "type": "property", "price": 120, "rents": [8, 40, 100, 300, 450, 600], "color": "sky_blue"},
 	10: {"name": "Jail"},
@@ -27,10 +29,12 @@ const SPACE_DATA: Dictionary = {
 	14: {"name": "Virginia Avenue", "type": "property", "price": 160, "rents": [12, 60, 180, 500, 700, 900], "color": "pink"},
 	15: {"name": "Pennsylvania Railroad", "type": "property", "price": 200, "rents": [25, 50, 100, 200], "color": "railroad", "icon": "res://Magopoly Assets/Railroad.png"},
 	16: {"name": "St. James Place", "type": "property", "price": 180, "rents": [14, 70, 200, 550, 750, 950], "color": "orange"},
+	17: {"name": "Spell Shop", "type": "spell_shop"},
 	18: {"name": "Tennessee Avenue", "type": "property", "price": 180, "rents": [14, 70, 200, 550, 750, 950], "color": "orange"},
 	19: {"name": "New York Avenue", "type": "property", "price": 200, "rents": [16, 80, 220, 600, 800, 1000], "color": "orange"},
 	20: {"name": "Free Parking", "type": "free_parking"},
 	21: {"name": "Kentucky Avenue", "type": "property", "price": 220, "rents": [18, 90, 250, 700, 875, 1050], "color": "red"},
+	22: {"name": "Magic Forest", "type": "magic_forest"},
 	23: {"name": "Indiana Avenue", "type": "property", "price": 220, "rents": [18, 90, 250, 700, 875, 1050], "color": "red"},
 	24: {"name": "Illinois Avenue", "type": "property", "price": 240, "rents": [20, 100, 300, 750, 925, 1100], "color": "red"},
 	25: {"name": "B&O Railroad", "type": "property", "price": 200, "rents": [25, 50, 100, 200], "color": "railroad", "icon": "res://Magopoly Assets/Railroad.png"},
@@ -41,8 +45,10 @@ const SPACE_DATA: Dictionary = {
 	30: {"name": "Go To Jail", "type": "go_to_jail"},
 	31: {"name": "Pacific Avenue", "type": "property", "price": 300, "rents": [26, 130, 390, 900, 1100, 1275], "color": "green"},
 	32: {"name": "North Carolina Avenue", "type": "property", "price": 300, "rents": [26, 130, 390, 900, 1100, 1275], "color": "green"},
+	33: {"name": "Spell Shop", "type": "spell_shop"},
 	34: {"name": "Pennsylvania Avenue", "type": "property", "price": 320, "rents": [28, 150, 450, 1000, 1200, 1400], "color": "green"},
 	35: {"name": "Short Line", "type": "property", "price": 200, "rents": [25, 50, 100, 200], "color": "railroad", "icon": "res://Magopoly Assets/Railroad.png"},
+	36: {"name": "Magic Forest", "type": "magic_forest"},
 	37: {"name": "Park Place", "type": "property", "price": 350, "rents": [35, 175, 500, 1100, 1300, 1500], "color": "ocean_blue"},
 	(TOTAL_SPACES - 2): {"name": "Luxury Tax", "type": "tax", "value": 100},
 	39: {"name": "Boardwalk", "type": "property", "price": 400, "rents": [50, 200, 600, 1400, 1700, 2000], "color": "ocean_blue"},
@@ -120,6 +126,9 @@ func _generate_board() -> void:
 		var color_name: String = info.get("color", "")
 		if color_name != "":
 			space.banner_color = COLOR_GROUP_COLORS.get(color_name, Color(0, 0, 0, 0))
+		var space_type: String = info.get("type", "")
+		if space_type == "magic_forest" or space_type == "spell_shop":
+			space.special_marker = space_type
 		space.position = _grid_to_position(_index_to_grid(i))
 		space.clicked.connect(space_clicked.emit)
 		add_child(space)

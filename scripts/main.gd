@@ -4,16 +4,22 @@ const PLAYER_SCENE: PackedScene = preload("res://scenes/player.tscn")
 const MINI_CARD_SCENE: PackedScene = preload("res://scenes/mini_property_card.tscn")
 const MINI_SPELL_CARD_SCENE: PackedScene = preload("res://scenes/mini_spell_card.tscn")
 
-# Starting hands by player index -- the only way to gain spells for now.
-# P2's single T1 Burn Spell is there for _ai_p2_opening_burn() to use.
-const STARTING_SPELLS_BY_PLAYER: Dictionary = {
-	0: ["T1 Burn Spell", "T1 Burn Spell", "T3 Escape Spell", "T3 Escape Spell", "T2 Response Spell", "T2 Response Spell"],
-	1: ["T1 Burn Spell"],
+# The shared Spell Deck's starting contents -- a placeholder until real deck
+# composition/building is designed. See _build_spell_deck().
+const SPELL_DECK_STARTING_COUNTS: Dictionary = {
+	"T1 Burn Spell": 5,
+	"T2 Response Spell": 5,
+	"T3 Escape Spell": 5,
 }
+const STARTING_HAND_SIZE: int = 4
 
 # Sentinel "level" for the level-picker's extra "Burn for Attunement" entry --
 # safe from colliding with a real spell level, which are always >= 1.
 const BURN_FOR_ATTUNEMENT_INDEX: int = 0
+
+# Sentinel for the Spell Shop picker's "Skip" entry -- safe from colliding
+# with a real top-of-deck card index (0..3).
+const SPELL_SHOP_SKIP_INDEX: int = -2
 
 # How long a response window (see _ensure_response_window()) lasts before
 # automatically continuing, if nobody pauses it (or extends it by casting
@@ -166,14 +172,23 @@ var _roll_in_flight: bool = false
 var _current_roll: int = 0
 
 # The pending spell stack: each entry is {"id": int, "caster_id": int,
-# "display_name": String, "resolve": Callable}. A spell is pushed here the
-# moment it's cast (having already left the caster's hand and picked
-# whatever targets it needs) and popped LIFO -- last cast, first resolved --
-# once the response window that followed it finally closes. Countering a
-# spell (T2 Response Spell, Level 1) just removes its entry before it's ever
-# popped. See _finish_cast() and _resolve_spell_stack().
+# "spell_name": String, "display_name": String, "resolve": Callable}. A
+# spell is pushed here the moment it's cast (having already left the
+# caster's hand and picked whatever targets it needs) and popped LIFO --
+# last cast, first resolved -- once the response window that followed it
+# finally closes. Countering a spell (T2 Response Spell, Level 1) just
+# removes its entry before it's ever popped, so it never reaches
+# _resolve_spell_stack()'s own shuffle-back -- _resolve_t2_counter() shuffles
+# it back into _spell_deck itself instead. See _finish_cast().
 var _spell_stack: Array[Dictionary] = []
 var _next_stack_id: int = 0
+
+# The shared Spell Deck every player draws from (game start, and one card
+# whenever anyone passes Go). Every spell that leaves a hand -- resolved,
+# countered, or burned for Attunement -- gets shuffled back in once it's
+# done; see _return_spell_to_deck() and its callers. Built once in _ready()
+# from SPELL_DECK_STARTING_COUNTS.
+var _spell_deck: Array[String] = []
 
 # Set while the current player owes more money than they have on hand and is
 # being given a chance to raise it (selling houses / mortgaging) before
@@ -218,6 +233,7 @@ var _ai_initiated_trade: bool = false
 
 func _ready() -> void:
 	admin_row.visible = GameState.admin_mode
+	_build_spell_deck()
 	_spawn_players()
 	current_player = _first_active_player()
 	roll_button.pressed.connect(_on_roll_pressed)
@@ -276,8 +292,6 @@ func _spawn_players() -> void:
 		player.position = board.get_space_center(0) + MARKER_OFFSETS[i]
 		players.append(player)
 		player_header_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
-		if STARTING_SPELLS_BY_PLAYER.has(i):
-			player.spell_hand.append_array(STARTING_SPELLS_BY_PLAYER[i])
 		if i == 1:
 			# P2 starts owning Illinois Avenue, giving it enough Red
 			# Attunement to open with _ai_p2_opening_burn()'s Level 1 cast.
@@ -290,13 +304,36 @@ func _spawn_players() -> void:
 		if type == GameState.PlayerType.DISABLED:
 			# Treated as already bankrupt so turn order, the trade picker,
 			# and the win check all just skip over them -- this slot was
-			# never really in the game.
+			# never really in the game. Never really drew a hand either.
 			player.is_bankrupt = true
 			player.visible = false
 			player_rows[i].visible = false
 			player_row_separators[i].visible = false
-		elif type == GameState.PlayerType.COMPUTER:
-			player.is_ai = true
+		else:
+			if type == GameState.PlayerType.COMPUTER:
+				player.is_ai = true
+			for j in STARTING_HAND_SIZE:
+				_draw_spell(player)
+
+
+func _build_spell_deck() -> void:
+	_spell_deck.clear()
+	for spell_name in SPELL_DECK_STARTING_COUNTS:
+		for i in SPELL_DECK_STARTING_COUNTS[spell_name]:
+			_spell_deck.append(spell_name)
+	_spell_deck.shuffle()
+
+
+# Draws one card from the shared deck into `player`'s hand, returning its
+# name (or "" if the deck happens to be empty -- e.g. more players drawing
+# their starting hand than the placeholder deck actually holds). A no-op
+# other than the return value in that case.
+func _draw_spell(player: Node2D) -> String:
+	if _spell_deck.is_empty():
+		return ""
+	var spell_name: String = _spell_deck.pop_back()
+	player.spell_hand.append(spell_name)
+	return spell_name
 
 
 # The player order always starts at index 0, but that slot might be
@@ -884,14 +921,25 @@ func _ensure_response_window() -> void:
 # Pops and resolves _spell_stack LIFO -- last spell cast, first to resolve --
 # once its response window has fully closed. Countering a spell (T2 Response
 # Spell, Level 1) removes its entry before it's ever popped here, so it's
-# simply skipped, per "countering negates the effect and discards it".
+# simply skipped -- per "countering negates the effect and discards it", its
+# own resolve never runs, but _resolve_t2_counter() shuffles it back into
+# the deck itself, same as any spell that resolves normally here does.
 func _resolve_spell_stack() -> void:
 	while not _spell_stack.is_empty():
 		var entry: Dictionary = _spell_stack.pop_back()
 		var resolve: Callable = entry["resolve"]
 		if resolve.is_valid():
 			await resolve.call()
+			_return_spell_to_deck(entry["spell_name"])
 	_update_player_panels()
+
+
+# Every spell that's used -- resolved here, countered (_resolve_t2_counter),
+# or burned for Attunement (_burn_spell_for_attunement) -- shuffles back into
+# the shared deck via this.
+func _return_spell_to_deck(spell_name: String) -> void:
+	_spell_deck.append(spell_name)
+	_spell_deck.shuffle()
 
 
 # Handler for the response window above, per player_index (0 = P1, paused by
@@ -981,7 +1029,12 @@ func _move_player(player: Node2D, roll: int) -> bool:
 	var passed_go: bool = new_space_raw >= board.TOTAL_SPACES
 	if passed_go:
 		player.money += 200
-		dice_label.text += "\nYou passed Go! (+200 Money)"
+		var drawn_spell: String = _draw_spell(player)
+		if drawn_spell != "":
+			dice_label.text += "\nYou passed Go! (+200 Money, drew %s)" % drawn_spell
+		else:
+			dice_label.text += "\nYou passed Go! (+200 Money)"
+		_update_player_panels()
 
 	player.current_space = new_space_raw % board.TOTAL_SPACES
 	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
@@ -1007,6 +1060,12 @@ func _move_player(player: Node2D, roll: int) -> bool:
 		_send_to_jail(player)
 		dice_label.text += "\nLanded on Go To Jail! Sent to Jail."
 		return true
+	elif landed_info.get("type", "") == "magic_forest":
+		dice_label.text += "\nLanded on Magic Forest!"
+		await _visit_magic_forest(player)
+	elif landed_info.get("type", "") == "spell_shop":
+		dice_label.text += "\nLanded on Spell Shop!"
+		await _visit_spell_shop(player)
 	elif landed_info.get("type", "") == "property":
 		var space: Node2D = board.spaces[player.current_space]
 		var property_name: String = landed_info.get("name", "")
@@ -1073,6 +1132,96 @@ func _move_player(player: Node2D, roll: int) -> bool:
 				dice_label.text += "\nLanded on %s (owned by %s)! Paid $%d rent%s." % [property_name, PLAYER_NAMES[space.owner_id], rent_amount, note]
 
 	return false
+
+
+# Magic Forest: draw 2 spells, then must discard 1 card from hand -- an AI
+# just discards a random card (no strategy yet); a human picks via
+# player_picker, locked behind _casting_spell like a real cast so a
+# response-window click from someone else can't collide with it (there's no
+# response window of its own here, this isn't an Instant Timing).
+func _visit_magic_forest(player: Node2D) -> void:
+	var drawn: Array[String] = []
+	for i in 2:
+		var spell_name: String = _draw_spell(player)
+		if spell_name != "":
+			drawn.append(spell_name)
+	if drawn.is_empty():
+		dice_label.text += " The Spell Deck is empty."
+	else:
+		dice_label.text += " Drew %s." % ", ".join(drawn)
+	_update_player_panels()
+
+	if player.spell_hand.is_empty():
+		return
+
+	_casting_spell = true
+	_refresh_action_buttons()
+
+	var hand_index: int
+	if player.is_ai:
+		hand_index = randi_range(0, player.spell_hand.size() - 1)
+	else:
+		var entries: Array = []
+		for i in player.spell_hand.size():
+			entries.append({"index": i, "name": player.spell_hand[i], "color": Color.WHITE})
+		player_picker.open("Magic Forest: choose a spell to discard.", entries, true)
+		hand_index = await player_picker.player_chosen
+
+	var discarded: String = player.spell_hand[hand_index]
+	player.spell_hand.remove_at(hand_index)
+	_return_spell_to_deck(discarded)
+	dice_label.text += "\n%s discarded %s." % [_player_display_name(player.player_id), discarded]
+
+	_casting_spell = false
+	_refresh_action_buttons()
+	_update_player_panels()
+
+
+# Spell Shop: look at the top 4 cards of the deck; pick one for $100 (to
+# Free Parking) or Skip. Either way, whatever isn't taken shuffles back in.
+# An AI always skips for now (no purchasing strategy yet).
+func _visit_spell_shop(player: Node2D) -> void:
+	var top_cards: Array[String] = []
+	for i in 4:
+		if _spell_deck.is_empty():
+			break
+		top_cards.append(_spell_deck.pop_back())
+	if top_cards.is_empty():
+		dice_label.text += " The Spell Deck is empty."
+		return
+
+	_casting_spell = true
+	_refresh_action_buttons()
+
+	var choice: int = SPELL_SHOP_SKIP_INDEX
+	if not player.is_ai:
+		var entries: Array = []
+		for i in top_cards.size():
+			entries.append({"index": i, "name": top_cards[i], "color": Color.WHITE})
+		entries.append({"index": SPELL_SHOP_SKIP_INDEX, "name": "Skip", "color": Color.WHITE})
+		player_picker.open("Spell Shop: pick a spell for $100, or Skip.", entries, true)
+		choice = await player_picker.player_chosen
+
+	if choice >= 0 and choice < top_cards.size():
+		if player.money < 100:
+			dice_label.text += "\n%s can't afford the Spell Shop's $100 price and skips." % _player_display_name(player.player_id)
+		else:
+			var chosen_spell: String = top_cards[choice]
+			top_cards.remove_at(choice)
+			player.money -= 100
+			free_parking_amount += 100
+			player.spell_hand.append(chosen_spell)
+			dice_label.text += "\n%s bought %s from the Spell Shop for $100!" % [_player_display_name(player.player_id), chosen_spell]
+	else:
+		dice_label.text += "\n%s skipped the Spell Shop." % _player_display_name(player.player_id)
+
+	for spell_name in top_cards:
+		_spell_deck.append(spell_name)
+	_spell_deck.shuffle()
+
+	_casting_spell = false
+	_refresh_action_buttons()
+	_update_player_panels()
 
 
 # Gives the current player a chance to raise money (selling houses /
@@ -1818,12 +1967,14 @@ func _on_spell_clicked(hand_index: int, player_index: int) -> void:
 # Attunement of its color, lasting until the start of this player's next
 # turn (see _advance_to_next_active_player()). Always legal regardless of
 # timing or whether the spell itself is Instant -- burning for Attunement is
-# Instant Speed for every spell.
+# Instant Speed for every spell. Shuffled back into the deck like any other
+# used spell.
 func _burn_spell_for_attunement(caster: Node2D, hand_index: int, spell_name: String, color_name: String) -> void:
 	caster.spell_hand.remove_at(hand_index)
 	if color_name != "":
 		caster.temp_attunement[color_name] = caster.temp_attunement.get(color_name, 0) + 1
 	dice_label.text = "%s burned %s for +1 %s Attunement." % [_player_display_name(caster.player_id), spell_name, color_name.capitalize()]
+	_return_spell_to_deck(spell_name)
 	_update_player_panels()
 
 
@@ -1890,7 +2041,7 @@ func _finish_cast(caster: Node2D, hand_index: int, spell_name: String, level: in
 	var stack_id: int = _next_stack_id
 	_next_stack_id += 1
 	var display_name: String = "%s (Level %d)" % [spell_name, level]
-	_spell_stack.append({"id": stack_id, "caster_id": caster.player_id, "display_name": display_name, "resolve": resolve})
+	_spell_stack.append({"id": stack_id, "caster_id": caster.player_id, "spell_name": spell_name, "display_name": display_name, "resolve": resolve})
 	dice_label.text += "\n%s casts %s!" % [_player_display_name(caster.player_id), display_name]
 	_update_player_panels()
 	await _ensure_response_window()
@@ -1967,15 +2118,17 @@ func _prepare_t2_counter(caster: Node2D) -> Callable:
 
 
 # Removes the targeted entry from the stack before it's ever popped --
-# per "countering negates the effect and discards it". If it's already gone
-# (resolved or countered by someone else in the meantime), this just
-# fizzles.
+# per "countering negates the effect and discards it" -- but, like any other
+# used spell, the countered card still gets shuffled back into the deck. If
+# it's already gone (resolved or countered by someone else in the
+# meantime), this just fizzles.
 func _resolve_t2_counter(caster: Node2D, target_id: int) -> void:
 	for i in _spell_stack.size():
 		if _spell_stack[i]["id"] == target_id:
 			var countered: Dictionary = _spell_stack[i]
 			_spell_stack.remove_at(i)
 			dice_label.text = "%s's T2 Response Spell (Level 1) counters %s's %s!" % [_player_display_name(caster.player_id), _player_display_name(countered["caster_id"]), countered["display_name"]]
+			_return_spell_to_deck(countered["spell_name"])
 			return
 	dice_label.text = "%s's T2 Response Spell (Level 1) had nothing left to counter." % _player_display_name(caster.player_id)
 
