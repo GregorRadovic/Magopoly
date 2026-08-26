@@ -1,11 +1,13 @@
 extends Control
 
 const TYPE_LABELS: Array[String] = ["Local Human", "Disabled", "Computer"]
-# Index in TYPE_LABELS -> GameState.PlayerType. Local Human is the default
-# selection for every slot.
+# Index in TYPE_LABELS -> GameState.PlayerType.
 const TYPE_VALUES: Array[GameState.PlayerType] = [
 	GameState.PlayerType.HUMAN, GameState.PlayerType.DISABLED, GameState.PlayerType.COMPUTER,
 ]
+# Default TYPE_LABELS selection per slot: P1 Local Human, P2 Computer, P3/P4
+# Disabled.
+const DEFAULT_SELECTIONS: Array[int] = [0, 2, 1, 1]
 
 @onready var start_button: Button = $VBox/StartButton
 @onready var close_game_button: Button = $VBox/CloseGameButton
@@ -20,10 +22,11 @@ const TYPE_VALUES: Array[GameState.PlayerType] = [
 
 
 func _ready() -> void:
-	for option in player_type_options:
+	for i in player_type_options.size():
+		var option: OptionButton = player_type_options[i]
 		for label in TYPE_LABELS:
 			option.add_item(label)
-		option.selected = 0
+		option.selected = DEFAULT_SELECTIONS[i]
 	start_button.pressed.connect(_on_start_pressed)
 	close_game_button.pressed.connect(_on_close_game_pressed)
 

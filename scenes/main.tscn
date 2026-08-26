@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/board.tscn" id="2"]
@@ -8,6 +8,7 @@
 [ext_resource type="PackedScene" path="res://scenes/property_card.tscn" id="6"]
 [ext_resource type="PackedScene" path="res://scenes/asset_card.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/player_picker.tscn" id="8"]
+[ext_resource type="PackedScene" path="res://scenes/spell_card.tscn" id="9"]
 
 [sub_resource type="StyleBoxFlat" id="OpaquePanelStyle"]
 bg_color = Color(0.145, 0.145, 0.161, 1)
@@ -89,6 +90,8 @@ text = "Trade"
 
 [node name="PlayerPicker" parent="UI" instance=ExtResource("8")]
 
+[node name="SpellCard" parent="UI" instance=ExtResource("9")]
+
 [node name="PlayersPanel" type="Panel" parent="UI"]
 theme_override_styles/panel = SubResource("OpaquePanelStyle")
 offset_left = 968.0
@@ -117,7 +120,20 @@ text = "Free Parking: $0"
 autowrap_mode = 2
 text = "Player 1 -- $1500"
 
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0"]
+[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player0"]
+theme_override_constants/separation = 10
+
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
+size_flags_horizontal = 3
+
+[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
+
+[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
+size_flags_horizontal = 3
+
+[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
+
+[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
 
 [node name="HSeparator1" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 
@@ -127,7 +143,20 @@ text = "Player 1 -- $1500"
 autowrap_mode = 2
 text = "Player 2 -- $1500"
 
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1"]
+[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player1"]
+theme_override_constants/separation = 10
+
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
+size_flags_horizontal = 3
+
+[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
+
+[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
+size_flags_horizontal = 3
+
+[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
+
+[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
 
 [node name="HSeparator2" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 
@@ -137,7 +166,20 @@ text = "Player 2 -- $1500"
 autowrap_mode = 2
 text = "Player 3 -- $1500"
 
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2"]
+[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player2"]
+theme_override_constants/separation = 10
+
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
+size_flags_horizontal = 3
+
+[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
+
+[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
+size_flags_horizontal = 3
+
+[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
+
+[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
 
 [node name="HSeparator3" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 
@@ -147,7 +189,20 @@ text = "Player 3 -- $1500"
 autowrap_mode = 2
 text = "Player 4 -- $1500"
 
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3"]
+[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player3"]
+theme_override_constants/separation = 10
+
+[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
+size_flags_horizontal = 3
+
+[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
+
+[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
+size_flags_horizontal = 3
+
+[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
+
+[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
 
 [node name="HSeparatorTrade" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 visible = false

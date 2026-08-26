@@ -2,6 +2,14 @@ extends Node2D
 
 const PLAYER_SCENE: PackedScene = preload("res://scenes/player.tscn")
 const MINI_CARD_SCENE: PackedScene = preload("res://scenes/mini_property_card.tscn")
+const MINI_SPELL_CARD_SCENE: PackedScene = preload("res://scenes/mini_spell_card.tscn")
+
+# P1's starting hand -- the only way to gain spells for now.
+const STARTING_SPELLS: Array[String] = ["T1 Burn Spell", "T1 Burn Spell", "T1 Burn Spell", "T1 Burn Spell"]
+
+# Sentinel "level" for the level-picker's extra "Burn for Attunement" entry --
+# safe from colliding with a real spell level, which are always >= 1.
+const BURN_FOR_ATTUNEMENT_INDEX: int = 0
 
 const PLAYER_COLORS: Array[Color] = [
 	Color(0.85, 0.2, 0.2),
@@ -48,6 +56,7 @@ signal trade_concluded
 @onready var property_card: PopupPanel = $UI/PropertyCard
 @onready var asset_card: PopupPanel = $UI/AssetCard
 @onready var player_picker: PopupPanel = $UI/PlayerPicker
+@onready var spell_card: PopupPanel = $UI/SpellCard
 @onready var free_parking_label: Label = $UI/PlayersPanel/VBox/FreeParkingLabel
 @onready var player_header_labels: Array[Label] = [
 	$UI/PlayersPanel/VBox/Player0/HeaderLabel,
@@ -56,10 +65,22 @@ signal trade_concluded
 	$UI/PlayersPanel/VBox/Player3/HeaderLabel,
 ]
 @onready var player_properties_flows: Array[HFlowContainer] = [
-	$UI/PlayersPanel/VBox/Player0/PropertiesFlow,
-	$UI/PlayersPanel/VBox/Player1/PropertiesFlow,
-	$UI/PlayersPanel/VBox/Player2/PropertiesFlow,
-	$UI/PlayersPanel/VBox/Player3/PropertiesFlow,
+	$UI/PlayersPanel/VBox/Player0/AssetsRow/PropertiesFlow,
+	$UI/PlayersPanel/VBox/Player1/AssetsRow/PropertiesFlow,
+	$UI/PlayersPanel/VBox/Player2/AssetsRow/PropertiesFlow,
+	$UI/PlayersPanel/VBox/Player3/AssetsRow/PropertiesFlow,
+]
+@onready var player_spells_flows: Array[HFlowContainer] = [
+	$UI/PlayersPanel/VBox/Player0/AssetsRow/SpellsFlow,
+	$UI/PlayersPanel/VBox/Player1/AssetsRow/SpellsFlow,
+	$UI/PlayersPanel/VBox/Player2/AssetsRow/SpellsFlow,
+	$UI/PlayersPanel/VBox/Player3/AssetsRow/SpellsFlow,
+]
+@onready var player_attunement_flows: Array[HFlowContainer] = [
+	$UI/PlayersPanel/VBox/Player0/AssetsRow/AttunementFlow,
+	$UI/PlayersPanel/VBox/Player1/AssetsRow/AttunementFlow,
+	$UI/PlayersPanel/VBox/Player2/AssetsRow/AttunementFlow,
+	$UI/PlayersPanel/VBox/Player3/AssetsRow/AttunementFlow,
 ]
 @onready var player_rows: Array[VBoxContainer] = [
 	$UI/PlayersPanel/VBox/Player0,
@@ -98,6 +119,10 @@ var _quit_prompt_open: bool = false
 var _admin_picking_property: bool = false
 var _buying_house_or_unmortgaging: bool = false
 var _selling_house_or_mortgaging: bool = false
+# Set while the current player is casting a spell (choosing its level, then
+# any target it asks for), so a second spell card click can't start another
+# cast on top of it and stomp the shared player_picker popup.
+var _casting_spell: bool = false
 
 # Set while the current player owes more money than they have on hand and is
 # being given a chance to raise it (selling houses / mortgaging) before
@@ -186,6 +211,8 @@ func _spawn_players() -> void:
 		player.position = board.get_space_center(0) + MARKER_OFFSETS[i]
 		players.append(player)
 		player_header_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
+		if i == 0:
+			player.spell_hand.append_array(STARTING_SPELLS)
 
 		var type: GameState.PlayerType = GameState.player_types[i]
 		if type == GameState.PlayerType.DISABLED:
@@ -957,8 +984,9 @@ func _maybe_resolve_debt() -> void:
 # opponent instead of just liquidating. While deciding whether to buy a
 # just-landed-on property, the same restriction applies except Declare
 # Bankruptcy and Trade stay off -- there's nothing to forfeit or negotiate
-# over, they can simply decline the purchase. While trading, everything here
-# is off (the trade display's own buttons take over). Otherwise everything
+# over, they can simply decline the purchase. While trading or casting a
+# spell, everything here is off (the trade display's own buttons, or the
+# spell's own level/target prompts, take over). Otherwise everything
 # is usable -- including once the player has rolled: rolling doesn't end a
 # turn, so Roll turns into End Turn and stays enabled while Admin (a stand-in
 # for rolling) turns off until that's clicked.
@@ -968,14 +996,14 @@ func _refresh_action_buttons() -> void:
 	# human at the keyboard can't act (or trade) on its behalf while it's
 	# "thinking".
 	var ai_turn: bool = players[current_player].is_ai
-	roll_button.disabled = limited_to_selling or _trading or ai_turn
+	roll_button.disabled = limited_to_selling or _trading or _casting_spell or ai_turn
 	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
-	admin_button.disabled = limited_to_selling or _trading or _awaiting_end_turn or ai_turn
-	admin_properties_button.disabled = limited_to_selling or _trading or ai_turn
-	buy_house_unmortgage_button.disabled = limited_to_selling or _trading or ai_turn
-	sell_house_mortgage_button.disabled = _trading or ai_turn
-	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading or ai_turn
-	trade_button.disabled = _awaiting_buy_decision or _trading or ai_turn
+	admin_button.disabled = limited_to_selling or _trading or _casting_spell or _awaiting_end_turn or ai_turn
+	admin_properties_button.disabled = limited_to_selling or _trading or _casting_spell or ai_turn
+	buy_house_unmortgage_button.disabled = limited_to_selling or _trading or _casting_spell or ai_turn
+	sell_house_mortgage_button.disabled = _trading or _casting_spell or ai_turn
+	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or ai_turn
+	trade_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or ai_turn
 
 
 func _on_trade_pressed() -> void:
@@ -1458,6 +1486,14 @@ func _count_owned_in_group(player_id: int, color_name: String) -> int:
 	return count
 
 
+# Attunement to a color: how many properties of that color the player owns,
+# plus any Temporary Attunement from burning spells of that color this turn.
+func _color_attunement(player: Node2D, color_name: String) -> int:
+	if color_name == "":
+		return 0
+	return _count_owned_in_group(player.player_id, color_name) + player.temp_attunement.get(color_name, 0)
+
+
 func _on_space_clicked(index: int) -> void:
 	# Any tile click can dismiss the buy-confirmation popup as a side effect
 	# (Godot closes popups on any outside click, including whatever this
@@ -1548,6 +1584,115 @@ func _show_property_details(index: int) -> void:
 	info_prompt.open("\n".join(lines))
 
 
+# Shows the full card art for a spell, regardless of whose turn it is --
+# same as right-clicking a property mini card, this is just for looking, so
+# it isn't gated by any turn/state checks.
+func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
+	if hand_index < 0 or hand_index >= players[player_index].spell_hand.size():
+		return
+	var spell_name: String = players[player_index].spell_hand[hand_index]
+	var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
+	spell_card.show_card(load(spell_info.get("icon", "")))
+
+
+# Kicks off casting a spell from `player_index`'s hand: pick a level (or
+# Burn for Attunement instead), then hand off to that spell's own effect
+# handler (which may ask for a target of its own, e.g. an opponent). Only the
+# current player, and only one cast at a time, per _casting_spell. Casting at
+# level X requires Attunement to the spell's color >= X -- see
+# _color_attunement().
+func _on_spell_clicked(hand_index: int, player_index: int) -> void:
+	if player_index != current_player:
+		return
+	if _casting_spell or _trading or _in_debt or _awaiting_buy_decision or players[current_player].is_ai:
+		return
+	var caster: Node2D = players[current_player]
+	if hand_index < 0 or hand_index >= caster.spell_hand.size():
+		return
+	var spell_name: String = caster.spell_hand[hand_index]
+	var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
+	var levels: Dictionary = spell_info.get("levels", {})
+	if levels.is_empty():
+		return
+	var color_name: String = spell_info.get("color", "")
+
+	_casting_spell = true
+	_refresh_action_buttons()
+
+	var level_entries: Array = []
+	for level in levels.keys():
+		level_entries.append({"index": level, "name": "Level %d: %s" % [level, levels[level].get("description", "")], "color": Color.WHITE})
+	level_entries.sort_custom(func(a, b): return a["index"] < b["index"])
+	level_entries.append({"index": BURN_FOR_ATTUNEMENT_INDEX, "name": "Burn for Attunement (+1 %s Attunement)" % color_name.capitalize(), "color": Color.WHITE})
+
+	player_picker.open("Cast %s at what level?" % spell_name, level_entries)
+	var choice: int = await player_picker.player_chosen
+	if choice == BURN_FOR_ATTUNEMENT_INDEX:
+		_burn_spell_for_attunement(caster, hand_index, spell_name, color_name)
+	elif choice != -1:
+		var attunement: int = _color_attunement(caster, color_name)
+		if attunement < choice:
+			dice_label.text = "%s doesn't have enough %s Attunement to cast %s at Level %d (has %d, needs %d)." % [_player_display_name(caster.player_id), color_name.capitalize(), spell_name, choice, attunement, choice]
+		else:
+			await _cast_spell(caster, hand_index, spell_name, choice)
+
+	_casting_spell = false
+	_refresh_action_buttons()
+
+
+# Discards a spell without its effect in exchange for +1 Temporary
+# Attunement of its color, lasting until the start of this player's next
+# turn (see _advance_to_next_active_player()).
+func _burn_spell_for_attunement(caster: Node2D, hand_index: int, spell_name: String, color_name: String) -> void:
+	caster.spell_hand.remove_at(hand_index)
+	if color_name != "":
+		caster.temp_attunement[color_name] = caster.temp_attunement.get(color_name, 0) + 1
+	dice_label.text = "%s burned %s for +1 %s Attunement." % [_player_display_name(caster.player_id), spell_name, color_name.capitalize()]
+	_update_player_panels()
+
+
+# Dispatches to the effect handler for `spell_name`. Each handler is
+# responsible for picking any targets it needs and, only once the cast
+# actually goes through, removing the card from `caster`'s hand at
+# `hand_index` -- canceling a target picker leaves the card in hand.
+func _cast_spell(caster: Node2D, hand_index: int, spell_name: String, level: int) -> void:
+	match spell_name:
+		"T1 Burn Spell":
+			await _cast_t1_burn_spell(caster, hand_index, level)
+
+
+# T1 Burn Spell: the caster picks an opponent, who pays the level's dollar
+# amount straight to the caster. An opponent who can't afford the full
+# amount just pays what they have -- there's no bankruptcy-by-spell yet,
+# only the usual debt collection from landing on rent/tax.
+func _cast_t1_burn_spell(caster: Node2D, hand_index: int, level: int) -> void:
+	var entries: Array = []
+	for i in players.size():
+		if i != caster.player_id and not players[i].is_bankrupt:
+			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
+	if entries.is_empty():
+		dice_label.text += "\nThere's no opponent to burn."
+		return
+
+	player_picker.open("T1 Burn Spell: choose an opponent to pay you.", entries)
+	var target_index: int = await player_picker.player_chosen
+	if target_index == -1:
+		return
+
+	var amount: int = SpellData.SPELLS["T1 Burn Spell"]["levels"][level].get("amount", 0)
+	var opponent: Node2D = players[target_index]
+	var payment: int = mini(amount, opponent.money)
+	opponent.money -= payment
+	caster.money += payment
+	caster.spell_hand.remove_at(hand_index)
+
+	if payment < amount:
+		dice_label.text = "%s cast T1 Burn Spell (Level %d) on %s, who could only pay $%d of the $%d owed." % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], payment, amount]
+	else:
+		dice_label.text = "%s cast T1 Burn Spell (Level %d) on %s for $%d!" % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], amount]
+	_update_player_panels()
+
+
 func _send_to_jail(player: Node2D) -> void:
 	player.current_space = JAIL_SPACE_INDEX
 	player.position = board.get_space_center(JAIL_SPACE_INDEX) + MARKER_OFFSETS[player.player_id]
@@ -1562,6 +1707,9 @@ func _advance_to_next_active_player() -> void:
 	for i in players.size():
 		current_player = (current_player + 1) % players.size()
 		if not players[current_player].is_bankrupt:
+			# Temporary Attunement (from burning spells) only lasts until the
+			# start of the turn it was gained on.
+			players[current_player].temp_attunement.clear()
 			return
 
 
@@ -1600,6 +1748,30 @@ func _update_player_panels() -> void:
 			mini_card.setup(space_index, info.get("name", ""), color, board.spaces[space_index].house_count, board.spaces[space_index].is_mortgaged)
 			mini_card.card_clicked.connect(_on_space_clicked)
 			mini_card.card_right_clicked.connect(_show_property_details)
+
+		var spell_flow: HFlowContainer = player_spells_flows[i]
+		for child in spell_flow.get_children():
+			child.queue_free()
+		for hand_index in players[i].spell_hand.size():
+			var spell_name: String = players[i].spell_hand[hand_index]
+			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
+			var mini_spell: Control = MINI_SPELL_CARD_SCENE.instantiate()
+			spell_flow.add_child(mini_spell)
+			mini_spell.setup(hand_index, load(spell_info.get("icon", "")))
+			mini_spell.card_clicked.connect(_on_spell_clicked.bind(i))
+			mini_spell.card_right_clicked.connect(_on_spell_right_clicked.bind(i))
+
+		var attunement_flow: HFlowContainer = player_attunement_flows[i]
+		for child in attunement_flow.get_children():
+			child.queue_free()
+		for color_name in players[i].temp_attunement:
+			var count: int = players[i].temp_attunement[color_name]
+			if count <= 0:
+				continue
+			var chip := Label.new()
+			chip.text = "%s +%d" % [color_name.capitalize(), count]
+			chip.add_theme_color_override("font_color", board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE))
+			attunement_flow.add_child(chip)
 
 	if _trading:
 		_populate_trade_flow(trader1_flow, _trade1_offered)
