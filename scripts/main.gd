@@ -4,12 +4,21 @@ const PLAYER_SCENE: PackedScene = preload("res://scenes/player.tscn")
 const MINI_CARD_SCENE: PackedScene = preload("res://scenes/mini_property_card.tscn")
 const MINI_SPELL_CARD_SCENE: PackedScene = preload("res://scenes/mini_spell_card.tscn")
 
-# P1's starting hand -- the only way to gain spells for now.
-const STARTING_SPELLS: Array[String] = ["T1 Burn Spell", "T1 Burn Spell", "T1 Burn Spell", "T1 Burn Spell"]
+# Starting hands by player index -- the only way to gain spells for now.
+# P2's single T1 Burn Spell is there for _ai_p2_opening_burn() to use.
+const STARTING_SPELLS_BY_PLAYER: Dictionary = {
+	0: ["T1 Burn Spell", "T1 Burn Spell", "T3 Escape Spell", "T3 Escape Spell", "T2 Response Spell", "T2 Response Spell"],
+	1: ["T1 Burn Spell"],
+}
 
 # Sentinel "level" for the level-picker's extra "Burn for Attunement" entry --
 # safe from colliding with a real spell level, which are always >= 1.
 const BURN_FOR_ATTUNEMENT_INDEX: int = 0
+
+# How long a response window (see _ensure_response_window()) lasts before
+# automatically continuing, if nobody pauses it (or extends it by casting
+# another spell in response).
+const RESPONSE_WINDOW_SECONDS: float = 2.0
 
 const PLAYER_COLORS: Array[Color] = [
 	Color(0.85, 0.2, 0.2),
@@ -124,6 +133,48 @@ var _selling_house_or_mortgaging: bool = false
 # cast on top of it and stomp the shared player_picker popup.
 var _casting_spell: bool = false
 
+# Set for the whole extent of a response window (see
+# _ensure_response_window()), opened either by a roll (giving a chance to
+# react before it's used for movement) or by a spell being cast (giving a
+# chance to respond to *that spell*, e.g. counter it, before it resolves) --
+# both kinds share this same window/pause machinery and the same
+# RESPONSE_WINDOW_SECONDS deadline, which a new spell cast during the window
+# pushes back out (see _window_deadline_msec). _response_window_open by
+# itself just means the window's still running (open, ticking down, or
+# paused by someone) and keeps the normal action buttons locked throughout
+# either way; it takes at least one player actually pausing it (see
+# _response_window_paused_by) to unlock casting, and only for them.
+var _response_window_open: bool = false
+# Indexed by player_id (Space Bar and "1" both pause index 0 -- P1's
+# perspective -- "2" pauses index 1, and so on). Pausing is per-player on
+# purpose: with multiple humans at the table, only the player who actually
+# paused (from *their* perspective) may cast during that pause -- see
+# _level_timing_allowed(). The window itself stays frozen as long as *any*
+# entry is true, but each player's own casting eligibility only looks at
+# their own entry.
+var _response_window_paused_by: Array[bool] = [false, false, false, false]
+var _window_deadline_msec: int = 0
+# True for the whole time a roll is "in flight" -- from right after it's
+# shown until movement actually happens -- so Instant spells timed to a roll
+# (e.g. T3 Escape Spell) know a roll is actually what's being responded to,
+# as opposed to a response window that only exists because of a spell cast
+# on someone's ordinary turn.
+var _roll_in_flight: bool = false
+# The roll value being built up while a roll is in flight -- read/returned
+# by _perform_roll() via _roll_in_flight's window, and mutated in place by
+# an Instant spell like T3 Escape Spell while paused.
+var _current_roll: int = 0
+
+# The pending spell stack: each entry is {"id": int, "caster_id": int,
+# "display_name": String, "resolve": Callable}. A spell is pushed here the
+# moment it's cast (having already left the caster's hand and picked
+# whatever targets it needs) and popped LIFO -- last cast, first resolved --
+# once the response window that followed it finally closes. Countering a
+# spell (T2 Response Spell, Level 1) just removes its entry before it's ever
+# popped. See _finish_cast() and _resolve_spell_stack().
+var _spell_stack: Array[Dictionary] = []
+var _next_stack_id: int = 0
+
 # Set while the current player owes more money than they have on hand and is
 # being given a chance to raise it (selling houses / mortgaging) before
 # bankruptcy. See _collect_debt().
@@ -191,6 +242,20 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel") and not _quit_prompt_open:
 		_confirm_quit()
+		return
+	if event is InputEventKey and event.pressed and not event.echo:
+		# Space Bar always pauses from P1's perspective, same as "1" --
+		# with multiple local humans, "2"/"3"/"4" pause from that player's
+		# own perspective instead. See _response_window_paused_by.
+		match event.keycode:
+			KEY_SPACE, KEY_1:
+				_toggle_pause_for_player(0)
+			KEY_2:
+				_toggle_pause_for_player(1)
+			KEY_3:
+				_toggle_pause_for_player(2)
+			KEY_4:
+				_toggle_pause_for_player(3)
 
 
 func _confirm_quit() -> void:
@@ -211,8 +276,15 @@ func _spawn_players() -> void:
 		player.position = board.get_space_center(0) + MARKER_OFFSETS[i]
 		players.append(player)
 		player_header_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
-		if i == 0:
-			player.spell_hand.append_array(STARTING_SPELLS)
+		if STARTING_SPELLS_BY_PLAYER.has(i):
+			player.spell_hand.append_array(STARTING_SPELLS_BY_PLAYER[i])
+		if i == 1:
+			# P2 starts owning Illinois Avenue, giving it enough Red
+			# Attunement to open with _ai_p2_opening_burn()'s Level 1 cast.
+			var illinois_index: int = 24
+			board.spaces[illinois_index].owner_id = 1
+			player.owned_property_indices.append(illinois_index)
+			_sort_owned_properties(player)
 
 		var type: GameState.PlayerType = GameState.player_types[i]
 		if type == GameState.PlayerType.DISABLED:
@@ -272,6 +344,7 @@ func _advance_turn() -> void:
 # way to raise money. Deliberately simple; smarter play comes later.
 func _run_ai_turn() -> void:
 	var ai_index: int = current_player
+	await _ai_p2_opening_burn(players[ai_index])
 	while current_player == ai_index and not players[ai_index].is_bankrupt:
 		_refresh_action_buttons()
 		await get_tree().create_timer(0.6).timeout
@@ -287,6 +360,24 @@ func _run_ai_turn() -> void:
 				return
 			_end_turn()
 			return
+
+
+# Scripted one-off for testing responses, per design: P2 opens each of its
+# turns by casting its starting T1 Burn Spell at Level 1 on P1, if it's
+# still holding it, before playing the rest of the turn normally. Bypasses
+# _prepare_t1_burn_spell()'s own opponent-picker (an AI shouldn't be driving
+# player-facing UI) and targets P1 directly, but still goes through
+# _finish_cast() like any other cast, so a human still gets the usual
+# response window to react (e.g. counter it) before it resolves.
+func _ai_p2_opening_burn(player: Node2D) -> void:
+	if player.player_id != 1:
+		return
+	var hand_index: int = player.spell_hand.find("T1 Burn Spell")
+	if hand_index == -1:
+		return
+	var amount: int = SpellData.SPELLS["T1 Burn Spell"]["levels"][1].get("amount", 0)
+	var resolve: Callable = _resolve_t1_burn_spell.bind(player, 1, 0, amount)
+	await _finish_cast(player, hand_index, "T1 Burn Spell", 1, resolve)
 
 
 # Runs once, right before a Computer player ends its turn: unmortgage what
@@ -758,6 +849,66 @@ func _ai_house_check(player: Node2D) -> void:
 		_buy_house(option)
 
 
+# The two Instant Timings implemented so far both open this same shared
+# window: right after a roll is shown (see _perform_roll(), _roll_in_flight)
+# and right after any spell is cast (see _finish_cast(), which pushes onto
+# _spell_stack before calling this). Every player gets a
+# RESPONSE_WINDOW_SECONDS window to hit Space and pause the game -- while
+# paused, any player may cast an Instant spell (see _on_spell_clicked()).
+# Pausing just freezes the countdown rather than resetting it, so unpausing
+# resumes whatever was left rather than cutting it short (fair to everyone
+# else at the table who might still want their own turn to react).
+#
+# Only the call that actually *opens* the window (finds it not already
+# open) waits here and resolves the stack once it closes -- a call that
+# arrives while it's already open (e.g. a second spell cast in response to
+# the first) just pushes _window_deadline_msec back out, extending the
+# window the first call is waiting on, and returns immediately.
+func _ensure_response_window() -> void:
+	_window_deadline_msec = Time.get_ticks_msec() + int(RESPONSE_WINDOW_SECONDS * 1000.0)
+	if _response_window_open:
+		return
+	_response_window_open = true
+	_response_window_paused_by = [false, false, false, false]
+	_refresh_action_buttons()
+	dice_label.text += "\n(Press Space/1/2/3/4 within %ds to pause from that player's perspective and react with an Instant spell.)" % int(RESPONSE_WINDOW_SECONDS)
+
+	while _response_window_paused_by.has(true) or Time.get_ticks_msec() < _window_deadline_msec:
+		await get_tree().process_frame
+
+	_response_window_open = false
+	_refresh_action_buttons()
+	await _resolve_spell_stack()
+
+
+# Pops and resolves _spell_stack LIFO -- last spell cast, first to resolve --
+# once its response window has fully closed. Countering a spell (T2 Response
+# Spell, Level 1) removes its entry before it's ever popped here, so it's
+# simply skipped, per "countering negates the effect and discards it".
+func _resolve_spell_stack() -> void:
+	while not _spell_stack.is_empty():
+		var entry: Dictionary = _spell_stack.pop_back()
+		var resolve: Callable = entry["resolve"]
+		if resolve.is_valid():
+			await resolve.call()
+	_update_player_panels()
+
+
+# Handler for the response window above, per player_index (0 = P1, paused by
+# either Space or "1"; 1-3 = P2-P4, paused by "2"-"4" -- see
+# _unhandled_input()). Ignored while a spell's own cast prompts are up
+# (_casting_spell) so resuming mid-cast can't yank the popup out from under
+# whoever's answering it.
+func _toggle_pause_for_player(player_index: int) -> void:
+	if not _response_window_open or _casting_spell:
+		return
+	_response_window_paused_by[player_index] = not _response_window_paused_by[player_index]
+	if _response_window_paused_by[player_index]:
+		dice_label.text += "\nPaused from %s's perspective -- press %d to resume." % [PLAYER_NAMES[player_index], player_index + 1]
+	_refresh_action_buttons()
+	_update_player_panels()
+
+
 func _perform_roll(die1: int, die2: int) -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
@@ -771,6 +922,12 @@ func _perform_roll(die1: int, die2: int) -> void:
 	var is_double: bool = die1 == die2
 	var player: Node2D = players[current_player]
 	dice_label.text = "%s rolled: %d + %d = %d" % [_player_display_name(current_player), die1, die2, roll]
+
+	_current_roll = roll
+	_roll_in_flight = true
+	await _ensure_response_window()
+	_roll_in_flight = false
+	roll = _current_roll
 
 	var grants_extra_turn: bool = is_double
 
@@ -984,26 +1141,27 @@ func _maybe_resolve_debt() -> void:
 # opponent instead of just liquidating. While deciding whether to buy a
 # just-landed-on property, the same restriction applies except Declare
 # Bankruptcy and Trade stay off -- there's nothing to forfeit or negotiate
-# over, they can simply decline the purchase. While trading or casting a
-# spell, everything here is off (the trade display's own buttons, or the
-# spell's own level/target prompts, take over). Otherwise everything
-# is usable -- including once the player has rolled: rolling doesn't end a
-# turn, so Roll turns into End Turn and stays enabled while Admin (a stand-in
-# for rolling) turns off until that's clicked.
+# over, they can simply decline the purchase. While trading, casting a
+# spell, or inside the post-roll response window, everything here is off
+# (the trade display's own buttons, the spell's own level/target prompts, or
+# the response window itself, take over). Otherwise everything is usable --
+# including once the player has rolled: rolling doesn't end a turn, so Roll
+# turns into End Turn and stays enabled while Admin (a stand-in for rolling)
+# turns off until that's clicked.
 func _refresh_action_buttons() -> void:
 	var limited_to_selling: bool = _in_debt or _awaiting_buy_decision
 	# A Computer player's turn plays itself -- lock every button so the
 	# human at the keyboard can't act (or trade) on its behalf while it's
 	# "thinking".
 	var ai_turn: bool = players[current_player].is_ai
-	roll_button.disabled = limited_to_selling or _trading or _casting_spell or ai_turn
+	roll_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
 	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
-	admin_button.disabled = limited_to_selling or _trading or _casting_spell or _awaiting_end_turn or ai_turn
-	admin_properties_button.disabled = limited_to_selling or _trading or _casting_spell or ai_turn
-	buy_house_unmortgage_button.disabled = limited_to_selling or _trading or _casting_spell or ai_turn
-	sell_house_mortgage_button.disabled = _trading or _casting_spell or ai_turn
-	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or ai_turn
-	trade_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or ai_turn
+	admin_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or _awaiting_end_turn or ai_turn
+	admin_properties_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
+	buy_house_unmortgage_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
+	sell_house_mortgage_button.disabled = _trading or _casting_spell or _response_window_open or ai_turn
+	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or _response_window_open or ai_turn
+	trade_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or _response_window_open or ai_turn
 
 
 func _on_trade_pressed() -> void:
@@ -1595,18 +1753,20 @@ func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
 	spell_card.show_card(load(spell_info.get("icon", "")))
 
 
-# Kicks off casting a spell from `player_index`'s hand: pick a level (or
-# Burn for Attunement instead), then hand off to that spell's own effect
-# handler (which may ask for a target of its own, e.g. an opponent). Only the
-# current player, and only one cast at a time, per _casting_spell. Casting at
-# level X requires Attunement to the spell's color >= X -- see
-# _color_attunement().
+# Kicks off interacting with a spell from `player_index`'s hand: pick a
+# level, or Burn for Attunement instead. Only one such interaction at a
+# time, per _casting_spell, and only the card's owner (obviously) -- neither
+# of those depend on timing. Burning is always legal (it's Instant Speed for
+# every spell, not just ones marked Instant -- see _burn_spell_for_attunement()),
+# but actually casting a level checks _level_timing_allowed() (most spells
+# are turn-only; some levels are only usable responding to a roll or another
+# spell) and then Attunement (_color_attunement() must be >= the level).
 func _on_spell_clicked(hand_index: int, player_index: int) -> void:
-	if player_index != current_player:
+	if _casting_spell:
 		return
-	if _casting_spell or _trading or _in_debt or _awaiting_buy_decision or players[current_player].is_ai:
+	var caster: Node2D = players[player_index]
+	if caster.is_bankrupt or caster.is_ai:
 		return
-	var caster: Node2D = players[current_player]
 	if hand_index < 0 or hand_index >= caster.spell_hand.size():
 		return
 	var spell_name: String = caster.spell_hand[hand_index]
@@ -1627,22 +1787,38 @@ func _on_spell_clicked(hand_index: int, player_index: int) -> void:
 
 	player_picker.open("Cast %s at what level?" % spell_name, level_entries)
 	var choice: int = await player_picker.player_chosen
+
+	# Only actually push a cast onto the stack -- and open/extend the
+	# response window for it -- once _casting_spell is released below, so
+	# other players' clicks (e.g. a response to this very cast) aren't
+	# locked out for the window's whole 2+ seconds.
+	var post_cast: Callable = Callable()
 	if choice == BURN_FOR_ATTUNEMENT_INDEX:
 		_burn_spell_for_attunement(caster, hand_index, spell_name, color_name)
 	elif choice != -1:
-		var attunement: int = _color_attunement(caster, color_name)
-		if attunement < choice:
-			dice_label.text = "%s doesn't have enough %s Attunement to cast %s at Level %d (has %d, needs %d)." % [_player_display_name(caster.player_id), color_name.capitalize(), spell_name, choice, attunement, choice]
+		if not _level_timing_allowed(caster, spell_name, choice):
+			dice_label.text = "%s can't cast %s at Level %d right now -- wrong timing." % [_player_display_name(caster.player_id), spell_name, choice]
 		else:
-			await _cast_spell(caster, hand_index, spell_name, choice)
+			var attunement: int = _color_attunement(caster, color_name)
+			if attunement < choice:
+				dice_label.text = "%s doesn't have enough %s Attunement to cast %s at Level %d (has %d, needs %d)." % [_player_display_name(caster.player_id), color_name.capitalize(), spell_name, choice, attunement, choice]
+			else:
+				var resolve: Callable = await _prepare_spell_cast(caster, spell_name, choice)
+				if resolve.is_valid():
+					post_cast = _finish_cast.bind(caster, hand_index, spell_name, choice, resolve)
 
 	_casting_spell = false
 	_refresh_action_buttons()
 
+	if post_cast.is_valid():
+		await post_cast.call()
+
 
 # Discards a spell without its effect in exchange for +1 Temporary
 # Attunement of its color, lasting until the start of this player's next
-# turn (see _advance_to_next_active_player()).
+# turn (see _advance_to_next_active_player()). Always legal regardless of
+# timing or whether the spell itself is Instant -- burning for Attunement is
+# Instant Speed for every spell.
 func _burn_spell_for_attunement(caster: Node2D, hand_index: int, spell_name: String, color_name: String) -> void:
 	caster.spell_hand.remove_at(hand_index)
 	if color_name != "":
@@ -1651,45 +1827,169 @@ func _burn_spell_for_attunement(caster: Node2D, hand_index: int, spell_name: Str
 	_update_player_panels()
 
 
-# Dispatches to the effect handler for `spell_name`. Each handler is
-# responsible for picking any targets it needs and, only once the cast
-# actually goes through, removing the card from `caster`'s hand at
-# `hand_index` -- canceling a target picker leaves the card in hand.
-func _cast_spell(caster: Node2D, hand_index: int, spell_name: String, level: int) -> void:
+# Whether `level` of `spell_name` can actually be *cast* (not burned -- that
+# has no timing restriction) right now, per its "timings" list:
+# - "turn": only the current player, only on their own ordinary turn (no
+#   response window open, and not mid-trade/debt/buy-decision) -- this is
+#   the only timing most spells have.
+# - "roll_response": only while a roll is in flight and *this caster*
+#   (specifically) has paused the window from their own perspective -- see
+#   _roll_in_flight, _response_window_paused_by. With several humans at the
+#   table, one pausing doesn't open casting to everyone; each player only
+#   ever unlocks their own casting by pausing themselves.
+# - "spell_response": same, but there just needs to be a spell on the stack
+#   to respond to, instead of a roll in flight.
+# "exclude_current_player" (used by T2 Response Spell's roll-decreasing
+# Level 2 -- it only makes sense against an *opponent's* roll) additionally
+# requires the caster not be whoever the timing is centered on.
+# "requires_current_player" is the opposite (used by T3 Escape Spell -- it
+# only makes sense on your *own* roll, not an opponent's) and additionally
+# requires the caster BE whoever the timing is centered on.
+func _level_timing_allowed(caster: Node2D, spell_name: String, level: int) -> bool:
+	var level_info: Dictionary = SpellData.SPELLS[spell_name]["levels"][level]
+	var timings: Array = level_info.get("timings", ["turn"])
+	var is_caster_current: bool = caster.player_id == current_player
+	var excludes_caster: bool = level_info.get("exclude_current_player", false) and is_caster_current
+	var requires_caster: bool = level_info.get("requires_current_player", false) and not is_caster_current
+	var caster_has_paused: bool = _response_window_paused_by[caster.player_id]
+
+	if timings.has("turn") and not _response_window_open:
+		if is_caster_current and not _trading and not _in_debt and not _awaiting_buy_decision:
+			return true
+	if timings.has("spell_response") and caster_has_paused and not _spell_stack.is_empty() and not excludes_caster and not requires_caster:
+		return true
+	if timings.has("roll_response") and caster_has_paused and _roll_in_flight and not excludes_caster and not requires_caster:
+		return true
+	return false
+
+
+# Gathers whatever targets `spell_name` at `level` needs (which may fail or
+# be cancelled, e.g. an empty opponent-picker or a target picker the caster
+# backs out of) and returns a zero-arg Callable that applies the effect --
+# or an invalid Callable if nothing was actually cast, in which case the
+# caller must leave the card in the caster's hand untouched.
+func _prepare_spell_cast(caster: Node2D, spell_name: String, level: int) -> Callable:
 	match spell_name:
 		"T1 Burn Spell":
-			await _cast_t1_burn_spell(caster, hand_index, level)
+			return await _prepare_t1_burn_spell(caster, level)
+		"T3 Escape Spell":
+			return _prepare_t3_escape_spell(caster, level)
+		"T2 Response Spell":
+			if level == 1:
+				return await _prepare_t2_counter(caster)
+			elif level == 2:
+				return _prepare_t2_decrease_roll(caster)
+	return Callable()
 
 
-# T1 Burn Spell: the caster picks an opponent, who pays the level's dollar
-# amount straight to the caster. An opponent who can't afford the full
-# amount just pays what they have -- there's no bankruptcy-by-spell yet,
-# only the usual debt collection from landing on rent/tax.
-func _cast_t1_burn_spell(caster: Node2D, hand_index: int, level: int) -> void:
+# Removes the card from `caster`'s hand, pushes `resolve` onto the stack,
+# and opens (or, if one's already running, just extends) the response
+# window for it -- see _ensure_response_window().
+func _finish_cast(caster: Node2D, hand_index: int, spell_name: String, level: int, resolve: Callable) -> void:
+	caster.spell_hand.remove_at(hand_index)
+	var stack_id: int = _next_stack_id
+	_next_stack_id += 1
+	var display_name: String = "%s (Level %d)" % [spell_name, level]
+	_spell_stack.append({"id": stack_id, "caster_id": caster.player_id, "display_name": display_name, "resolve": resolve})
+	dice_label.text += "\n%s casts %s!" % [_player_display_name(caster.player_id), display_name]
+	_update_player_panels()
+	await _ensure_response_window()
+
+
+# T1 Burn Spell: the caster picks an opponent to target now; the payment
+# itself (checked against the opponent's money at the time) happens at
+# resolution, in case things change while it's pending on the stack.
+func _prepare_t1_burn_spell(caster: Node2D, level: int) -> Callable:
 	var entries: Array = []
 	for i in players.size():
 		if i != caster.player_id and not players[i].is_bankrupt:
 			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
 	if entries.is_empty():
 		dice_label.text += "\nThere's no opponent to burn."
-		return
+		return Callable()
 
 	player_picker.open("T1 Burn Spell: choose an opponent to pay you.", entries)
 	var target_index: int = await player_picker.player_chosen
 	if target_index == -1:
-		return
+		return Callable()
 
 	var amount: int = SpellData.SPELLS["T1 Burn Spell"]["levels"][level].get("amount", 0)
+	return _resolve_t1_burn_spell.bind(caster, level, target_index, amount)
+
+
+# An opponent who can't afford the full amount just pays what they have --
+# there's no bankruptcy-by-spell yet, only the usual debt collection from
+# landing on rent/tax. If the target's since gone bankrupt entirely (e.g.
+# forfeited while this was pending), the spell just fizzles.
+func _resolve_t1_burn_spell(caster: Node2D, level: int, target_index: int, amount: int) -> void:
 	var opponent: Node2D = players[target_index]
+	if opponent.is_bankrupt:
+		dice_label.text = "%s's T1 Burn Spell (Level %d) fizzles -- %s is already out of the game." % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index]]
+		return
 	var payment: int = mini(amount, opponent.money)
 	opponent.money -= payment
 	caster.money += payment
-	caster.spell_hand.remove_at(hand_index)
-
 	if payment < amount:
-		dice_label.text = "%s cast T1 Burn Spell (Level %d) on %s, who could only pay $%d of the $%d owed." % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], payment, amount]
+		dice_label.text = "%s's T1 Burn Spell (Level %d) resolves on %s, who could only pay $%d of the $%d owed." % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], payment, amount]
 	else:
-		dice_label.text = "%s cast T1 Burn Spell (Level %d) on %s for $%d!" % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], amount]
+		dice_label.text = "%s's T1 Burn Spell (Level %d) resolves on %s for $%d!" % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], amount]
+	_update_player_panels()
+
+
+# T3 Escape Spell (Instant): no target to pick, so preparing it just needs
+# the level's bonus.
+func _prepare_t3_escape_spell(caster: Node2D, level: int) -> Callable:
+	var bonus: int = SpellData.SPELLS["T3 Escape Spell"]["levels"][level].get("roll_bonus", 0)
+	return _resolve_t3_escape_spell.bind(caster, level, bonus)
+
+
+# Bumps _current_roll, which whichever _ensure_response_window() call is
+# covering the in-flight roll is holding onto, regardless of who casts this.
+func _resolve_t3_escape_spell(caster: Node2D, level: int, bonus: int) -> void:
+	_current_roll += bonus
+	dice_label.text = "%s's T3 Escape Spell (Level %d) resolves! Roll increased by %d (now %d)." % [_player_display_name(caster.player_id), level, bonus, _current_roll]
+	_update_player_panels()
+
+
+# T2 Response Spell, Level 1 (Instant, spell_response only): the caster
+# picks which pending spell on the stack to counter.
+func _prepare_t2_counter(caster: Node2D) -> Callable:
+	var entries: Array = []
+	for entry in _spell_stack:
+		entries.append({"index": entry["id"], "name": "%s's %s" % [_player_display_name(entry["caster_id"]), entry["display_name"]], "color": PLAYER_COLORS[entry["caster_id"]]})
+	entries.reverse()  # show the most recently cast (top of stack) first
+
+	player_picker.open("T2 Response Spell: choose a spell to counter.", entries)
+	var target_id: int = await player_picker.player_chosen
+	if target_id == -1:
+		return Callable()
+	return _resolve_t2_counter.bind(caster, target_id)
+
+
+# Removes the targeted entry from the stack before it's ever popped --
+# per "countering negates the effect and discards it". If it's already gone
+# (resolved or countered by someone else in the meantime), this just
+# fizzles.
+func _resolve_t2_counter(caster: Node2D, target_id: int) -> void:
+	for i in _spell_stack.size():
+		if _spell_stack[i]["id"] == target_id:
+			var countered: Dictionary = _spell_stack[i]
+			_spell_stack.remove_at(i)
+			dice_label.text = "%s's T2 Response Spell (Level 1) counters %s's %s!" % [_player_display_name(caster.player_id), _player_display_name(countered["caster_id"]), countered["display_name"]]
+			return
+	dice_label.text = "%s's T2 Response Spell (Level 1) had nothing left to counter." % _player_display_name(caster.player_id)
+
+
+# T2 Response Spell, Level 2 (Instant, roll_response only, opponent's roll
+# only): no target to pick -- there's only ever one roll in flight, and
+# exclude_current_player already keeps the caster from targeting their own.
+func _prepare_t2_decrease_roll(caster: Node2D) -> Callable:
+	return _resolve_t2_decrease_roll.bind(caster)
+
+
+func _resolve_t2_decrease_roll(caster: Node2D) -> void:
+	_current_roll = maxi(0, _current_roll - 1)
+	dice_label.text = "%s's T2 Response Spell (Level 2) resolves! %s's roll decreased by 1 (now %d)." % [_player_display_name(caster.player_id), _player_display_name(current_player), _current_roll]
 	_update_player_panels()
 
 
@@ -1730,7 +2030,8 @@ func _player_display_name(index: int) -> String:
 func _update_player_panels() -> void:
 	free_parking_label.text = "Free Parking: $%d" % free_parking_amount
 	for i in players.size():
-		player_header_labels[i].text = "%s -- $%d" % [_player_display_name(i), players[i].money]
+		var pause_marker: String = " (Paused)" if _response_window_paused_by[i] else ""
+		player_header_labels[i].text = "%s%s -- $%d" % [_player_display_name(i), pause_marker, players[i].money]
 
 		var flow: HFlowContainer = player_properties_flows[i]
 		for child in flow.get_children():
