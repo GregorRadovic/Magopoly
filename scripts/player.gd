@@ -19,6 +19,38 @@ var spell_hand: Array[String] = []
 # at the start of this player's next turn.
 var temp_attunement: Dictionary = {}
 
+# "This turn" spell buffs -- all wiped at the end of whichever turn they
+# were set on (see _advance_to_next_active_player() in main.gd), regardless
+# of whose turn that is.
+#
+# Counterfeit Currency: cuts the next payment this player owes an opponent
+# by this much (floored at $0), then resets to 0 -- covers one payment only.
+var payment_reduction_buffer: int = 0
+# Hasty Exit, Level 1: added to this player's own next roll this turn, then
+# reset to 0 once that roll happens.
+var next_roll_bonus: int = 0
+# Price Gouging: extra house-equivalents (capped at 5 total) any opponent's
+# rent is calculated with when they land on one of this player's properties
+# this turn.
+var price_gouging_bonus_houses: int = 0
+# Unstable Portal: multiplies this player's own next roll this turn, then
+# resets to 1 (no-op) once that roll happens.
+var next_roll_multiplier: int = 1
+# Haggling: percent discount (50 or 100) on this player's next property or
+# house purchase this turn; 0 = no discount active. Consumed (reset to 0,
+# along with haggling_refund_on_use) the moment it's used.
+var haggling_discount_percent: int = 0
+# Haggling, Level 3: also refund the (already-discounted) amount actually
+# spent on that purchase, netting it to free.
+var haggling_refund_on_use: bool = false
+# Spell name -> number of copies to pull back out of the shared deck and
+# into this player's hand at the end of the turn they were cast on (Sanity
+# Grinding, Step Forward). See _queue_spell_return_to_hand() in main.gd.
+var pending_return_spells: Dictionary = {}
+# The Cult of Terminus, Level 1: the next railroad this player buys this
+# turn (via the normal landing-purchase flow only) costs $0.
+var free_railroad_purchase: bool = false
+
 
 func setup(id: int, color: Color) -> void:
 	player_id = id
