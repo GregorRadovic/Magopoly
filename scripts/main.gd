@@ -354,7 +354,15 @@ func _ready() -> void:
 	_update_turn_label()
 	_update_player_panels()
 	_refresh_action_buttons()
-	if players[current_player].is_ai:
+	if GameState.online:
+		if GameState.is_authority():
+			multiplayer.peer_disconnected.connect(_on_peer_gone)
+		else:
+			multiplayer.server_disconnected.connect(_on_host_gone)
+	if GameState.online and not GameState.is_authority():
+		_net_request_initial_snapshot()
+		return
+	if GameState.is_authority() and players[current_player].is_ai:
 		_run_ai_turn()
 
 
@@ -362,19 +370,40 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel") and not _quit_prompt_open:
 		_confirm_quit()
 		return
-	if event is InputEventKey and event.pressed and not event.echo:
-		# Space Bar always pauses from P1's perspective, same as "1" --
-		# with multiple local humans, "2"/"3"/"4" pause from that player's
-		# own perspective instead. See _response_window_paused_by.
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return
+	var pause_keys: Array = [KEY_SPACE, KEY_1, KEY_2, KEY_3, KEY_4]
+	if not pause_keys.has(event.keycode):
+		return
+
+	if GameState.online:
+		# A client controls one seat, so any pause key pauses that seat; the
+		# press is sent to the host. The host's own keys pause only the
+		# seat(s) it controls -- another player's seat is paused by that
+		# player's own client.
+		if not GameState.is_authority():
+			var mine: Array[int] = GameState.local_slots()
+			if not mine.is_empty():
+				_net_pause_intent.rpc_id(1, mine[0])
+			return
 		match event.keycode:
-			KEY_SPACE, KEY_1:
-				_toggle_pause_for_player(0)
-			KEY_2:
-				_toggle_pause_for_player(1)
-			KEY_3:
-				_toggle_pause_for_player(2)
-			KEY_4:
-				_toggle_pause_for_player(3)
+			KEY_SPACE, KEY_1: _try_local_pause(0)
+			KEY_2: _try_local_pause(1)
+			KEY_3: _try_local_pause(2)
+			KEY_4: _try_local_pause(3)
+		return
+
+	# Local hotseat: Space/1 = P1's perspective, 2/3/4 = that player's.
+	match event.keycode:
+		KEY_SPACE, KEY_1: _toggle_pause_for_player(0)
+		KEY_2: _toggle_pause_for_player(1)
+		KEY_3: _toggle_pause_for_player(2)
+		KEY_4: _toggle_pause_for_player(3)
+
+
+func _try_local_pause(slot: int) -> void:
+	if GameState.is_slot_local(slot):
+		_toggle_pause_for_player(slot)
 
 
 func _confirm_quit() -> void:
@@ -456,12 +485,247 @@ func _first_active_player() -> int:
 
 
 func _on_roll_pressed() -> void:
+	# Online: only the machine controlling the current player may act, and a
+	# client sends the press to the host rather than running it locally.
+	if GameState.online:
+		if not GameState.is_slot_local(current_player):
+			return
+		if not GameState.is_authority():
+			_net_roll_intent.rpc_id(1)
+			return
+	_perform_roll_button_action()
+
+
+# The actual effect of the Roll / End Turn button, run only on the authority
+# (locally on the host, or via _net_roll_intent for a remote player).
+func _perform_roll_button_action() -> void:
 	if _awaiting_end_turn:
 		_end_turn()
 		return
-	var die1: int = randi_range(1, 6)
-	var die2: int = randi_range(1, 6)
-	_perform_roll(die1, die2)
+	_perform_roll(randi_range(1, 6), randi_range(1, 6))
+
+
+# Whether the current player could press Roll / End Turn right now. Shared by
+# button enablement and the host's validation of a remote roll intent.
+func _can_take_roll_action() -> bool:
+	if _in_debt or _awaiting_buy_decision or _trading or _casting_spell or _response_window_open:
+		return false
+	var p: Node2D = players[current_player]
+	return not p.is_ai and not p.is_bankrupt
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_roll_intent() -> void:
+	if not GameState.is_authority():
+		return
+	if GameState.slot_peer[current_player] != multiplayer.get_remote_sender_id():
+		return
+	if not _can_take_roll_action():
+		return
+	_perform_roll_button_action()
+
+
+# A remote player clicked one of their own spell cards (own turn, or during a
+# response window they've paused). Validated and run as that seat.
+@rpc("any_peer", "call_remote", "reliable")
+func _net_spell_click_intent(hand_index: int, slot: int) -> void:
+	if not GameState.is_authority():
+		return
+	if _peer_for_slot(slot) != multiplayer.get_remote_sender_id():
+		return
+	_begin_spell_cast(hand_index, slot)
+
+
+# A remote player pressed a pause key during a response window.
+@rpc("any_peer", "call_remote", "reliable")
+func _net_pause_intent(slot: int) -> void:
+	if not GameState.is_authority():
+		return
+	if _peer_for_slot(slot) != multiplayer.get_remote_sender_id():
+		return
+	_toggle_pause_for_player(slot)
+
+
+# A remote player pressed one of their own-turn action buttons (buy/sell
+# houses, mortgage, declare bankruptcy). Validated against the acting seat
+# and run as if the button were pressed on the host.
+@rpc("any_peer", "call_remote", "reliable")
+func _net_action_intent(action: String) -> void:
+	if not GameState.is_authority():
+		return
+	if _peer_for_slot(_acting_player_id()) != multiplayer.get_remote_sender_id():
+		return
+	match action:
+		"buy_house_unmortgage":
+			_on_buy_house_unmortgage_pressed()
+		"sell_house_mortgage":
+			_on_sell_house_mortgage_pressed()
+		"declare_bankruptcy":
+			_on_declare_bankruptcy_pressed()
+		"trade":
+			_on_trade_pressed()
+
+
+# A remote player clicked a board tile while their seat was in a pick mode.
+@rpc("any_peer", "call_remote", "reliable")
+func _net_board_click_intent(index: int) -> void:
+	if not GameState.is_authority():
+		return
+	if _peer_for_slot(_acting_player_id()) != multiplayer.get_remote_sender_id():
+		return
+	# Only meaningful while a pick mode is actually armed -- otherwise a
+	# stale click (mode already consumed by an earlier one) would pop a
+	# property card on the host.
+	if not (_buying_house_or_unmortgaging or _selling_house_or_mortgaging or _picking_promised_land_property):
+		return
+	_on_space_clicked(index)
+
+
+# --- trade intents: a remote proposer's clicks / edits / buttons -------
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_trade_click_intent(index: int) -> void:
+	if not GameState.is_authority() or not _trading:
+		return
+	if _peer_for_slot(_trade_proposer) != multiplayer.get_remote_sender_id():
+		return
+	_apply_trade_click(index)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_trade_spell_click_intent(hand_index: int, player_index: int) -> void:
+	if not GameState.is_authority() or not _trading:
+		return
+	if _peer_for_slot(_trade_proposer) != multiplayer.get_remote_sender_id():
+		return
+	_apply_trade_spell_click(hand_index, player_index)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_trade_money_intent(m1: int, m2: int) -> void:
+	if not GameState.is_authority() or not _trading:
+		return
+	if _peer_for_slot(_trade_proposer) != multiplayer.get_remote_sender_id():
+		return
+	trader1_money_edit.text = str(maxi(0, m1))
+	trader2_money_edit.text = str(maxi(0, m2))
+	_mark_trade_modified()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_trade_offer_intent() -> void:
+	if not GameState.is_authority() or not _trading:
+		return
+	if _peer_for_slot(_trade_proposer) != multiplayer.get_remote_sender_id():
+		return
+	_on_offer_trade_pressed()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_trade_decline_intent() -> void:
+	if not GameState.is_authority() or not _trading:
+		return
+	if _peer_for_slot(_trade_proposer) != multiplayer.get_remote_sender_id():
+		return
+	_on_decline_trade_pressed()
+
+
+# ============================================================================
+# Online multiplayer -- disconnects (Phase 7)
+# ============================================================================
+
+# Client: the host's connection dropped. Nothing more can happen -- back to
+# the menu.
+func _on_host_gone() -> void:
+	if _returning_to_menu:
+		return
+	_returning_to_menu = true
+	Net.leave()
+	info_prompt.open("The host left the game. Returning to the menu.")
+	await info_prompt.closed
+	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
+
+
+var _returning_to_menu: bool = false
+
+
+# Host: a client dropped. Hand its seat(s) to the AI and unblock anything the
+# game was waiting on that player for.
+func _on_peer_gone(peer_id: int) -> void:
+	if not (GameState.online and GameState.is_authority()):
+		return
+	_net_ready_peers.erase(peer_id)
+	var affected: Array[int] = []
+	for slot in GameState.slot_peer.size():
+		if GameState.slot_peer[slot] == peer_id:
+			affected.append(slot)
+	if affected.is_empty():
+		return
+
+	for slot in affected:
+		GameState.slot_peer[slot] = 0
+		players[slot].is_ai = true
+		_response_window_paused_by[slot] = false
+		dice_label.text += "\n%s disconnected -- a Computer takes over." % PLAYER_NAMES[slot]
+
+	# A trade with the departed player can't continue.
+	if _trading and (affected.has(_trader1) or affected.has(_trader2)):
+		_end_trade()
+
+	# A debt the departed player was raising money for: settle it AI-style now
+	# (mortgage, sell houses, forfeit if still short).
+	if _in_debt and affected.has(_debt_player_id):
+		_ai_settle_debt_now(_debt_player_id)
+
+	_update_player_panels()
+	_refresh_action_buttons()
+
+	# If it's their turn and the turn is idle, get the AI moving. A turn
+	# mid-await (a routed prompt, response window) resolves to a default on
+	# its own and then lands on the End Turn step, which the watchdog clears.
+	if affected.has(current_player) and not players[current_player].is_bankrupt:
+		if _awaiting_end_turn:
+			_end_turn()
+		elif not (_casting_spell or _response_window_open or _trading or _in_debt or _awaiting_buy_decision):
+			_run_ai_turn()
+
+
+# The AI branch of _collect_debt(), run after the fact when a human in debt
+# disconnects mid-collection. Emits debt_resolved either way so the
+# _collect_debt() call still awaiting it can continue.
+func _ai_settle_debt_now(slot: int) -> void:
+	var player: Node2D = players[slot]
+	var amount: int = _debt_amount
+	var creditor: Node2D = _debt_creditor
+	_ai_mortgage_properties(player, amount)
+	if player.money < amount:
+		_ai_sell_houses(player, amount)
+	if player.money < amount:
+		_ai_mortgage_properties(player, amount)
+	if player.money >= amount:
+		_maybe_resolve_debt()
+	else:
+		dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(slot)
+		_forfeit_to_bankruptcy(player, creditor)
+		_in_debt = false
+		_debt_amount = 0
+		_debt_creditor = null
+		_debt_player_id = -1
+		debt_resolved.emit()
+
+
+# A seat that went AI via a disconnect can get stuck on the End Turn step --
+# _perform_roll() finished, but nothing clicks the button. Once the turn is
+# genuinely idle (no prompt, window, trade or debt in flight) and no real AI
+# turn coroutine is running, end it.
+func _net_ai_takeover_watchdog() -> void:
+	if not _awaiting_end_turn or _ai_turn_running:
+		return
+	if not players[current_player].is_ai or players[current_player].is_bankrupt:
+		return
+	if _casting_spell or _response_window_open or _trading or _in_debt or _awaiting_buy_decision:
+		return
+	_end_turn()
 
 
 # Called when the button (showing "End Turn" at this point) is pressed after
@@ -481,7 +745,7 @@ func _advance_turn() -> void:
 	_awaiting_end_turn = false
 	_advance_to_next_active_player()
 	_update_turn_label()
-	if players[current_player].is_ai:
+	if GameState.is_authority() and players[current_player].is_ai:
 		_run_ai_turn()
 
 
@@ -489,7 +753,20 @@ func _advance_turn() -> void:
 # purchase, and end turn -- rolling again first if that roll was doubles.
 # Debt it can't cover ends in an immediate forfeit, since it has no other
 # way to raise money. Deliberately simple; smarter play comes later.
+#
+# _ai_turn_running is true for the whole span so the disconnect watchdog
+# (_net_ai_takeover_watchdog) can tell "AI turn in progress" from "AI seat
+# stranded on the End Turn step after a disconnect".
+var _ai_turn_running: bool = false
+
+
 func _run_ai_turn() -> void:
+	_ai_turn_running = true
+	await _run_ai_turn_body()
+	_ai_turn_running = false
+
+
+func _run_ai_turn_body() -> void:
 	var ai_index: int = current_player
 	await _ai_p2_opening_burn(players[ai_index])
 	while current_player == ai_index and not players[ai_index].is_bankrupt:
@@ -616,7 +893,7 @@ func _on_admin_properties_pressed() -> void:
 	# without ever emitting "closed", which used to leave pick mode
 	# unarmed and the buttons disabled forever.
 	_admin_picking_property = true
-	info_prompt.open("Click the property you want to gain.")
+	_info_open("Click the property you want to gain.")
 
 
 func _admin_assign_property(index: int) -> void:
@@ -662,8 +939,8 @@ func _on_admin_spells_pressed() -> void:
 	for i in spell_names.size():
 		var spell_info: Dictionary = SpellData.SPELLS.get(spell_names[i], {})
 		entries.append({"index": i, "name": spell_names[i], "icon": load(spell_info.get("icon", ""))})
-	card_picker.open("Admin Spells: choose a spell to add to your hand.", entries)
-	var choice: int = await card_picker.card_chosen
+	_cp_open("Admin Spells: choose a spell to add to your hand.", entries)
+	var choice: int = await _cp_result()
 	_refresh_action_buttons()
 	if choice < 0 or choice >= spell_names.size():
 		return
@@ -675,6 +952,9 @@ func _on_admin_spells_pressed() -> void:
 
 
 func _on_buy_house_unmortgage_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		_net_action_intent.rpc_id(1, "buy_house_unmortgage")
+		return
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
@@ -687,7 +967,7 @@ func _on_buy_house_unmortgage_pressed() -> void:
 	# dismisses the popup via Godot's default outside-click behavior without
 	# emitting "closed", so pick mode can't be left waiting on that signal.
 	_buying_house_or_unmortgaging = true
-	info_prompt.open("Click a property to build a house on it, or to unmortgage it if it's mortgaged.")
+	_info_open("Click a property to build a house on it, or to unmortgage it if it's mortgaged.")
 
 
 # Dispatches to unmortgaging or house-building depending on the clicked
@@ -750,6 +1030,9 @@ func _min_houses_in_group(color_name: String) -> int:
 
 
 func _on_sell_house_mortgage_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		_net_action_intent.rpc_id(1, "sell_house_mortgage")
+		return
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
@@ -760,7 +1043,7 @@ func _on_sell_house_mortgage_pressed() -> void:
 	trade_button.disabled = true
 	# Armed immediately, same reasoning as Buy House / Admin Properties.
 	_selling_house_or_mortgaging = true
-	info_prompt.open("Click a property to sell a house from it, or to mortgage it if it has no houses.")
+	_info_open("Click a property to sell a house from it, or to mortgage it if it has no houses.")
 
 
 # Dispatches to house-selling or mortgaging depending on whether the clicked
@@ -1059,14 +1342,21 @@ func _ai_house_check(player: Node2D) -> void:
 # arrives while it's already open (e.g. a second spell cast in response to
 # the first) just pushes _window_deadline_msec back out, extending the
 # window the first call is waiting on, and returns immediately.
+func _response_window_seconds() -> float:
+	# Online, widen the window so a remote player's pause has time to reach
+	# the host before the countdown expires.
+	return RESPONSE_WINDOW_SECONDS * 2.0 if GameState.online else RESPONSE_WINDOW_SECONDS
+
+
 func _ensure_response_window() -> void:
-	_window_deadline_msec = Time.get_ticks_msec() + int(RESPONSE_WINDOW_SECONDS * 1000.0)
+	var seconds: float = _response_window_seconds()
+	_window_deadline_msec = Time.get_ticks_msec() + int(seconds * 1000.0)
 	if _response_window_open:
 		return
 	_response_window_open = true
 	_response_window_paused_by = [false, false, false, false]
 	_refresh_action_buttons()
-	dice_label.text += "\n(Press Space/1/2/3/4 within %ds to pause from that player's perspective and react with an Instant spell.)" % int(RESPONSE_WINDOW_SECONDS)
+	dice_label.text += "\n(Press Space/1/2/3/4 within %ds to pause from that player's perspective and react with an Instant spell.)" % int(seconds)
 
 	while _response_window_paused_by.has(true) or Time.get_ticks_msec() < _window_deadline_msec:
 		await get_tree().process_frame
@@ -1511,8 +1801,8 @@ func _visit_magic_forest(player: Node2D) -> void:
 			var spell_name: String = player.spell_hand[i]
 			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 			entries.append({"index": i, "name": spell_name, "icon": load(spell_info.get("icon", ""))})
-		card_picker.open("Magic Forest: choose a spell to discard.", entries, true)
-		hand_index = await card_picker.card_chosen
+		_cp_open("Magic Forest: choose a spell to discard.", entries, true)
+		hand_index = await _cp_result()
 
 	var discarded: String = player.spell_hand[hand_index]
 	player.spell_hand.remove_at(hand_index)
@@ -1546,8 +1836,8 @@ func _visit_spell_shop(player: Node2D) -> void:
 		for i in top_cards.size():
 			var spell_info: Dictionary = SpellData.SPELLS.get(top_cards[i], {})
 			entries.append({"index": i, "name": top_cards[i], "icon": load(spell_info.get("icon", ""))})
-		card_picker.open("Spell Shop: pick a spell for $100, or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX)
-		choice = await card_picker.card_chosen
+		_cp_open("Spell Shop: pick a spell for $100, or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX)
+		choice = await _cp_result()
 
 	if choice >= 0 and choice < top_cards.size():
 		if player.money < 100:
@@ -1659,25 +1949,45 @@ func _maybe_resolve_debt() -> void:
 # turns off until that's clicked.
 func _refresh_action_buttons() -> void:
 	var limited_to_selling: bool = _in_debt or _awaiting_buy_decision
-	# A Computer player's turn plays itself -- lock every button so the
-	# human at the keyboard can't act (or trade) on its behalf while it's
-	# "thinking". While a debt is outstanding, this needs to reflect whoever
-	# actually owes it (see _acting_player_id()) -- otherwise a human forced
-	# into debt by a spell cast during an AI's turn would find Sell Houses/
-	# Mortgage, Declare Bankruptcy, and Trade all wrongly locked out.
+	# Online: only the machine that controls the acting seat gets live action
+	# buttons -- the host on a remote player's turn, and every client on
+	# someone else's turn, stay locked. (Local hotseat: is_slot_local() is
+	# always true, so this is never set.)
+	var not_my_seat: bool = GameState.online and not GameState.is_slot_local(_acting_player_id())
+	# Admin buttons are a host-side testing aid -- never offered to a client.
+	var host_only: bool = not GameState.is_authority()
+	# A Computer player's turn plays itself -- lock every button so the human
+	# at the keyboard can't act (or trade) on its behalf while it's "thinking".
+	# Uses _acting_player_id() so a human forced into debt on an AI's turn
+	# still gets Sell Houses / Mortgage / Declare Bankruptcy / Trade.
 	var ai_turn: bool = players[_acting_player_id()].is_ai
-	roll_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
+	var lock: bool = _trading or _casting_spell or _response_window_open or ai_turn or not_my_seat
+
+	roll_button.disabled = limited_to_selling or lock
 	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
-	admin_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or _awaiting_end_turn or ai_turn
-	admin_properties_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
-	admin_spells_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
-	buy_house_unmortgage_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
-	sell_house_mortgage_button.disabled = _trading or _casting_spell or _response_window_open or ai_turn
-	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or _response_window_open or ai_turn
-	trade_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or _response_window_open or ai_turn
+	admin_button.disabled = limited_to_selling or lock or _awaiting_end_turn or host_only
+	admin_properties_button.disabled = limited_to_selling or lock or host_only
+	admin_spells_button.disabled = limited_to_selling or lock or host_only
+	buy_house_unmortgage_button.disabled = limited_to_selling or lock
+	sell_house_mortgage_button.disabled = lock
+	declare_bankruptcy_button.disabled = _awaiting_buy_decision or lock
+	trade_button.disabled = _awaiting_buy_decision or lock
+
+	if _trading:
+		# During a trade only the current proposer's machine has controls;
+		# everyone else watches. (Hotseat: is_slot_local() is always true.)
+		var can_propose: bool = not GameState.online or GameState.is_slot_local(_trade_proposer)
+		offer_trade_button.disabled = not can_propose
+		decline_trade_button.disabled = not can_propose
+		trader1_money_edit.editable = can_propose
+		trader2_money_edit.editable = can_propose
+		offer_trade_button.text = "Accept Trade" if _trade_can_accept else "Offer Trade"
 
 
 func _on_trade_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		_net_action_intent.rpc_id(1, "trade")
+		return
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
@@ -1698,8 +2008,8 @@ func _on_trade_pressed() -> void:
 		_refresh_action_buttons()
 		return
 
-	player_picker.open("Trade with which player?", entries)
-	var chosen: int = await player_picker.player_chosen
+	_pp_open("Trade with which player?", entries)
+	var chosen: int = await _pp_result()
 	if chosen == -1:
 		_refresh_action_buttons()
 		return
@@ -1738,6 +2048,18 @@ func _start_trade(p1_index: int, p2_index: int) -> void:
 # Reused for clicks both on a player's normal mini cards (offering it) and
 # on the trade display's own mini cards (taking it back).
 func _handle_trade_click(index: int) -> void:
+	# Only the proposer's machine acts; a client sends it to the host, which
+	# runs _apply_trade_click via _net_trade_click_intent (already validated).
+	if GameState.online:
+		if not GameState.is_slot_local(_trade_proposer):
+			return
+		if not GameState.is_authority():
+			_net_trade_click_intent.rpc_id(1, index)
+			return
+	_apply_trade_click(index)
+
+
+func _apply_trade_click(index: int) -> void:
 	var space: Node2D = board.spaces[index]
 	if space.owner_id != _trader1 and space.owner_id != _trader2:
 		dice_label.text = "That property isn't part of this trade."
@@ -1763,6 +2085,16 @@ func _handle_trade_click(index: int) -> void:
 # index, a spell's hand_index only makes sense together with which player's
 # hand it's from, so that has to be passed in rather than looked up.
 func _handle_trade_spell_click(hand_index: int, player_index: int) -> void:
+	if GameState.online:
+		if not GameState.is_slot_local(_trade_proposer):
+			return
+		if not GameState.is_authority():
+			_net_trade_spell_click_intent.rpc_id(1, hand_index, player_index)
+			return
+	_apply_trade_spell_click(hand_index, player_index)
+
+
+func _apply_trade_spell_click(hand_index: int, player_index: int) -> void:
 	if player_index != _trader1 and player_index != _trader2:
 		dice_label.text = "That spell isn't part of this trade."
 		return
@@ -1776,7 +2108,22 @@ func _handle_trade_spell_click(hand_index: int, player_index: int) -> void:
 
 
 func _on_trade_money_changed(_new_text: String) -> void:
+	# A snapshot writing the box (client) isn't a local edit.
+	if _applying_snapshot:
+		return
+	if GameState.online and not GameState.is_authority():
+		if _trading and GameState.is_slot_local(_trade_proposer):
+			_net_trade_money_intent.rpc_id(1,
+				_trade_money_int(trader1_money_edit.text),
+				_trade_money_int(trader2_money_edit.text))
+		return
+	if not GameState.is_authority():
+		return
 	_mark_trade_modified()
+
+
+func _trade_money_int(text: String) -> int:
+	return maxi(0, int(text))
 
 
 # Any change to the terms -- a property clicked, a money box edited -- means
@@ -1786,6 +2133,7 @@ func _mark_trade_modified() -> void:
 	if _trade_can_accept:
 		_trade_can_accept = false
 		_update_trade_action_button()
+		_refresh_action_buttons()
 
 
 func _update_trade_action_button() -> void:
@@ -1796,6 +2144,12 @@ func _update_trade_action_button() -> void:
 # the other side for a decision, or -- once they've sent back exactly what's
 # already on screen -- finalizes the trade.
 func _on_offer_trade_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		if _trading and GameState.is_slot_local(_trade_proposer):
+			_net_trade_offer_intent.rpc_id(1)
+		return
+	if not GameState.is_authority():
+		return
 	if _trade_can_accept:
 		_finalize_trade()
 	else:
@@ -1809,6 +2163,9 @@ func _send_trade_offer() -> void:
 	_trade_can_accept = true
 	dice_label.text = "%s offered a trade to %s." % [PLAYER_NAMES[sender], PLAYER_NAMES[responder]]
 	_update_trade_action_button()
+	# The proposer just changed hands -- online, that moves the live trade
+	# controls to the other player's machine (and off this one).
+	_refresh_action_buttons()
 	if players[responder].is_ai:
 		if _ai_initiated_trade:
 			# Evaluate whatever the other side just sent back -- see
@@ -1875,6 +2232,12 @@ func _finalize_trade() -> void:
 
 
 func _on_decline_trade_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		if _trading and GameState.is_slot_local(_trade_proposer):
+			_net_trade_decline_intent.rpc_id(1)
+		return
+	if not GameState.is_authority():
+		return
 	var decliner: int = _trade_proposer
 	var other: int = _trader2 if decliner == _trader1 else _trader1
 	dice_label.text = "%s declined to trade with %s." % [PLAYER_NAMES[decliner], PLAYER_NAMES[other]]
@@ -2103,6 +2466,9 @@ func _check_for_winner() -> void:
 
 
 func _on_declare_bankruptcy_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		_net_action_intent.rpc_id(1, "declare_bankruptcy")
+		return
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
@@ -2112,8 +2478,8 @@ func _on_declare_bankruptcy_pressed() -> void:
 	declare_bankruptcy_button.disabled = true
 	trade_button.disabled = true
 
-	confirm_prompt.open("Are you sure you want to declare bankruptcy?")
-	var yes: bool = await confirm_prompt.answered
+	_cf_open("Are you sure you want to declare bankruptcy?")
+	var yes: bool = await _cf_result()
 	if yes:
 		var player: Node2D = players[_acting_player_id()]
 		var forfeiting_name: String = _player_display_name(player.player_id)
@@ -2164,8 +2530,8 @@ func _ask_buy_property(property_name: String, price: int) -> bool:
 	var player: Node2D = players[current_player]
 	var result: bool = false
 	while true:
-		confirm_prompt.open("Buy %s for $%d?" % [property_name, price])
-		var yes: bool = await confirm_prompt.answered
+		_cf_open("Buy %s for $%d?" % [property_name, price])
+		var yes: bool = await _cf_result()
 		if not yes:
 			break
 		if player.money >= price:
@@ -2179,8 +2545,10 @@ func _ask_buy_property(property_name: String, price: int) -> bool:
 
 
 func _reassert_buy_prompt_if_needed() -> void:
-	if _awaiting_buy_decision and not confirm_prompt.visible:
-		confirm_prompt.open("Buy %s for $%d?" % [_pending_buy_property_name, _pending_buy_price])
+	# Only meaningful for a prompt shown locally -- a buy decision routed to a
+	# remote player lives on their screen, not behind a host board click.
+	if _awaiting_buy_decision and _prompt_is_local() and not confirm_prompt.visible:
+		_cf_open("Buy %s for $%d?" % [_pending_buy_property_name, _pending_buy_price])
 
 
 func _sort_owned_properties(player: Node2D) -> void:
@@ -2286,6 +2654,23 @@ func _color_attunement(player: Node2D, color_name: String) -> int:
 
 
 func _on_space_clicked(index: int) -> void:
+	if GameState.online and not GameState.is_authority():
+		# During a trade, a property click toggles it in/out of the offer
+		# (routed if this machine is the proposer, otherwise ignored).
+		if _trading:
+			_handle_trade_click(index)
+			return
+		# A board click only means something while this machine's own seat is
+		# in a pick mode (house/mortgage, or a Promised Land target) -- then
+		# it's sent to the host. Otherwise it's just inspecting the tile.
+		if GameState.is_slot_local(_acting_player_id()) and (_buying_house_or_unmortgaging
+				or _selling_house_or_mortgaging or _picking_promised_land_property):
+			if info_prompt.visible:
+				info_prompt.hide()
+			_net_board_click_intent.rpc_id(1, index)
+		else:
+			_show_property_details(index)
+		return
 	# Any tile click can dismiss the buy-confirmation popup as a side effect
 	# (Godot closes popups on any outside click, including whatever this
 	# click actually does), which would otherwise auto-decline the purchase;
@@ -2379,6 +2764,7 @@ func _show_property_details(index: int) -> void:
 	var lines: Array[String] = [space_name]
 	if info.has("price"):
 		lines.append("Cost: $%d" % info["price"])
+	# Local inspection popup -- never routed to another player.
 	info_prompt.open("\n".join(lines))
 
 
@@ -2404,6 +2790,26 @@ func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
 # levels are only usable responding to a roll or another spell) and then
 # Attunement (_color_attunement() must be >= the level).
 func _on_spell_clicked(hand_index: int, player_index: int) -> void:
+	# During a trade a spell-card click toggles that spell in/out of the
+	# offer -- _handle_trade_spell_click self-routes to the host if this
+	# machine is the proposer.
+	if _trading:
+		_handle_trade_spell_click(hand_index, player_index)
+		return
+	# Online: you may only cast from your own hand. A client sends the click
+	# to the host, which runs it for that seat exactly as a hotseat player
+	# would (turn spells on your turn, Instant spells once you've paused a
+	# response window). Intents arriving via _net_spell_click_intent skip
+	# this and call _begin_spell_cast directly, already validated.
+	if GameState.online and not GameState.is_slot_local(player_index):
+		return
+	if GameState.online and not GameState.is_authority():
+		_net_spell_click_intent.rpc_id(1, hand_index, player_index)
+		return
+	_begin_spell_cast(hand_index, player_index)
+
+
+func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 	if _trading:
 		_handle_trade_spell_click(hand_index, player_index)
 		return
@@ -2422,6 +2828,10 @@ func _on_spell_clicked(hand_index: int, player_index: int) -> void:
 	var color_name: String = spell_info.get("color", "")
 
 	_casting_spell = true
+	# The caster -- not necessarily whoever's turn it is -- owns every prompt
+	# this cast raises (level, then targets). Matters once a remote player can
+	# cast during someone else's response window (Phase 5); harmless now.
+	_prompt_slot = player_index
 	_refresh_action_buttons()
 
 	var level_entries: Array = []
@@ -2434,8 +2844,8 @@ func _on_spell_clicked(hand_index: int, player_index: int) -> void:
 	if color_name != "utility":
 		level_entries.append({"index": BURN_FOR_ATTUNEMENT_INDEX, "name": "Burn for Attunement (+1 %s Attunement)" % color_name.capitalize(), "color": Color.WHITE})
 
-	player_picker.open("Cast %s at what level?" % spell_name, level_entries)
-	var choice: int = await player_picker.player_chosen
+	_pp_open("Cast %s at what level?" % spell_name, level_entries)
+	var choice: int = await _pp_result()
 
 	# Only actually push a cast onto the stack -- and open/extend the
 	# response window for it -- once _casting_spell is released below, so
@@ -2460,6 +2870,7 @@ func _on_spell_clicked(hand_index: int, player_index: int) -> void:
 					post_cast = _finish_cast.bind(caster, spell_name, choice, resolve)
 
 	_casting_spell = false
+	_prompt_slot = -1
 	_refresh_action_buttons()
 
 	if post_cast.is_valid():
@@ -2691,8 +3102,8 @@ func _prepare_t1_burn_spell(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no opponent to burn."
 		return Callable()
 
-	player_picker.open("T1 Burn Spell: choose an opponent to pay you.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("T1 Burn Spell: choose an opponent to pay you.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 
@@ -2738,8 +3149,8 @@ func _prepare_t2_counter(caster: Node2D) -> Callable:
 		dice_label.text += "\nThere's no spell on the stack to counter."
 		return Callable()
 
-	player_picker.open("T2 Response Spell: choose a spell to counter.", entries)
-	var target_id: int = await player_picker.player_chosen
+	_pp_open("T2 Response Spell: choose a spell to counter.", entries)
+	var target_id: int = await _pp_result()
 	if target_id == -1:
 		return Callable()
 	return _resolve_counter_spell.bind(caster, "T2 Response Spell (Level 1)", target_id)
@@ -2753,8 +3164,8 @@ func _prepare_counterbalance(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no Level %d spell on the stack to counter." % level
 		return Callable()
 
-	player_picker.open("Counterbalance: choose a Level %d spell to counter." % level, entries)
-	var target_id: int = await player_picker.player_chosen
+	_pp_open("Counterbalance: choose a Level %d spell to counter." % level, entries)
+	var target_id: int = await _pp_result()
 	if target_id == -1:
 		return Callable()
 	return _resolve_counter_spell.bind(caster, "Counterbalance (Level %d)" % level, target_id)
@@ -2829,8 +3240,8 @@ func _prepare_snatch_purse(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no opponent to snatch from."
 		return Callable()
 
-	player_picker.open("Snatch Purse: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Snatch Purse: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 
@@ -2935,8 +3346,8 @@ func _prepare_migraine(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
 
-	player_picker.open("Migraine: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Migraine: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 
@@ -2973,8 +3384,8 @@ func _prepare_impossible_architecture(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no property to build on."
 		return Callable()
 
-	player_picker.open("Impossible Architecture: choose a property to build on.", entries)
-	var space_index: int = await player_picker.player_chosen
+	_pp_open("Impossible Architecture: choose a property to build on.", entries)
+	var space_index: int = await _pp_result()
 	if space_index == -1:
 		return Callable()
 
@@ -3032,8 +3443,8 @@ func _prepare_promised_land(caster: Node2D, level: int) -> Callable:
 				{"index": 2, "name": "Top Side", "color": Color.WHITE},
 				{"index": 3, "name": "Right Side", "color": Color.WHITE},
 			]
-			player_picker.open("Promised Land: choose a side of the board.", side_entries)
-			var side: int = await player_picker.player_chosen
+			_pp_open("Promised Land: choose a side of the board.", side_entries)
+			var side: int = await _pp_result()
 			if side == -1:
 				return Callable()
 			var pool: Array[int] = _unowned_property_indices_on_side(side)
@@ -3043,7 +3454,7 @@ func _prepare_promised_land(caster: Node2D, level: int) -> Callable:
 			space_index = pool[randi_range(0, pool.size() - 1)]
 		3:
 			_picking_promised_land_property = true
-			info_prompt.open("Promised Land: click an unowned property to (maybe) buy.")
+			_info_open("Promised Land: click an unowned property to (maybe) buy.")
 			var clicked: int = await board_space_picked
 			if info_prompt.visible:
 				info_prompt.hide()
@@ -3055,8 +3466,8 @@ func _prepare_promised_land(caster: Node2D, level: int) -> Callable:
 
 	var info: Dictionary = board.get_space_info(space_index)
 	var price: int = info.get("price", 0)
-	confirm_prompt.open("Promised Land: buy %s for $%d?" % [info.get("name", ""), price])
-	var yes: bool = await confirm_prompt.answered
+	_cf_open("Promised Land: buy %s for $%d?" % [info.get("name", ""), price])
+	var yes: bool = await _cf_result()
 	if not yes:
 		return Callable()
 	return _resolve_promised_land.bind(caster, level, space_index, price)
@@ -3160,8 +3571,8 @@ func _prepare_divine_protection(caster: Node2D, level: int) -> Callable:
 			{"index": 1, "name": "Subtract 1 from your roll", "color": Color.WHITE},
 			{"index": 2, "name": "Subtract 2 from your roll", "color": Color.WHITE},
 		]
-		player_picker.open("Divine Protection: subtract how much from your roll?", entries)
-		var amount: int = await player_picker.player_chosen
+		_pp_open("Divine Protection: subtract how much from your roll?", entries)
+		var amount: int = await _pp_result()
 		if amount == -1:
 			return Callable()
 		return _resolve_divine_protection.bind(caster, level, amount)
@@ -3198,16 +3609,16 @@ func _prepare_art_of_the_deal(caster: Node2D, hand_index: int, level: int) -> Ca
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
 
-	player_picker.open("Art of the Deal: choose an opponent.", opponent_entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Art of the Deal: choose an opponent.", opponent_entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 
 	var give_entries: Array = []
 	for i in giveable_indices:
 		give_entries.append({"index": i, "name": caster.spell_hand[i], "color": Color.WHITE})
-	player_picker.open("Art of the Deal: choose a spell to give away.", give_entries)
-	var give_index: int = await player_picker.player_chosen
+	_pp_open("Art of the Deal: choose a spell to give away.", give_entries)
+	var give_index: int = await _pp_result()
 	if give_index == -1:
 		return Callable()
 
@@ -3299,8 +3710,8 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no eligible property to take."
 		return Callable()
 
-	player_picker.open("Offer You Can't Refuse: choose an opponent's property without houses.", target_entries)
-	var target_space_index: int = await player_picker.player_chosen
+	_pp_open("Offer You Can't Refuse: choose an opponent's property without houses.", target_entries)
+	var target_space_index: int = await _pp_result()
 	if target_space_index == -1:
 		return Callable()
 
@@ -3322,8 +3733,8 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 			if entries.is_empty():
 				dice_label.text += "\n%s doesn't have enough property value to make this offer." % _player_display_name(caster.player_id)
 				return Callable()
-			player_picker.open("Offer You Can't Refuse: give properties worth $%d or more (have $%d so far)." % [target_price, total_value], entries)
-			var picked: int = await player_picker.player_chosen
+			_pp_open("Offer You Can't Refuse: give properties worth $%d or more (have $%d so far)." % [target_price, total_value], entries)
+			var picked: int = await _pp_result()
 			if picked == -1:
 				return Callable()
 			given.append(picked)
@@ -3340,8 +3751,8 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 		if entries.is_empty():
 			dice_label.text += "\n%s has no property to give in return." % _player_display_name(caster.player_id)
 			return Callable()
-		player_picker.open("Offer You Can't Refuse: choose a property to give in return.", entries)
-		var picked: int = await player_picker.player_chosen
+		_pp_open("Offer You Can't Refuse: choose a property to give in return.", entries)
+		var picked: int = await _pp_result()
 		if picked == -1:
 			return Callable()
 		return _resolve_offer_you_cant_refuse.bind(caster, level, target_space_index, target_owner_id, [picked] as Array[int], 0)
@@ -3409,8 +3820,8 @@ func _prepare_burn_to_the_ground(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere are no houses to destroy."
 		return Callable()
 
-	player_picker.open("Burn to the Ground: choose a property.", entries)
-	var space_index: int = await player_picker.player_chosen
+	_pp_open("Burn to the Ground: choose a property.", entries)
+	var space_index: int = await _pp_result()
 	if space_index == -1:
 		return Callable()
 	var houses: int = SpellData.SPELLS["Burn to the Ground"]["levels"][level].get("houses", 0)
@@ -3436,8 +3847,8 @@ func _prepare_line_of_fire(caster: Node2D, level: int) -> Callable:
 		{"index": 2, "name": "Top Side", "color": Color.WHITE},
 		{"index": 3, "name": "Right Side", "color": Color.WHITE},
 	]
-	player_picker.open("Line of Fire: choose a side of the board.", side_entries)
-	var side: int = await player_picker.player_chosen
+	_pp_open("Line of Fire: choose a side of the board.", side_entries)
+	var side: int = await _pp_result()
 	if side == -1:
 		return Callable()
 	var amount: int = SpellData.SPELLS["Line of Fire"]["levels"][level].get("amount", 0)
@@ -3514,8 +3925,8 @@ func _prepare_threaten(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no eligible property to threaten."
 		return Callable()
 
-	player_picker.open("Threaten: choose an opponent's property without houses.", entries)
-	var space_index: int = await player_picker.player_chosen
+	_pp_open("Threaten: choose an opponent's property without houses.", entries)
+	var space_index: int = await _pp_result()
 	if space_index == -1:
 		return Callable()
 	var amount: int = SpellData.SPELLS["Threaten"]["levels"][level].get("amount", 0)
@@ -3538,8 +3949,8 @@ func _resolve_threaten(caster: Node2D, level: int, space_index: int, amount: int
 			{"index": 0, "name": "Give up %s" % property_name, "color": Color.WHITE},
 			{"index": 1, "name": "Pay $%d" % amount, "color": Color.WHITE},
 		]
-		player_picker.open("%s's Threaten (Level %d): give up %s, or pay $%d?" % [_player_display_name(caster.player_id), level, property_name, amount], entries)
-		var choice: int = await player_picker.player_chosen
+		_pp_open("%s's Threaten (Level %d): give up %s, or pay $%d?" % [_player_display_name(caster.player_id), level, property_name, amount], entries)
+		var choice: int = await _pp_result()
 		give_up_property = choice != 1
 
 	if give_up_property:
@@ -3578,8 +3989,8 @@ func _prepare_royal_aid(caster: Node2D, level: int) -> Callable:
 			entries.append({"index": space_index, "name": "%s ($%d)" % [display_name, cost], "color": Color.WHITE})
 		if entries.is_empty():
 			break
-		player_picker.open("Royal Aid: choose a mortgaged property to unmortgage (%d/%d)." % [chosen.size() + 1, count], entries)
-		var picked: int = await player_picker.player_chosen
+		_pp_open("Royal Aid: choose a mortgaged property to unmortgage (%d/%d)." % [chosen.size() + 1, count], entries)
+		var picked: int = await _pp_result()
 		if picked == -1:
 			break
 		chosen.append(picked)
@@ -3620,8 +4031,8 @@ func _prepare_taxes(caster: Node2D, level: int) -> Callable:
 	if entries.is_empty():
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
-	player_picker.open("Taxes: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Taxes: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 	var divisor: int = SpellData.SPELLS["Taxes"]["levels"][level].get("divisor", 1)
@@ -3652,8 +4063,8 @@ func _prepare_far_reaching_empire(caster: Node2D, level: int) -> Callable:
 	if entries.is_empty():
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
-	player_picker.open("Far-Reaching Empire: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Far-Reaching Empire: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 	var amount: int = SpellData.SPELLS["Far-Reaching Empire"]["levels"][level].get("amount", 0)
@@ -3701,8 +4112,8 @@ func _prepare_annexation(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no eligible property to annex."
 		return Callable()
 
-	player_picker.open("Annexation: choose a property without houses.", entries)
-	var target_space_index: int = await player_picker.player_chosen
+	_pp_open("Annexation: choose a property without houses.", entries)
+	var target_space_index: int = await _pp_result()
 	if target_space_index == -1:
 		return Callable()
 	var target_owner_id: int = board.spaces[target_space_index].owner_id
@@ -3761,8 +4172,8 @@ func _prepare_sinkhole(caster: Node2D, level: int) -> Callable:
 	if entries.is_empty():
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
-	player_picker.open("Sinkhole: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Sinkhole: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 	var amount: int = SpellData.SPELLS["Sinkhole"]["levels"][level].get("amount", 0)
@@ -3815,8 +4226,8 @@ func _prepare_decompose(caster: Node2D, level: int) -> Callable:
 			entries.append({"index": space_index, "name": "%s (%s)" % [info.get("name", ""), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
 		if entries.is_empty():
 			break
-		player_picker.open("Decompose: choose a mortgaged property to return to the bank (%d/%d)." % [chosen.size() + 1, count], entries)
-		var picked: int = await player_picker.player_chosen
+		_pp_open("Decompose: choose a mortgaged property to return to the bank (%d/%d)." % [chosen.size() + 1, count], entries)
+		var picked: int = await _pp_result()
 		if picked == -1:
 			break
 		chosen.append(picked)
@@ -3857,8 +4268,8 @@ func _prepare_sanity_grinding(caster: Node2D, level: int) -> Callable:
 	if entries.is_empty():
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
-	player_picker.open("Sanity Grinding: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Sanity Grinding: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 	var amount: int = SpellData.SPELLS["Sanity Grinding"]["levels"][level].get("amount", 0)
@@ -3885,8 +4296,8 @@ func _prepare_spell_mastery(caster: Node2D, level: int) -> Callable:
 	if entries.is_empty():
 		dice_label.text += "\nThere's no spell on the stack to counter."
 		return Callable()
-	player_picker.open("Spell Mastery: choose a spell to counter.", entries)
-	var target_id: int = await player_picker.player_chosen
+	_pp_open("Spell Mastery: choose a spell to counter.", entries)
+	var target_id: int = await _pp_result()
 	if target_id == -1:
 		return Callable()
 	return _resolve_spell_mastery.bind(caster, level, target_id)
@@ -3962,8 +4373,8 @@ func _prepare_manastone(caster: Node2D, level: int) -> Callable:
 	for i in ATTUNABLE_COLORS.size():
 		var color_name: String = ATTUNABLE_COLORS[i]
 		color_entries.append({"index": i, "name": color_name.capitalize(), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
-	player_picker.open("Manastone: choose a color to gain Temporary Attunement for.", color_entries)
-	var chosen_index: int = await player_picker.player_chosen
+	_pp_open("Manastone: choose a color to gain Temporary Attunement for.", color_entries)
+	var chosen_index: int = await _pp_result()
 	if chosen_index == -1:
 		return Callable()
 	var color_name: String = ATTUNABLE_COLORS[chosen_index]
@@ -4041,8 +4452,8 @@ func _prepare_cult_of_terminus_buy_railroad(caster: Node2D) -> Callable:
 		dice_label.text += "\n%s can't afford $%d." % [_player_display_name(caster.player_id), price]
 		return Callable()
 
-	player_picker.open("The Cult of Terminus: choose a railroad to buy for $%d." % price, entries)
-	var target_space_index: int = await player_picker.player_chosen
+	_pp_open("The Cult of Terminus: choose a railroad to buy for $%d." % price, entries)
+	var target_space_index: int = await _pp_result()
 	if target_space_index == -1:
 		return Callable()
 	var target_owner_id: int = board.spaces[target_space_index].owner_id
@@ -4211,3 +4622,440 @@ func _update_player_panels() -> void:
 		_populate_trade_spell_flow(trader1_flow, _trader1, _trade1_spells_offered)
 		_populate_trade_flow(trader2_flow, _trade2_offered)
 		_populate_trade_spell_flow(trader2_flow, _trader2, _trade2_spells_offered)
+
+
+# ============================================================================
+# Online multiplayer -- state replication (Phase 2)
+#
+# The host runs the only real simulation. Once per frame it builds a snapshot
+# of everything a client needs to render and, if anything changed since the
+# last one, broadcasts it. Clients apply snapshots and reuse the existing
+# _update_player_panels() / _refresh_action_buttons() to draw them; they never
+# mutate game state (see the GameState.is_authority() guards on the input
+# handlers). Player-driven input over the network arrives in Phase 3.
+# ============================================================================
+
+# Host: the last snapshot broadcast. Client: the last snapshot applied. Either
+# way, "the last state we know about" -- an empty dict means "nothing yet".
+var _net_last_snapshot: Dictionary = {}
+# True only while _apply_snapshot() is running, so signal handlers fired by
+# programmatic widget updates (LineEdit.text -> text_changed) can tell a
+# snapshot apart from a real local edit.
+var _applying_snapshot: bool = false
+
+
+# Host: peers whose Main scene has come up and asked for state. Snapshots go
+# only to these (broadcasting to a peer mid-scene-load just logs "node not
+# found" and drops the packet).
+var _net_ready_peers: Dictionary = {}
+
+
+func _process(_delta: float) -> void:
+	if not (GameState.online and GameState.is_authority()):
+		return
+	_net_ai_takeover_watchdog()
+	var snap: Dictionary = _build_snapshot()
+	if snap == _net_last_snapshot:
+		return
+	_net_last_snapshot = snap
+	for peer in _net_ready_peers.keys():
+		if multiplayer.get_peers().has(peer):
+			_recv_snapshot.rpc_id(peer, snap)
+		else:
+			_net_ready_peers.erase(peer)
+
+
+func _build_snapshot() -> Dictionary:
+	var player_states: Array = []
+	for p in players:
+		player_states.append({
+			"money": p.money,
+			"space": p.current_space,
+			"in_jail": p.in_jail,
+			"jail_turns": p.jail_turns_left,
+			"doubles": p.consecutive_doubles,
+			"bankrupt": p.is_bankrupt,
+			"is_ai": p.is_ai,
+			"visible": p.visible,
+			"owned": p.owned_property_indices.duplicate(),
+			"hand": p.spell_hand.duplicate(),
+			"attunement": p.temp_attunement.duplicate(),
+		})
+	var space_states: Array = []
+	for s in board.spaces:
+		space_states.append({
+			"owner": s.owner_id,
+			"houses": s.house_count,
+			"mortgaged": s.is_mortgaged,
+		})
+	return {
+		"players": player_states,
+		"spaces": space_states,
+		"current_player": current_player,
+		"slot_peer": GameState.slot_peer.duplicate(),
+		"free_parking": free_parking_amount,
+		"awaiting_end_turn": _awaiting_end_turn,
+		"in_debt": _in_debt,
+		"debt_player": _debt_player_id,
+		"debt_amount": _debt_amount,
+		"awaiting_buy": _awaiting_buy_decision,
+		"casting_spell": _casting_spell,
+		"buying_ho": _buying_house_or_unmortgaging,
+		"selling_hm": _selling_house_or_mortgaging,
+		"picking_pl": _picking_promised_land_property,
+		"dice_text": dice_label.text,
+		"turn_text": turn_label.text,
+		"response_window_open": _response_window_open,
+		"paused_by": _response_window_paused_by.duplicate(),
+		"roll_in_flight": _roll_in_flight,
+		"current_roll": _current_roll,
+		"trading": _trading,
+		"trader1": _trader1,
+		"trader2": _trader2,
+		"trade_proposer": _trade_proposer,
+		"trade1_offered": _trade1_offered.duplicate(),
+		"trade2_offered": _trade2_offered.duplicate(),
+		"trade1_spells": _trade1_spells_offered.duplicate(),
+		"trade2_spells": _trade2_spells_offered.duplicate(),
+		"trade1_money": trader1_money_edit.text,
+		"trade2_money": trader2_money_edit.text,
+		"trade_can_accept": _trade_can_accept,
+	}
+
+
+@rpc("authority", "call_remote", "reliable")
+func _recv_snapshot(snap: Dictionary) -> void:
+	_apply_snapshot(snap)
+
+
+# Client -> host, on load: pull the current state right away instead of
+# waiting for the host's next change to be broadcast.
+@rpc("any_peer", "call_remote", "reliable")
+func _request_snapshot() -> void:
+	if not GameState.is_authority() or players.is_empty():
+		return
+	var who: int = multiplayer.get_remote_sender_id()
+	_net_ready_peers[who] = true
+	_recv_snapshot.rpc_id(who, _build_snapshot())
+
+
+func _net_request_initial_snapshot() -> void:
+	for _attempt in 12:
+		if not _net_last_snapshot.is_empty():
+			return
+		_request_snapshot.rpc_id(1)
+		await get_tree().create_timer(0.5).timeout
+
+
+func _apply_snapshot(snap: Dictionary) -> void:
+	_net_last_snapshot = snap
+	# Setting LineEdit.text below fires text_changed; this flag keeps
+	# _on_trade_money_changed from treating a snapshot as a local edit.
+	_applying_snapshot = true
+
+	var player_states: Array = snap.get("players", [])
+	for i in mini(player_states.size(), players.size()):
+		var ps: Dictionary = player_states[i]
+		var p: Node2D = players[i]
+		p.money = ps.get("money", p.money)
+		p.current_space = ps.get("space", p.current_space)
+		p.in_jail = ps.get("in_jail", false)
+		p.jail_turns_left = ps.get("jail_turns", 0)
+		p.consecutive_doubles = ps.get("doubles", 0)
+		p.is_bankrupt = ps.get("bankrupt", false)
+		p.is_ai = ps.get("is_ai", p.is_ai)
+		p.visible = ps.get("visible", true)
+		p.owned_property_indices = _net_int_array(ps.get("owned", []))
+		p.spell_hand = _net_string_array(ps.get("hand", []))
+		p.temp_attunement = (ps.get("attunement", {}) as Dictionary).duplicate()
+		p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
+
+	var space_states: Array = snap.get("spaces", [])
+	for i in mini(space_states.size(), board.spaces.size()):
+		var ss: Dictionary = space_states[i]
+		var s: Node2D = board.spaces[i]
+		s.owner_id = ss.get("owner", -1)
+		s.house_count = ss.get("houses", 0)
+		s.is_mortgaged = ss.get("mortgaged", false)
+
+	current_player = snap.get("current_player", 0)
+	if snap.has("slot_peer"):
+		GameState.slot_peer = _net_int_array(snap["slot_peer"])
+	free_parking_amount = snap.get("free_parking", 0)
+	_awaiting_end_turn = snap.get("awaiting_end_turn", false)
+	_in_debt = snap.get("in_debt", false)
+	_debt_player_id = snap.get("debt_player", -1)
+	_debt_amount = snap.get("debt_amount", 0)
+	_awaiting_buy_decision = snap.get("awaiting_buy", false)
+	_casting_spell = snap.get("casting_spell", false)
+	_buying_house_or_unmortgaging = snap.get("buying_ho", false)
+	_selling_house_or_mortgaging = snap.get("selling_hm", false)
+	_picking_promised_land_property = snap.get("picking_pl", false)
+	_response_window_open = snap.get("response_window_open", false)
+	_response_window_paused_by = _net_bool_array(snap.get("paused_by", []))
+	_trading = snap.get("trading", false)
+	_trader1 = snap.get("trader1", -1)
+	_trader2 = snap.get("trader2", -1)
+	_trade1_offered = _net_int_array(snap.get("trade1_offered", []))
+	_trade2_offered = _net_int_array(snap.get("trade2_offered", []))
+	_trade1_spells_offered = _net_int_array(snap.get("trade1_spells", []))
+	_trade2_spells_offered = _net_int_array(snap.get("trade2_spells", []))
+	_trade_can_accept = snap.get("trade_can_accept", false)
+	_trade_proposer = snap.get("trade_proposer", -1)
+
+	dice_label.text = snap.get("dice_text", "")
+	turn_label.text = snap.get("turn_text", "")
+
+	trade_hseparator.visible = _trading
+	trade_display.visible = _trading
+	if _trading:
+		trader1_label.text = PLAYER_NAMES[_trader1]
+		trader1_label.add_theme_color_override("font_color", PLAYER_COLORS[_trader1])
+		trader2_label.text = PLAYER_NAMES[_trader2]
+		trader2_label.add_theme_color_override("font_color", PLAYER_COLORS[_trader2])
+		# Don't stomp a box this player is actively editing (see
+		# _refresh_action_buttons for who that is); otherwise mirror the host.
+		if not trader1_money_edit.has_focus():
+			trader1_money_edit.text = snap.get("trade1_money", "")
+		if not trader2_money_edit.has_focus():
+			trader2_money_edit.text = snap.get("trade2_money", "")
+	else:
+		for child in trader1_flow.get_children():
+			child.queue_free()
+		for child in trader2_flow.get_children():
+			child.queue_free()
+
+	# These two have setters that redraw the wizard-vision line.
+	_current_roll = snap.get("current_roll", 0)
+	_roll_in_flight = snap.get("roll_in_flight", false)
+
+	_update_player_panels()
+	_refresh_action_buttons()
+	_applying_snapshot = false
+
+
+func _net_int_array(a) -> Array[int]:
+	var out: Array[int] = []
+	for v in a:
+		out.append(int(v))
+	return out
+
+
+func _net_string_array(a) -> Array[String]:
+	var out: Array[String] = []
+	for v in a:
+		out.append(str(v))
+	return out
+
+
+func _net_bool_array(a) -> Array[bool]:
+	var out: Array[bool] = [false, false, false, false]
+	for i in mini(a.size(), 4):
+		out[i] = bool(a[i])
+	return out
+
+
+# ============================================================================
+# Online multiplayer -- prompt router (Phase 4)
+#
+# The host runs all game logic, but a question meant for a specific player
+# (buy this property? which spell to discard?) must be answered on THAT
+# player's machine. Every popup the host would open now goes through an
+# _xx_open / _xx_result wrapper: if the target player is local -- or it's a
+# local game -- the real popup opens here exactly as before; otherwise the
+# host asks that player's client over RPC and awaits the reply.
+#
+# Pickers are used strictly one-at-a-time (each caller awaits its result
+# before opening the next), so a single pending-request slot suffices.
+# ============================================================================
+
+# Which player should see prompts right now. -1 == "derive it" (whoever is
+# acting). Reserved for Phase 5, when a remote player can cast spells and the
+# caster -- not the current player -- owns the follow-up prompts.
+var _prompt_slot: int = -1
+var _net_prompt_seq: int = 0
+var _net_prompt_replies: Dictionary = {}
+var _net_pending_req: int = 0
+var _net_pending_peer: int = 0
+var _net_pending_kind: String = ""
+
+
+func _prompt_target() -> int:
+	return _prompt_slot if _prompt_slot >= 0 else _acting_player_id()
+
+
+func _prompt_is_local() -> bool:
+	return not GameState.online or GameState.is_slot_local(_prompt_target())
+
+
+func _peer_for_slot(slot: int) -> int:
+	return GameState.slot_peer[slot] if slot >= 0 and slot < GameState.slot_peer.size() else 1
+
+
+# --- confirm_prompt (yes / no) ----------------------------------------
+
+func _cf_open(text: String) -> void:
+	if _prompt_is_local():
+		confirm_prompt.open(text)
+	else:
+		_net_open_remote("confirm", {"text": text})
+
+
+func _cf_result() -> bool:
+	if _prompt_is_local():
+		return await confirm_prompt.answered
+	return bool(await _net_await_reply())
+
+
+# --- player_picker (choice list) ------------------------------------
+
+func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
+	if _prompt_is_local():
+		player_picker.open(text, entries, mandatory)
+	else:
+		_net_open_remote("pick", {
+			"text": text, "entries": _net_pack_entries(entries), "mandatory": mandatory,
+		})
+
+
+func _pp_result() -> int:
+	if _prompt_is_local():
+		return await player_picker.player_chosen
+	return int(await _net_await_reply())
+
+
+# --- card_picker --------------------------------------------------
+
+func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2) -> void:
+	if _prompt_is_local():
+		card_picker.open(text, entries, mandatory, skip_text, skip_index)
+	else:
+		_net_open_remote("card", {
+			"text": text, "entries": _net_pack_card_entries(entries),
+			"mandatory": mandatory, "skip_text": skip_text, "skip_index": skip_index,
+		})
+
+
+func _cp_result() -> int:
+	if _prompt_is_local():
+		return await card_picker.card_chosen
+	return int(await _net_await_reply())
+
+
+# --- info_prompt (no reply) --------------------------------------
+
+func _info_open(text: String) -> void:
+	if _prompt_is_local():
+		info_prompt.open(text)
+	else:
+		_net_show_info.rpc_id(_peer_for_slot(_prompt_target()), text)
+
+
+# --- host side: dispatch + await ----------------------------------
+
+func _net_open_remote(kind: String, payload: Dictionary) -> void:
+	_net_prompt_seq += 1
+	_net_pending_req = _net_prompt_seq
+	_net_pending_peer = _peer_for_slot(_prompt_target())
+	_net_pending_kind = kind
+	_net_prompt_replies.erase(_net_pending_req)
+	_net_show_prompt.rpc_id(_net_pending_peer, _net_pending_req, kind, payload)
+
+
+func _net_await_reply() -> Variant:
+	var req: int = _net_pending_req
+	var peer: int = _net_pending_peer
+	while not _net_prompt_replies.has(req):
+		if not multiplayer.get_peers().has(peer):
+			# The player we were waiting on is gone -- resolve to a safe
+			# default so host logic never hangs. (Phase 6 handles this
+			# properly; for now the turn just proceeds as a decline.)
+			return false if _net_pending_kind == "confirm" else -1
+		await get_tree().process_frame
+	var value: Variant = _net_prompt_replies[req]
+	_net_prompt_replies.erase(req)
+	return value
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_prompt_reply(req_id: int, value: Variant) -> void:
+	if not GameState.is_authority():
+		return
+	_net_prompt_replies[req_id] = value
+
+
+# --- client side: show the popup, send the answer back --------------
+
+@rpc("authority", "call_remote", "reliable")
+func _net_show_prompt(req_id: int, kind: String, payload: Dictionary) -> void:
+	var result: Variant = await _net_client_run_prompt(kind, payload)
+	_net_prompt_reply.rpc_id(1, req_id, result)
+
+
+func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
+	match kind:
+		"confirm":
+			confirm_prompt.open(str(payload.get("text", "")))
+			return await confirm_prompt.answered
+		"pick":
+			player_picker.open(str(payload.get("text", "")),
+				_net_unpack_entries(payload.get("entries", [])),
+				bool(payload.get("mandatory", false)))
+			return await player_picker.player_chosen
+		"card":
+			card_picker.open(str(payload.get("text", "")),
+				_net_unpack_card_entries(payload.get("entries", [])),
+				bool(payload.get("mandatory", false)),
+				str(payload.get("skip_text", "")),
+				int(payload.get("skip_index", -2)))
+			return await card_picker.card_chosen
+	return -1
+
+
+@rpc("authority", "call_remote", "reliable")
+func _net_show_info(text: String) -> void:
+	info_prompt.open(text)
+
+
+# --- entry (de)serialization ------------------------------------
+
+func _net_pack_entries(entries: Array) -> Array:
+	var out: Array = []
+	for e in entries:
+		out.append({
+			"index": int(e["index"]), "name": str(e["name"]),
+			"color": e.get("color", Color.WHITE),
+		})
+	return out
+
+
+func _net_unpack_entries(entries: Array) -> Array:
+	var out: Array = []
+	for e in entries:
+		out.append({
+			"index": int(e["index"]), "name": str(e["name"]),
+			"color": e.get("color", Color.WHITE),
+		})
+	return out
+
+
+func _net_pack_card_entries(entries: Array) -> Array:
+	var out: Array = []
+	for e in entries:
+		var icon: Variant = e.get("icon", null)
+		out.append({
+			"index": int(e["index"]), "name": str(e.get("name", "")),
+			"icon_path": icon.resource_path if icon != null else "",
+		})
+	return out
+
+
+func _net_unpack_card_entries(entries: Array) -> Array:
+	var out: Array = []
+	for e in entries:
+		var path: String = str(e.get("icon_path", ""))
+		out.append({
+			"index": int(e["index"]), "name": str(e.get("name", "")),
+			"icon": load(path) if path != "" else null,
+		})
+	return out
