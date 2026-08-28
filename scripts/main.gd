@@ -557,6 +557,8 @@ func _net_action_intent(action: String) -> void:
 			_on_sell_house_mortgage_pressed()
 		"declare_bankruptcy":
 			_on_declare_bankruptcy_pressed()
+		"trade":
+			_on_trade_pressed()
 
 
 # A remote player clicked a board tile while their seat was in a pick mode.
@@ -572,6 +574,55 @@ func _net_board_click_intent(index: int) -> void:
 	if not (_buying_house_or_unmortgaging or _selling_house_or_mortgaging or _picking_promised_land_property):
 		return
 	_on_space_clicked(index)
+
+
+# --- trade intents: a remote proposer's clicks / edits / buttons -------
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_trade_click_intent(index: int) -> void:
+	if not GameState.is_authority() or not _trading:
+		return
+	if _peer_for_slot(_trade_proposer) != multiplayer.get_remote_sender_id():
+		return
+	_apply_trade_click(index)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_trade_spell_click_intent(hand_index: int, player_index: int) -> void:
+	if not GameState.is_authority() or not _trading:
+		return
+	if _peer_for_slot(_trade_proposer) != multiplayer.get_remote_sender_id():
+		return
+	_apply_trade_spell_click(hand_index, player_index)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_trade_money_intent(m1: int, m2: int) -> void:
+	if not GameState.is_authority() or not _trading:
+		return
+	if _peer_for_slot(_trade_proposer) != multiplayer.get_remote_sender_id():
+		return
+	trader1_money_edit.text = str(maxi(0, m1))
+	trader2_money_edit.text = str(maxi(0, m2))
+	_mark_trade_modified()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_trade_offer_intent() -> void:
+	if not GameState.is_authority() or not _trading:
+		return
+	if _peer_for_slot(_trade_proposer) != multiplayer.get_remote_sender_id():
+		return
+	_on_offer_trade_pressed()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_trade_decline_intent() -> void:
+	if not GameState.is_authority() or not _trading:
+		return
+	if _peer_for_slot(_trade_proposer) != multiplayer.get_remote_sender_id():
+		return
+	_on_decline_trade_pressed()
 
 
 # Called when the button (showing "End Turn" at this point) is pressed after
@@ -1804,13 +1855,22 @@ func _refresh_action_buttons() -> void:
 	buy_house_unmortgage_button.disabled = limited_to_selling or lock
 	sell_house_mortgage_button.disabled = lock
 	declare_bankruptcy_button.disabled = _awaiting_buy_decision or lock
-	# Trading is still driven entirely on the host (Phase 6b will route it).
-	trade_button.disabled = _awaiting_buy_decision or lock or host_only
+	trade_button.disabled = _awaiting_buy_decision or lock
+
+	if _trading:
+		# During a trade only the current proposer's machine has controls;
+		# everyone else watches. (Hotseat: is_slot_local() is always true.)
+		var can_propose: bool = not GameState.online or GameState.is_slot_local(_trade_proposer)
+		offer_trade_button.disabled = not can_propose
+		decline_trade_button.disabled = not can_propose
+		trader1_money_edit.editable = can_propose
+		trader2_money_edit.editable = can_propose
+		offer_trade_button.text = "Accept Trade" if _trade_can_accept else "Offer Trade"
 
 
 func _on_trade_pressed() -> void:
-	# Trading is not yet routed over the network (Phase 6b) -- host only.
 	if GameState.online and not GameState.is_authority():
+		_net_action_intent.rpc_id(1, "trade")
 		return
 	roll_button.disabled = true
 	admin_button.disabled = true
@@ -1872,6 +1932,18 @@ func _start_trade(p1_index: int, p2_index: int) -> void:
 # Reused for clicks both on a player's normal mini cards (offering it) and
 # on the trade display's own mini cards (taking it back).
 func _handle_trade_click(index: int) -> void:
+	# Only the proposer's machine acts; a client sends it to the host, which
+	# runs _apply_trade_click via _net_trade_click_intent (already validated).
+	if GameState.online:
+		if not GameState.is_slot_local(_trade_proposer):
+			return
+		if not GameState.is_authority():
+			_net_trade_click_intent.rpc_id(1, index)
+			return
+	_apply_trade_click(index)
+
+
+func _apply_trade_click(index: int) -> void:
 	var space: Node2D = board.spaces[index]
 	if space.owner_id != _trader1 and space.owner_id != _trader2:
 		dice_label.text = "That property isn't part of this trade."
@@ -1897,6 +1969,16 @@ func _handle_trade_click(index: int) -> void:
 # index, a spell's hand_index only makes sense together with which player's
 # hand it's from, so that has to be passed in rather than looked up.
 func _handle_trade_spell_click(hand_index: int, player_index: int) -> void:
+	if GameState.online:
+		if not GameState.is_slot_local(_trade_proposer):
+			return
+		if not GameState.is_authority():
+			_net_trade_spell_click_intent.rpc_id(1, hand_index, player_index)
+			return
+	_apply_trade_spell_click(hand_index, player_index)
+
+
+func _apply_trade_spell_click(hand_index: int, player_index: int) -> void:
 	if player_index != _trader1 and player_index != _trader2:
 		dice_label.text = "That spell isn't part of this trade."
 		return
@@ -1910,9 +1992,22 @@ func _handle_trade_spell_click(hand_index: int, player_index: int) -> void:
 
 
 func _on_trade_money_changed(_new_text: String) -> void:
+	# A snapshot writing the box (client) isn't a local edit.
+	if _applying_snapshot:
+		return
+	if GameState.online and not GameState.is_authority():
+		if _trading and GameState.is_slot_local(_trade_proposer):
+			_net_trade_money_intent.rpc_id(1,
+				_trade_money_int(trader1_money_edit.text),
+				_trade_money_int(trader2_money_edit.text))
+		return
 	if not GameState.is_authority():
 		return
 	_mark_trade_modified()
+
+
+func _trade_money_int(text: String) -> int:
+	return maxi(0, int(text))
 
 
 # Any change to the terms -- a property clicked, a money box edited -- means
@@ -1932,6 +2027,10 @@ func _update_trade_action_button() -> void:
 # the other side for a decision, or -- once they've sent back exactly what's
 # already on screen -- finalizes the trade.
 func _on_offer_trade_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		if _trading and GameState.is_slot_local(_trade_proposer):
+			_net_trade_offer_intent.rpc_id(1)
+		return
 	if not GameState.is_authority():
 		return
 	if _trade_can_accept:
@@ -2013,6 +2112,10 @@ func _finalize_trade() -> void:
 
 
 func _on_decline_trade_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		if _trading and GameState.is_slot_local(_trade_proposer):
+			_net_trade_decline_intent.rpc_id(1)
+		return
 	if not GameState.is_authority():
 		return
 	var decliner: int = _trade_proposer
@@ -2432,6 +2535,11 @@ func _color_attunement(player: Node2D, color_name: String) -> int:
 
 func _on_space_clicked(index: int) -> void:
 	if GameState.online and not GameState.is_authority():
+		# During a trade, a property click toggles it in/out of the offer
+		# (routed if this machine is the proposer, otherwise ignored).
+		if _trading:
+			_handle_trade_click(index)
+			return
 		# A board click only means something while this machine's own seat is
 		# in a pick mode (house/mortgage, or a Promised Land target) -- then
 		# it's sent to the host. Otherwise it's just inspecting the tile.
@@ -2536,7 +2644,8 @@ func _show_property_details(index: int) -> void:
 	var lines: Array[String] = [space_name]
 	if info.has("price"):
 		lines.append("Cost: $%d" % info["price"])
-	_info_open("\n".join(lines))
+	# Local inspection popup -- never routed to another player.
+	info_prompt.open("\n".join(lines))
 
 
 # Shows the full card art for a spell, regardless of whose turn it is --
@@ -2561,6 +2670,12 @@ func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
 # levels are only usable responding to a roll or another spell) and then
 # Attunement (_color_attunement() must be >= the level).
 func _on_spell_clicked(hand_index: int, player_index: int) -> void:
+	# During a trade a spell-card click toggles that spell in/out of the
+	# offer -- _handle_trade_spell_click self-routes to the host if this
+	# machine is the proposer.
+	if _trading:
+		_handle_trade_spell_click(hand_index, player_index)
+		return
 	# Online: you may only cast from your own hand. A client sends the click
 	# to the host, which runs it for that seat exactly as a hotseat player
 	# would (turn spells on your turn, Instant spells once you've paused a
@@ -4403,15 +4518,30 @@ func _update_player_panels() -> void:
 # Host: the last snapshot broadcast. Client: the last snapshot applied. Either
 # way, "the last state we know about" -- an empty dict means "nothing yet".
 var _net_last_snapshot: Dictionary = {}
+# True only while _apply_snapshot() is running, so signal handlers fired by
+# programmatic widget updates (LineEdit.text -> text_changed) can tell a
+# snapshot apart from a real local edit.
+var _applying_snapshot: bool = false
+
+
+# Host: peers whose Main scene has come up and asked for state. Snapshots go
+# only to these (broadcasting to a peer mid-scene-load just logs "node not
+# found" and drops the packet).
+var _net_ready_peers: Dictionary = {}
 
 
 func _process(_delta: float) -> void:
 	if not (GameState.online and GameState.is_authority()):
 		return
 	var snap: Dictionary = _build_snapshot()
-	if snap != _net_last_snapshot:
-		_net_last_snapshot = snap
-		_recv_snapshot.rpc(snap)
+	if snap == _net_last_snapshot:
+		return
+	_net_last_snapshot = snap
+	for peer in _net_ready_peers.keys():
+		if multiplayer.get_peers().has(peer):
+			_recv_snapshot.rpc_id(peer, snap)
+		else:
+			_net_ready_peers.erase(peer)
 
 
 func _build_snapshot() -> Dictionary:
@@ -4459,6 +4589,7 @@ func _build_snapshot() -> Dictionary:
 		"trading": _trading,
 		"trader1": _trader1,
 		"trader2": _trader2,
+		"trade_proposer": _trade_proposer,
 		"trade1_offered": _trade1_offered.duplicate(),
 		"trade2_offered": _trade2_offered.duplicate(),
 		"trade1_spells": _trade1_spells_offered.duplicate(),
@@ -4480,7 +4611,9 @@ func _recv_snapshot(snap: Dictionary) -> void:
 func _request_snapshot() -> void:
 	if not GameState.is_authority() or players.is_empty():
 		return
-	_recv_snapshot.rpc_id(multiplayer.get_remote_sender_id(), _build_snapshot())
+	var who: int = multiplayer.get_remote_sender_id()
+	_net_ready_peers[who] = true
+	_recv_snapshot.rpc_id(who, _build_snapshot())
 
 
 func _net_request_initial_snapshot() -> void:
@@ -4493,6 +4626,9 @@ func _net_request_initial_snapshot() -> void:
 
 func _apply_snapshot(snap: Dictionary) -> void:
 	_net_last_snapshot = snap
+	# Setting LineEdit.text below fires text_changed; this flag keeps
+	# _on_trade_money_changed from treating a snapshot as a local edit.
+	_applying_snapshot = true
 
 	var player_states: Array = snap.get("players", [])
 	for i in mini(player_states.size(), players.size()):
@@ -4539,6 +4675,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_trade1_spells_offered = _net_int_array(snap.get("trade1_spells", []))
 	_trade2_spells_offered = _net_int_array(snap.get("trade2_spells", []))
 	_trade_can_accept = snap.get("trade_can_accept", false)
+	_trade_proposer = snap.get("trade_proposer", -1)
 
 	dice_label.text = snap.get("dice_text", "")
 	turn_label.text = snap.get("turn_text", "")
@@ -4550,13 +4687,12 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		trader1_label.add_theme_color_override("font_color", PLAYER_COLORS[_trader1])
 		trader2_label.text = PLAYER_NAMES[_trader2]
 		trader2_label.add_theme_color_override("font_color", PLAYER_COLORS[_trader2])
-		trader1_money_edit.text = snap.get("trade1_money", "")
-		trader2_money_edit.text = snap.get("trade2_money", "")
-		trader1_money_edit.editable = false
-		trader2_money_edit.editable = false
-		offer_trade_button.disabled = true
-		decline_trade_button.disabled = true
-		offer_trade_button.text = "Accept Trade" if _trade_can_accept else "Offer Trade"
+		# Don't stomp a box this player is actively editing (see
+		# _refresh_action_buttons for who that is); otherwise mirror the host.
+		if not trader1_money_edit.has_focus():
+			trader1_money_edit.text = snap.get("trade1_money", "")
+		if not trader2_money_edit.has_focus():
+			trader2_money_edit.text = snap.get("trade2_money", "")
 	else:
 		for child in trader1_flow.get_children():
 			child.queue_free()
@@ -4569,6 +4705,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 
 	_update_player_panels()
 	_refresh_action_buttons()
+	_applying_snapshot = false
 
 
 func _net_int_array(a) -> Array[int]:
