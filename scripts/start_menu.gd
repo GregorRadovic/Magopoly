@@ -12,6 +12,7 @@ const DEFAULT_SELECTIONS: Array[int] = [0, 2, 1, 1]
 @onready var start_button: Button = $VBox/StartButton
 @onready var close_game_button: Button = $VBox/CloseGameButton
 @onready var admin_mode_checkbox: CheckBox = $VBox/AdminModeCheckBox
+@onready var quickstart_mode_checkbox: CheckBox = $VBox/QuickstartModeCheckBox
 @onready var not_enough_players_dialog: AcceptDialog = $NotEnoughPlayersDialog
 @onready var player_type_options: Array[OptionButton] = [
 	$VBox/PlayersSection/PlayerRow0/TypeOption,
@@ -46,6 +47,7 @@ func _on_start_pressed() -> void:
 
 	GameState.player_types = types
 	GameState.admin_mode = admin_mode_checkbox.button_pressed
+	GameState.quickstart_mode = quickstart_mode_checkbox.button_pressed
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 

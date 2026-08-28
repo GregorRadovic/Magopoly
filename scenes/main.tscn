@@ -9,6 +9,8 @@
 [ext_resource type="PackedScene" path="res://scenes/asset_card.tscn" id="7"]
 [ext_resource type="PackedScene" path="res://scenes/player_picker.tscn" id="8"]
 [ext_resource type="PackedScene" path="res://scenes/spell_card.tscn" id="9"]
+[ext_resource type="PackedScene" path="res://scenes/card_picker.tscn" id="10"]
+[ext_resource type="Script" path="res://scripts/wizard_vision_line.gd" id="11"]
 
 [sub_resource type="StyleBoxFlat" id="OpaquePanelStyle"]
 bg_color = Color(0.145, 0.145, 0.161, 1)
@@ -23,6 +25,9 @@ script = ExtResource("1")
 [node name="Board" parent="." instance=ExtResource("2")]
 
 [node name="Players" type="Node2D" parent="."]
+
+[node name="WizardVisionLine" type="Node2D" parent="."]
+script = ExtResource("11")
 
 [node name="UI" type="CanvasLayer" parent="."]
 layer = 10
@@ -60,6 +65,10 @@ text = "Admin"
 custom_minimum_size = Vector2(200, 60)
 text = "Admin Properties"
 
+[node name="AdminSpellsButton" type="Button" parent="UI/Panel/VBox/AdminRow"]
+custom_minimum_size = Vector2(200, 60)
+text = "Admin Spells"
+
 [node name="BuyHouseUnmortgageButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
 text = "Buy houses / unmortgage"
@@ -91,6 +100,8 @@ text = "Trade"
 [node name="PlayerPicker" parent="UI" instance=ExtResource("8")]
 
 [node name="SpellCard" parent="UI" instance=ExtResource("9")]
+
+[node name="CardPicker" parent="UI" instance=ExtResource("10")]
 
 [node name="PlayersPanel" type="Panel" parent="UI"]
 theme_override_styles/panel = SubResource("OpaquePanelStyle")
