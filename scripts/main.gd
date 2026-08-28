@@ -354,6 +354,11 @@ func _ready() -> void:
 	_update_turn_label()
 	_update_player_panels()
 	_refresh_action_buttons()
+	if GameState.online:
+		if GameState.is_authority():
+			multiplayer.peer_disconnected.connect(_on_peer_gone)
+		else:
+			multiplayer.server_disconnected.connect(_on_host_gone)
 	if GameState.online and not GameState.is_authority():
 		_net_request_initial_snapshot()
 		return
@@ -625,6 +630,104 @@ func _net_trade_decline_intent() -> void:
 	_on_decline_trade_pressed()
 
 
+# ============================================================================
+# Online multiplayer -- disconnects (Phase 7)
+# ============================================================================
+
+# Client: the host's connection dropped. Nothing more can happen -- back to
+# the menu.
+func _on_host_gone() -> void:
+	if _returning_to_menu:
+		return
+	_returning_to_menu = true
+	Net.leave()
+	info_prompt.open("The host left the game. Returning to the menu.")
+	await info_prompt.closed
+	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
+
+
+var _returning_to_menu: bool = false
+
+
+# Host: a client dropped. Hand its seat(s) to the AI and unblock anything the
+# game was waiting on that player for.
+func _on_peer_gone(peer_id: int) -> void:
+	if not (GameState.online and GameState.is_authority()):
+		return
+	_net_ready_peers.erase(peer_id)
+	var affected: Array[int] = []
+	for slot in GameState.slot_peer.size():
+		if GameState.slot_peer[slot] == peer_id:
+			affected.append(slot)
+	if affected.is_empty():
+		return
+
+	for slot in affected:
+		GameState.slot_peer[slot] = 0
+		players[slot].is_ai = true
+		_response_window_paused_by[slot] = false
+		dice_label.text += "\n%s disconnected -- a Computer takes over." % PLAYER_NAMES[slot]
+
+	# A trade with the departed player can't continue.
+	if _trading and (affected.has(_trader1) or affected.has(_trader2)):
+		_end_trade()
+
+	# A debt the departed player was raising money for: settle it AI-style now
+	# (mortgage, sell houses, forfeit if still short).
+	if _in_debt and affected.has(_debt_player_id):
+		_ai_settle_debt_now(_debt_player_id)
+
+	_update_player_panels()
+	_refresh_action_buttons()
+
+	# If it's their turn and the turn is idle, get the AI moving. A turn
+	# mid-await (a routed prompt, response window) resolves to a default on
+	# its own and then lands on the End Turn step, which the watchdog clears.
+	if affected.has(current_player) and not players[current_player].is_bankrupt:
+		if _awaiting_end_turn:
+			_end_turn()
+		elif not (_casting_spell or _response_window_open or _trading or _in_debt or _awaiting_buy_decision):
+			_run_ai_turn()
+
+
+# The AI branch of _collect_debt(), run after the fact when a human in debt
+# disconnects mid-collection. Emits debt_resolved either way so the
+# _collect_debt() call still awaiting it can continue.
+func _ai_settle_debt_now(slot: int) -> void:
+	var player: Node2D = players[slot]
+	var amount: int = _debt_amount
+	var creditor: Node2D = _debt_creditor
+	_ai_mortgage_properties(player, amount)
+	if player.money < amount:
+		_ai_sell_houses(player, amount)
+	if player.money < amount:
+		_ai_mortgage_properties(player, amount)
+	if player.money >= amount:
+		_maybe_resolve_debt()
+	else:
+		dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(slot)
+		_forfeit_to_bankruptcy(player, creditor)
+		_in_debt = false
+		_debt_amount = 0
+		_debt_creditor = null
+		_debt_player_id = -1
+		debt_resolved.emit()
+
+
+# A seat that went AI via a disconnect can get stuck on the End Turn step --
+# _perform_roll() finished, but nothing clicks the button. Once the turn is
+# genuinely idle (no prompt, window, trade or debt in flight) and no real AI
+# turn coroutine is running, end it.
+func _net_ai_takeover_watchdog() -> void:
+	if not _awaiting_end_turn or _ai_turn_running:
+		return
+	if not players[current_player].is_ai or players[current_player].is_bankrupt:
+		return
+	if _casting_spell or _response_window_open or _trading or _in_debt or _awaiting_buy_decision:
+		return
+	_end_turn()
+
+
 # Called when the button (showing "End Turn" at this point) is pressed after
 # a roll that didn't earn another one. Actually hands play to the next
 # active player -- until this, the current player can keep managing houses,
@@ -650,7 +753,20 @@ func _advance_turn() -> void:
 # purchase, and end turn -- rolling again first if that roll was doubles.
 # Debt it can't cover ends in an immediate forfeit, since it has no other
 # way to raise money. Deliberately simple; smarter play comes later.
+#
+# _ai_turn_running is true for the whole span so the disconnect watchdog
+# (_net_ai_takeover_watchdog) can tell "AI turn in progress" from "AI seat
+# stranded on the End Turn step after a disconnect".
+var _ai_turn_running: bool = false
+
+
 func _run_ai_turn() -> void:
+	_ai_turn_running = true
+	await _run_ai_turn_body()
+	_ai_turn_running = false
+
+
+func _run_ai_turn_body() -> void:
 	var ai_index: int = current_player
 	await _ai_p2_opening_burn(players[ai_index])
 	while current_player == ai_index and not players[ai_index].is_bankrupt:
@@ -4537,6 +4653,7 @@ var _net_ready_peers: Dictionary = {}
 func _process(_delta: float) -> void:
 	if not (GameState.online and GameState.is_authority()):
 		return
+	_net_ai_takeover_watchdog()
 	var snap: Dictionary = _build_snapshot()
 	if snap == _net_last_snapshot:
 		return
@@ -4558,6 +4675,7 @@ func _build_snapshot() -> Dictionary:
 			"jail_turns": p.jail_turns_left,
 			"doubles": p.consecutive_doubles,
 			"bankrupt": p.is_bankrupt,
+			"is_ai": p.is_ai,
 			"visible": p.visible,
 			"owned": p.owned_property_indices.duplicate(),
 			"hand": p.spell_hand.duplicate(),
@@ -4574,6 +4692,7 @@ func _build_snapshot() -> Dictionary:
 		"players": player_states,
 		"spaces": space_states,
 		"current_player": current_player,
+		"slot_peer": GameState.slot_peer.duplicate(),
 		"free_parking": free_parking_amount,
 		"awaiting_end_turn": _awaiting_end_turn,
 		"in_debt": _in_debt,
@@ -4644,6 +4763,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		p.jail_turns_left = ps.get("jail_turns", 0)
 		p.consecutive_doubles = ps.get("doubles", 0)
 		p.is_bankrupt = ps.get("bankrupt", false)
+		p.is_ai = ps.get("is_ai", p.is_ai)
 		p.visible = ps.get("visible", true)
 		p.owned_property_indices = _net_int_array(ps.get("owned", []))
 		p.spell_hand = _net_string_array(ps.get("hand", []))
@@ -4659,6 +4779,8 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		s.is_mortgaged = ss.get("mortgaged", false)
 
 	current_player = snap.get("current_player", 0)
+	if snap.has("slot_peer"):
+		GameState.slot_peer = _net_int_array(snap["slot_peer"])
 	free_parking_amount = snap.get("free_parking", 0)
 	_awaiting_end_turn = snap.get("awaiting_end_turn", false)
 	_in_debt = snap.get("in_debt", false)

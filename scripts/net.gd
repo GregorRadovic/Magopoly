@@ -38,6 +38,9 @@ var peer_names: Dictionary = {1: "Host"}
 var online: bool = false
 var hosting: bool = false
 var my_name: String = "Player"
+# True once _recv_start has handed everyone into main.tscn. From then on a
+# peer drop is a gameplay event (main.gd handles it), not a lobby change.
+var game_started: bool = false
 
 
 func _ready() -> void:
@@ -80,6 +83,7 @@ func leave() -> void:
 	multiplayer.multiplayer_peer = null
 	online = false
 	hosting = false
+	game_started = false
 	_reset_slots()
 	peer_names = {1: my_name}
 	lobby_updated.emit()
@@ -116,7 +120,7 @@ func _register_client(client_name: String) -> void:
 
 
 func _on_peer_disconnected(id: int) -> void:
-	if not hosting:
+	if not hosting or game_started:
 		return
 	for i in SLOT_COUNT:
 		if slot_peer[i] == id:
@@ -214,6 +218,7 @@ func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bo
 	GameState.online = true
 	GameState.slot_peer = _to_int_array(peer_map)
 	GameState.local_peer_id = multiplayer.get_unique_id()
+	game_started = true
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
 
 
