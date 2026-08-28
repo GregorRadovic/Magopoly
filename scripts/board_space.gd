@@ -97,45 +97,65 @@ func _apply_layout() -> void:
 	var h: float = tile_size.y
 
 	if border:
-		border.offset_right = w
-		border.offset_bottom = h
+		_set_rect(border, 0.0, 0.0, w, h)
 	if background:
-		background.offset_left = BORDER
-		background.offset_top = BORDER
-		background.offset_right = w - BORDER
-		background.offset_bottom = h - BORDER
-	if banner:
-		banner.offset_left = BORDER
-		banner.offset_top = BORDER
-		banner.offset_right = w - BORDER
-		banner.offset_bottom = BORDER + BANNER_H
-	if house_icon:
-		_center_in_banner(house_icon, 16.0)
-	if house_count_label:
-		_center_in_banner(house_count_label, 16.0)
-	if label:
-		label.offset_left = 1.0
-		label.offset_top = 1.0
-		label.offset_right = w - 1.0
-		label.offset_bottom = h - 1.0
+		_set_rect(background, BORDER, BORDER, w - BORDER, h - BORDER)
 	if special_marker_label:
-		special_marker_label.offset_left = BORDER + 1.0
-		special_marker_label.offset_top = BORDER + BANNER_H + 1.0
-		special_marker_label.offset_right = BORDER + 19.0
-		special_marker_label.offset_bottom = BORDER + BANNER_H + 19.0
+		_set_rect(special_marker_label, BORDER + 2.0, BORDER + 2.0, BORDER + 20.0, BORDER + 20.0)
 	if click_area:
-		click_area.offset_right = w
-		click_area.offset_bottom = h
+		_set_rect(click_area, 0.0, 0.0, w, h)
 
+	_position_color_banner()
+	_position_name_label()
 	_position_owner_banner()
 
 
-func _center_in_banner(node: Control, sz: float) -> void:
-	var cx: float = tile_size.x * 0.5
-	node.offset_left = cx - sz * 0.5
-	node.offset_top = BORDER + (BANNER_H - sz) * 0.5
-	node.offset_right = cx + sz * 0.5
-	node.offset_bottom = BORDER + (BANNER_H + sz) * 0.5
+func _set_rect(node: Control, l: float, t: float, r: float, b: float) -> void:
+	node.offset_left = l
+	node.offset_top = t
+	node.offset_right = r
+	node.offset_bottom = b
+
+
+# The colour strip runs along the tile edge that faces the board's centre --
+# top for the bottom row, bottom for the top row, and vertically down the
+# inner edge for the two side columns (same as a real Monopoly board).
+func _position_color_banner() -> void:
+	if not banner:
+		return
+	var w: float = tile_size.x
+	var h: float = tile_size.y
+	match board_side:
+		0:  # bottom row -- strip along the top
+			_set_rect(banner, BORDER, BORDER, w - BORDER, BORDER + BANNER_H)
+		2:  # top row -- strip along the bottom
+			_set_rect(banner, BORDER, h - BORDER - BANNER_H, w - BORDER, h - BORDER)
+		1:  # left column -- strip down the right edge
+			_set_rect(banner, w - BORDER - BANNER_H, BORDER, w - BORDER, h - BORDER)
+		_:  # right column -- strip down the left edge
+			_set_rect(banner, BORDER, BORDER, BORDER + BANNER_H, h - BORDER)
+
+	# House icon / count sit centred in the strip (banner-local coordinates).
+	var bw: float = banner.offset_right - banner.offset_left
+	var bh: float = banner.offset_bottom - banner.offset_top
+	for node in [house_icon, house_count_label]:
+		if node:
+			_set_rect(node, bw * 0.5 - 8.0, bh * 0.5 - 8.0, bw * 0.5 + 8.0, bh * 0.5 + 8.0)
+
+
+# The tile name fills the tile but is inset from whichever edge carries the
+# colour strip, so the two don't overlap.
+func _position_name_label() -> void:
+	if not label:
+		return
+	var w: float = tile_size.x
+	var h: float = tile_size.y
+	var pad: float = BORDER + BANNER_H
+	match board_side:
+		0: _set_rect(label, 1.0, pad, w - 1.0, h - 1.0)
+		2: _set_rect(label, 1.0, 1.0, w - 1.0, h - pad)
+		1: _set_rect(label, 1.0, 1.0, w - pad, h - 1.0)
+		_: _set_rect(label, pad, 1.0, w - 1.0, h - 1.0)
 
 
 func _update_label() -> void:
