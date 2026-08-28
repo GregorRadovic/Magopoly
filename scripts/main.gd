@@ -354,6 +354,9 @@ func _ready() -> void:
 	_update_turn_label()
 	_update_player_panels()
 	_refresh_action_buttons()
+	if GameState.online and not GameState.is_authority():
+		_net_request_initial_snapshot()
+		return
 	if GameState.is_authority() and players[current_player].is_ai:
 		_run_ai_turn()
 
@@ -361,6 +364,10 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel") and not _quit_prompt_open:
 		_confirm_quit()
+		return
+	# Online: pausing the response window is host-only until Phase 5 wires it
+	# over the network. Quit (above) still works everywhere.
+	if not GameState.is_authority():
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		# Space Bar always pauses from P1's perspective, same as "1" --
@@ -1785,6 +1792,8 @@ func _handle_trade_spell_click(hand_index: int, player_index: int) -> void:
 
 
 func _on_trade_money_changed(_new_text: String) -> void:
+	if not GameState.is_authority():
+		return
 	_mark_trade_modified()
 
 
@@ -1805,6 +1814,8 @@ func _update_trade_action_button() -> void:
 # the other side for a decision, or -- once they've sent back exactly what's
 # already on screen -- finalizes the trade.
 func _on_offer_trade_pressed() -> void:
+	if not GameState.is_authority():
+		return
 	if _trade_can_accept:
 		_finalize_trade()
 	else:
@@ -1884,6 +1895,8 @@ func _finalize_trade() -> void:
 
 
 func _on_decline_trade_pressed() -> void:
+	if not GameState.is_authority():
+		return
 	var decliner: int = _trade_proposer
 	var other: int = _trader2 if decliner == _trader1 else _trader1
 	dice_label.text = "%s declined to trade with %s." % [PLAYER_NAMES[decliner], PLAYER_NAMES[other]]
@@ -2295,6 +2308,11 @@ func _color_attunement(player: Node2D, color_name: String) -> int:
 
 
 func _on_space_clicked(index: int) -> void:
+	# On a client, board / mini-card clicks are inspection only -- never a
+	# game action (Phase 3 routes real input through the host).
+	if not GameState.is_authority():
+		_show_property_details(index)
+		return
 	# Any tile click can dismiss the buy-confirmation popup as a side effect
 	# (Godot closes popups on any outside click, including whatever this
 	# click actually does), which would otherwise auto-decline the purchase;
@@ -2413,6 +2431,8 @@ func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
 # levels are only usable responding to a roll or another spell) and then
 # Attunement (_color_attunement() must be >= the level).
 func _on_spell_clicked(hand_index: int, player_index: int) -> void:
+	if not GameState.is_authority():
+		return
 	if _trading:
 		_handle_trade_spell_click(hand_index, player_index)
 		return
@@ -4220,3 +4240,190 @@ func _update_player_panels() -> void:
 		_populate_trade_spell_flow(trader1_flow, _trader1, _trade1_spells_offered)
 		_populate_trade_flow(trader2_flow, _trade2_offered)
 		_populate_trade_spell_flow(trader2_flow, _trader2, _trade2_spells_offered)
+
+
+# ============================================================================
+# Online multiplayer -- state replication (Phase 2)
+#
+# The host runs the only real simulation. Once per frame it builds a snapshot
+# of everything a client needs to render and, if anything changed since the
+# last one, broadcasts it. Clients apply snapshots and reuse the existing
+# _update_player_panels() / _refresh_action_buttons() to draw them; they never
+# mutate game state (see the GameState.is_authority() guards on the input
+# handlers). Player-driven input over the network arrives in Phase 3.
+# ============================================================================
+
+# Host: the last snapshot broadcast. Client: the last snapshot applied. Either
+# way, "the last state we know about" -- an empty dict means "nothing yet".
+var _net_last_snapshot: Dictionary = {}
+
+
+func _process(_delta: float) -> void:
+	if not (GameState.online and GameState.is_authority()):
+		return
+	var snap: Dictionary = _build_snapshot()
+	if snap != _net_last_snapshot:
+		_net_last_snapshot = snap
+		_recv_snapshot.rpc(snap)
+
+
+func _build_snapshot() -> Dictionary:
+	var player_states: Array = []
+	for p in players:
+		player_states.append({
+			"money": p.money,
+			"space": p.current_space,
+			"in_jail": p.in_jail,
+			"jail_turns": p.jail_turns_left,
+			"doubles": p.consecutive_doubles,
+			"bankrupt": p.is_bankrupt,
+			"visible": p.visible,
+			"owned": p.owned_property_indices.duplicate(),
+			"hand": p.spell_hand.duplicate(),
+			"attunement": p.temp_attunement.duplicate(),
+		})
+	var space_states: Array = []
+	for s in board.spaces:
+		space_states.append({
+			"owner": s.owner_id,
+			"houses": s.house_count,
+			"mortgaged": s.is_mortgaged,
+		})
+	return {
+		"players": player_states,
+		"spaces": space_states,
+		"current_player": current_player,
+		"free_parking": free_parking_amount,
+		"awaiting_end_turn": _awaiting_end_turn,
+		"dice_text": dice_label.text,
+		"turn_text": turn_label.text,
+		"response_window_open": _response_window_open,
+		"paused_by": _response_window_paused_by.duplicate(),
+		"roll_in_flight": _roll_in_flight,
+		"current_roll": _current_roll,
+		"trading": _trading,
+		"trader1": _trader1,
+		"trader2": _trader2,
+		"trade1_offered": _trade1_offered.duplicate(),
+		"trade2_offered": _trade2_offered.duplicate(),
+		"trade1_spells": _trade1_spells_offered.duplicate(),
+		"trade2_spells": _trade2_spells_offered.duplicate(),
+		"trade1_money": trader1_money_edit.text,
+		"trade2_money": trader2_money_edit.text,
+		"trade_can_accept": _trade_can_accept,
+	}
+
+
+@rpc("authority", "call_remote", "reliable")
+func _recv_snapshot(snap: Dictionary) -> void:
+	_apply_snapshot(snap)
+
+
+# Client -> host, on load: pull the current state right away instead of
+# waiting for the host's next change to be broadcast.
+@rpc("any_peer", "call_remote", "reliable")
+func _request_snapshot() -> void:
+	if not GameState.is_authority() or players.is_empty():
+		return
+	_recv_snapshot.rpc_id(multiplayer.get_remote_sender_id(), _build_snapshot())
+
+
+func _net_request_initial_snapshot() -> void:
+	for _attempt in 12:
+		if not _net_last_snapshot.is_empty():
+			return
+		_request_snapshot.rpc_id(1)
+		await get_tree().create_timer(0.5).timeout
+
+
+func _apply_snapshot(snap: Dictionary) -> void:
+	_net_last_snapshot = snap
+
+	var player_states: Array = snap.get("players", [])
+	for i in mini(player_states.size(), players.size()):
+		var ps: Dictionary = player_states[i]
+		var p: Node2D = players[i]
+		p.money = ps.get("money", p.money)
+		p.current_space = ps.get("space", p.current_space)
+		p.in_jail = ps.get("in_jail", false)
+		p.jail_turns_left = ps.get("jail_turns", 0)
+		p.consecutive_doubles = ps.get("doubles", 0)
+		p.is_bankrupt = ps.get("bankrupt", false)
+		p.visible = ps.get("visible", true)
+		p.owned_property_indices = _net_int_array(ps.get("owned", []))
+		p.spell_hand = _net_string_array(ps.get("hand", []))
+		p.temp_attunement = (ps.get("attunement", {}) as Dictionary).duplicate()
+		p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
+
+	var space_states: Array = snap.get("spaces", [])
+	for i in mini(space_states.size(), board.spaces.size()):
+		var ss: Dictionary = space_states[i]
+		var s: Node2D = board.spaces[i]
+		s.owner_id = ss.get("owner", -1)
+		s.house_count = ss.get("houses", 0)
+		s.is_mortgaged = ss.get("mortgaged", false)
+
+	current_player = snap.get("current_player", 0)
+	free_parking_amount = snap.get("free_parking", 0)
+	_awaiting_end_turn = snap.get("awaiting_end_turn", false)
+	_response_window_open = snap.get("response_window_open", false)
+	_response_window_paused_by = _net_bool_array(snap.get("paused_by", []))
+	_trading = snap.get("trading", false)
+	_trader1 = snap.get("trader1", -1)
+	_trader2 = snap.get("trader2", -1)
+	_trade1_offered = _net_int_array(snap.get("trade1_offered", []))
+	_trade2_offered = _net_int_array(snap.get("trade2_offered", []))
+	_trade1_spells_offered = _net_int_array(snap.get("trade1_spells", []))
+	_trade2_spells_offered = _net_int_array(snap.get("trade2_spells", []))
+	_trade_can_accept = snap.get("trade_can_accept", false)
+
+	dice_label.text = snap.get("dice_text", "")
+	turn_label.text = snap.get("turn_text", "")
+
+	trade_hseparator.visible = _trading
+	trade_display.visible = _trading
+	if _trading:
+		trader1_label.text = PLAYER_NAMES[_trader1]
+		trader1_label.add_theme_color_override("font_color", PLAYER_COLORS[_trader1])
+		trader2_label.text = PLAYER_NAMES[_trader2]
+		trader2_label.add_theme_color_override("font_color", PLAYER_COLORS[_trader2])
+		trader1_money_edit.text = snap.get("trade1_money", "")
+		trader2_money_edit.text = snap.get("trade2_money", "")
+		trader1_money_edit.editable = false
+		trader2_money_edit.editable = false
+		offer_trade_button.disabled = true
+		decline_trade_button.disabled = true
+		offer_trade_button.text = "Accept Trade" if _trade_can_accept else "Offer Trade"
+	else:
+		for child in trader1_flow.get_children():
+			child.queue_free()
+		for child in trader2_flow.get_children():
+			child.queue_free()
+
+	# These two have setters that redraw the wizard-vision line.
+	_current_roll = snap.get("current_roll", 0)
+	_roll_in_flight = snap.get("roll_in_flight", false)
+
+	_update_player_panels()
+	_refresh_action_buttons()
+
+
+func _net_int_array(a) -> Array[int]:
+	var out: Array[int] = []
+	for v in a:
+		out.append(int(v))
+	return out
+
+
+func _net_string_array(a) -> Array[String]:
+	var out: Array[String] = []
+	for v in a:
+		out.append(str(v))
+	return out
+
+
+func _net_bool_array(a) -> Array[bool]:
+	var out: Array[bool] = [false, false, false, false]
+	for i in mini(a.size(), 4):
+		out[i] = bool(a[i])
+	return out
