@@ -7,14 +7,14 @@ const SPACE_SCENE: PackedScene = preload("res://scenes/board_space.tscn")
 const SPACES_PER_SIDE: int = 10
 const TOTAL_SPACES: int = SPACES_PER_SIDE * 4
 
-# A proper Monopoly-shaped board. Each side is one square 2x2 corner tile
-# plus nine edge tiles that are 1 unit wide along the edge and 2 units deep
-# into the board -- so the whole board is 2 + 9 + 2 = 13 units on a side.
-const UNIT: float = 72.0
-const CORNER_SIZE: float = 2.0 * UNIT
-const EDGE_DEEP: float = 2.0 * UNIT
-const EDGE_THIN: float = UNIT
-const BOARD_SIZE: float = 13.0 * UNIT
+# A proper Monopoly-shaped board. Corner tiles are 3x3; the nine edge tiles
+# per side are 1.875 wide along the edge and 3 deep into the board (only the
+# ratios matter -- SCALE is just pixels per proportion-unit).
+const SCALE: float = 40.0
+const CORNER_SIZE: float = 3.0 * SCALE
+const EDGE_DEEP: float = 3.0 * SCALE
+const EDGE_THIN: float = 1.875 * SCALE
+const BOARD_SIZE: float = 2.0 * CORNER_SIZE + 9.0 * EDGE_THIN
 
 # Keys are resolved board indices (0..39). "-2" in the design spec counts
 # backward from Go, i.e. TOTAL_SPACES - 2 == 38.
