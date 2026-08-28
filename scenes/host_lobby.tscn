@@ -41,6 +41,30 @@ theme_override_font_sizes/font_size = 56
 text = "Host Game"
 horizontal_alignment = 1
 
+[node name="AddressRow" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_constants/separation = 12
+alignment = 1
+
+[node name="AddressLabel" type="Label" parent="VBox/AddressRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+text = "Others join with:"
+
+[node name="AddressValue" type="LineEdit" parent="VBox/AddressRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(260, 44)
+theme_override_font_sizes/font_size = 22
+editable = false
+alignment = 1
+
+[node name="CopyButton" type="Button" parent="VBox/AddressRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 44)
+theme_override_font_sizes/font_size = 20
+text = "Copy"
+
 [node name="StatusLabel" type="Label" parent="VBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 22

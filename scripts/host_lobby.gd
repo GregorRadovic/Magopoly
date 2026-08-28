@@ -12,6 +12,8 @@ const SLOT_COLORS: Array[Color] = [
 ]
 
 @onready var status_label: Label = $VBox/StatusLabel
+@onready var address_value: LineEdit = $VBox/AddressRow/AddressValue
+@onready var copy_button: Button = $VBox/AddressRow/CopyButton
 @onready var start_button: Button = $VBox/ButtonRow/StartButton
 @onready var back_button: Button = $VBox/ButtonRow/BackButton
 @onready var admin_checkbox: CheckBox = $VBox/OptionsRow/AdminModeCheckBox
@@ -27,6 +29,7 @@ func _ready() -> void:
 	Net.lobby_updated.connect(_refresh)
 
 	back_button.pressed.connect(_on_back)
+	copy_button.pressed.connect(_on_copy_pressed)
 	start_button.pressed.connect(func():
 		Net.start_game(admin_checkbox.button_pressed, quickstart_checkbox.button_pressed))
 
@@ -46,9 +49,12 @@ func _ready() -> void:
 	if not _host_ok:
 		status_label.text = "Couldn't start a server on port %d." % Net.DEFAULT_PORT
 		start_button.disabled = true
+		address_value.text = ""
+		copy_button.disabled = true
 		for row in slot_rows:
 			(row.get_node("KindOption") as OptionButton).disabled = true
 		return
+	address_value.text = _local_ip()
 	_refresh()
 
 
@@ -69,7 +75,15 @@ func _refresh() -> void:
 			opt.selected = sel if sel != -1 else 0
 
 	start_button.disabled = Net.active_slot_count() < 2
-	status_label.text = "Others join with: %s   (port %d)" % [_local_ip(), Net.DEFAULT_PORT]
+	status_label.text = "Port %d. Start when your players have joined." % Net.DEFAULT_PORT
+
+
+func _on_copy_pressed() -> void:
+	DisplayServer.clipboard_set(address_value.text)
+	copy_button.text = "Copied!"
+	await get_tree().create_timer(1.5).timeout
+	if is_instance_valid(copy_button):
+		copy_button.text = "Copy"
 
 
 func _slot_status_text(kind: int) -> String:
