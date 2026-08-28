@@ -177,6 +177,13 @@ theme_override_font_sizes/font_size = 24
 button_pressed = false
 text = "Admin Mode"
 
+[node name="QuickstartModeCheckBox" type="CheckBox" parent="VBox"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 24
+button_pressed = false
+text = "Quickstart Mode"
+
 [node name="StartButton" type="Button" parent="VBox"]
 layout_mode = 2
 size_flags_horizontal = 4

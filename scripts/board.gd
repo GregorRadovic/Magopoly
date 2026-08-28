@@ -66,6 +66,7 @@ const COLOR_GROUP_COLORS: Dictionary = {
 	"ocean_blue": Color(0.0, 0.447, 0.733),
 	"railroad": Color.BLACK,
 	"utility": Color(0.6, 0.6, 0.6),
+	"black": Color.BLACK,
 }
 
 # Cost to build one house on a property, by its color group. Railroads and
@@ -129,6 +130,7 @@ func _generate_board() -> void:
 		var space_type: String = info.get("type", "")
 		if space_type == "magic_forest" or space_type == "spell_shop":
 			space.special_marker = space_type
+		space.board_side = i / SPACES_PER_SIDE
 		space.position = _grid_to_position(_index_to_grid(i))
 		space.clicked.connect(space_clicked.emit)
 		add_child(space)

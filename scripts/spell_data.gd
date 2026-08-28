@@ -30,9 +30,13 @@ const SPELLS: Dictionary = {
 		"color": "red",
 		"icon": "res://Magopoly Assets/Cards/T3 Escape Spell.png",
 		"levels": {
-			1: {"description": "Increase your roll by 1.", "roll_bonus": 1, "timings": ["turn", "roll_response"], "requires_current_player": true},
-			2: {"description": "Increase your roll by 2.", "roll_bonus": 2, "timings": ["turn", "roll_response"], "requires_current_player": true},
-			3: {"description": "Increase your roll by 3.", "roll_bonus": 3, "timings": ["turn", "roll_response"], "requires_current_player": true},
+			# roll_response only -- modifying the *current* roll only makes
+			# sense while it's actually in flight; "turn" timing would let
+			# this be cast after it's already resolved into a move, wasting
+			# the card with zero effect.
+			1: {"description": "Increase your roll by 1.", "roll_bonus": 1, "timings": ["roll_response"], "requires_current_player": true},
+			2: {"description": "Increase your roll by 2.", "roll_bonus": 2, "timings": ["roll_response"], "requires_current_player": true},
+			3: {"description": "Increase your roll by 3.", "roll_bonus": 3, "timings": ["roll_response"], "requires_current_player": true},
 		},
 	},
 	"T2 Response Spell": {
@@ -183,7 +187,7 @@ const SPELLS: Dictionary = {
 		"levels": {
 			1: {"description": "When you buy your next property or house this turn, reduce the amount you would pay by 50%.", "discount_percent": 50, "timings": ["turn", "roll_response", "spell_response"]},
 			2: {"description": "When you buy your next property or house this turn, reduce the amount you would pay by 100%.", "discount_percent": 100, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "When you buy your next property or house this turn, reduce the amount you would pay by 50%. Then gain money equal to the money you would have spent.", "discount_percent": 50, "refund_on_use": true, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "When you buy your next property or house this turn, it's free. The bank also pays you money equal to its price.", "discount_percent": 100, "bank_bonus": true, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
 	"Burn to the Ground": {
@@ -268,9 +272,14 @@ const SPELLS: Dictionary = {
 		"color": "green",
 		"icon": "res://Magopoly Assets/Cards/7 1 Adrenaline.png",
 		"levels": {
-			1: {"description": "Increase your roll by 1.", "roll_bonus": 1, "timings": ["turn", "roll_response"], "requires_current_player": true},
-			2: {"description": "Increase your roll by 2.", "roll_bonus": 2, "timings": ["turn", "roll_response"], "requires_current_player": true},
-			3: {"description": "Increase your roll by 3.", "roll_bonus": 3, "timings": ["turn", "roll_response"], "requires_current_player": true},
+			# roll_response only -- see T3 Escape Spell's identical note:
+			# modifying the *current* roll only makes sense while it's still
+			# in flight. "turn" timing would let this be cast after the roll
+			# already resolved into a move, wasting the card with zero
+			# effect (the exact bug this was fixed for).
+			1: {"description": "Increase your roll by 1.", "roll_bonus": 1, "timings": ["roll_response"], "requires_current_player": true},
+			2: {"description": "Increase your roll by 2.", "roll_bonus": 2, "timings": ["roll_response"], "requires_current_player": true},
+			3: {"description": "Increase your roll by 3.", "roll_bonus": 3, "timings": ["roll_response"], "requires_current_player": true},
 		},
 	},
 	"Overflowing Bounty": {

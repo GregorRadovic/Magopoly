@@ -38,11 +38,11 @@ var price_gouging_bonus_houses: int = 0
 var next_roll_multiplier: int = 1
 # Haggling: percent discount (50 or 100) on this player's next property or
 # house purchase this turn; 0 = no discount active. Consumed (reset to 0,
-# along with haggling_refund_on_use) the moment it's used.
+# along with haggling_bank_bonus) the moment it's used.
 var haggling_discount_percent: int = 0
-# Haggling, Level 3: also refund the (already-discounted) amount actually
-# spent on that purchase, netting it to free.
-var haggling_refund_on_use: bool = false
+# Haggling, Level 3: the purchase is already free (100% discount); on top of
+# that, the bank also pays out the property/house's full undiscounted price.
+var haggling_bank_bonus: bool = false
 # Spell name -> number of copies to pull back out of the shared deck and
 # into this player's hand at the end of the turn they were cast on (Sanity
 # Grinding, Step Forward). See _queue_spell_return_to_hand() in main.gd.

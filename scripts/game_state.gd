@@ -16,3 +16,8 @@ enum PlayerType { HUMAN, DISABLED, COMPUTER }
 var player_types: Array[PlayerType] = [
 	PlayerType.HUMAN, PlayerType.COMPUTER, PlayerType.DISABLED, PlayerType.DISABLED,
 ]
+
+# If true, every active player starts with 3 random properties and 2 random
+# spells instead of the normal empty-handed, property-less start. Set by the
+# Start Menu's Quickstart Mode checkbox.
+var quickstart_mode: bool = false
