@@ -2017,6 +2017,7 @@ func _mark_trade_modified() -> void:
 	if _trade_can_accept:
 		_trade_can_accept = false
 		_update_trade_action_button()
+		_refresh_action_buttons()
 
 
 func _update_trade_action_button() -> void:
@@ -2046,6 +2047,9 @@ func _send_trade_offer() -> void:
 	_trade_can_accept = true
 	dice_label.text = "%s offered a trade to %s." % [PLAYER_NAMES[sender], PLAYER_NAMES[responder]]
 	_update_trade_action_button()
+	# The proposer just changed hands -- online, that moves the live trade
+	# controls to the other player's machine (and off this one).
+	_refresh_action_buttons()
 	if players[responder].is_ai:
 		if _ai_initiated_trade:
 			# Evaluate whatever the other side just sent back -- see
