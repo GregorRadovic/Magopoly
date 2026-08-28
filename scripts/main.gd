@@ -541,6 +541,39 @@ func _net_pause_intent(slot: int) -> void:
 	_toggle_pause_for_player(slot)
 
 
+# A remote player pressed one of their own-turn action buttons (buy/sell
+# houses, mortgage, declare bankruptcy). Validated against the acting seat
+# and run as if the button were pressed on the host.
+@rpc("any_peer", "call_remote", "reliable")
+func _net_action_intent(action: String) -> void:
+	if not GameState.is_authority():
+		return
+	if _peer_for_slot(_acting_player_id()) != multiplayer.get_remote_sender_id():
+		return
+	match action:
+		"buy_house_unmortgage":
+			_on_buy_house_unmortgage_pressed()
+		"sell_house_mortgage":
+			_on_sell_house_mortgage_pressed()
+		"declare_bankruptcy":
+			_on_declare_bankruptcy_pressed()
+
+
+# A remote player clicked a board tile while their seat was in a pick mode.
+@rpc("any_peer", "call_remote", "reliable")
+func _net_board_click_intent(index: int) -> void:
+	if not GameState.is_authority():
+		return
+	if _peer_for_slot(_acting_player_id()) != multiplayer.get_remote_sender_id():
+		return
+	# Only meaningful while a pick mode is actually armed -- otherwise a
+	# stale click (mode already consumed by an earlier one) would pop a
+	# property card on the host.
+	if not (_buying_house_or_unmortgaging or _selling_house_or_mortgaging or _picking_promised_land_property):
+		return
+	_on_space_clicked(index)
+
+
 # Called when the button (showing "End Turn" at this point) is pressed after
 # a roll that didn't earn another one. Actually hands play to the next
 # active player -- until this, the current player can keep managing houses,
@@ -752,6 +785,9 @@ func _on_admin_spells_pressed() -> void:
 
 
 func _on_buy_house_unmortgage_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		_net_action_intent.rpc_id(1, "buy_house_unmortgage")
+		return
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
@@ -827,6 +863,9 @@ func _min_houses_in_group(color_name: String) -> int:
 
 
 func _on_sell_house_mortgage_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		_net_action_intent.rpc_id(1, "sell_house_mortgage")
+		return
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
@@ -1742,45 +1781,37 @@ func _maybe_resolve_debt() -> void:
 # turns into End Turn and stays enabled while Admin (a stand-in for rolling)
 # turns off until that's clicked.
 func _refresh_action_buttons() -> void:
-	# Online, Phase 1: only the host runs the real game. Clients load the
-	# board but every control stays locked until in-game networking lands in
-	# a later phase.
-	if not GameState.is_authority():
-		# Client: everything stays locked except Roll / End Turn on this
-		# machine's own turn -- that intent is sent to the host (Phase 3).
-		# Houses, trades and spells wait for the Phase 4 prompt router.
-		for button in [admin_button, admin_properties_button, admin_spells_button,
-				buy_house_unmortgage_button, sell_house_mortgage_button,
-				declare_bankruptcy_button, trade_button]:
-			button.disabled = true
-		var my_roll: bool = GameState.is_slot_local(current_player) and _can_take_roll_action()
-		roll_button.disabled = not my_roll
-		roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
-		return
 	var limited_to_selling: bool = _in_debt or _awaiting_buy_decision
-	# Online: the host must not act on a remote player's turn -- their client
-	# drives it. (Local hotseat play is unaffected: is_slot_local() is always
-	# true there.)
-	var remote_turn: bool = GameState.online and not GameState.is_slot_local(_acting_player_id())
-	# A Computer player's turn plays itself -- lock every button so the
-	# human at the keyboard can't act (or trade) on its behalf while it's
-	# "thinking". While a debt is outstanding, this needs to reflect whoever
-	# actually owes it (see _acting_player_id()) -- otherwise a human forced
-	# into debt by a spell cast during an AI's turn would find Sell Houses/
-	# Mortgage, Declare Bankruptcy, and Trade all wrongly locked out.
+	# Online: only the machine that controls the acting seat gets live action
+	# buttons -- the host on a remote player's turn, and every client on
+	# someone else's turn, stay locked. (Local hotseat: is_slot_local() is
+	# always true, so this is never set.)
+	var not_my_seat: bool = GameState.online and not GameState.is_slot_local(_acting_player_id())
+	# Admin buttons are a host-side testing aid -- never offered to a client.
+	var host_only: bool = not GameState.is_authority()
+	# A Computer player's turn plays itself -- lock every button so the human
+	# at the keyboard can't act (or trade) on its behalf while it's "thinking".
+	# Uses _acting_player_id() so a human forced into debt on an AI's turn
+	# still gets Sell Houses / Mortgage / Declare Bankruptcy / Trade.
 	var ai_turn: bool = players[_acting_player_id()].is_ai
-	roll_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
+	var lock: bool = _trading or _casting_spell or _response_window_open or ai_turn or not_my_seat
+
+	roll_button.disabled = limited_to_selling or lock
 	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
-	admin_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or _awaiting_end_turn or ai_turn or remote_turn
-	admin_properties_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
-	admin_spells_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
-	buy_house_unmortgage_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
-	sell_house_mortgage_button.disabled = _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
-	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
-	trade_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
+	admin_button.disabled = limited_to_selling or lock or _awaiting_end_turn or host_only
+	admin_properties_button.disabled = limited_to_selling or lock or host_only
+	admin_spells_button.disabled = limited_to_selling or lock or host_only
+	buy_house_unmortgage_button.disabled = limited_to_selling or lock
+	sell_house_mortgage_button.disabled = lock
+	declare_bankruptcy_button.disabled = _awaiting_buy_decision or lock
+	# Trading is still driven entirely on the host (Phase 6b will route it).
+	trade_button.disabled = _awaiting_buy_decision or lock or host_only
 
 
 func _on_trade_pressed() -> void:
+	# Trading is not yet routed over the network (Phase 6b) -- host only.
+	if GameState.online and not GameState.is_authority():
+		return
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
@@ -2212,6 +2243,9 @@ func _check_for_winner() -> void:
 
 
 func _on_declare_bankruptcy_pressed() -> void:
+	if GameState.online and not GameState.is_authority():
+		_net_action_intent.rpc_id(1, "declare_bankruptcy")
+		return
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
@@ -2397,10 +2431,17 @@ func _color_attunement(player: Node2D, color_name: String) -> int:
 
 
 func _on_space_clicked(index: int) -> void:
-	# On a client, board / mini-card clicks are inspection only -- never a
-	# game action (Phase 3 routes real input through the host).
-	if not GameState.is_authority():
-		_show_property_details(index)
+	if GameState.online and not GameState.is_authority():
+		# A board click only means something while this machine's own seat is
+		# in a pick mode (house/mortgage, or a Promised Land target) -- then
+		# it's sent to the host. Otherwise it's just inspecting the tile.
+		if GameState.is_slot_local(_acting_player_id()) and (_buying_house_or_unmortgaging
+				or _selling_house_or_mortgaging or _picking_promised_land_property):
+			if info_prompt.visible:
+				info_prompt.hide()
+			_net_board_click_intent.rpc_id(1, index)
+		else:
+			_show_property_details(index)
 		return
 	# Any tile click can dismiss the buy-confirmation popup as a side effect
 	# (Godot closes popups on any outside click, including whatever this
@@ -4402,8 +4443,13 @@ func _build_snapshot() -> Dictionary:
 		"free_parking": free_parking_amount,
 		"awaiting_end_turn": _awaiting_end_turn,
 		"in_debt": _in_debt,
+		"debt_player": _debt_player_id,
+		"debt_amount": _debt_amount,
 		"awaiting_buy": _awaiting_buy_decision,
 		"casting_spell": _casting_spell,
+		"buying_ho": _buying_house_or_unmortgaging,
+		"selling_hm": _selling_house_or_mortgaging,
+		"picking_pl": _picking_promised_land_property,
 		"dice_text": dice_label.text,
 		"turn_text": turn_label.text,
 		"response_window_open": _response_window_open,
@@ -4476,8 +4522,13 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	free_parking_amount = snap.get("free_parking", 0)
 	_awaiting_end_turn = snap.get("awaiting_end_turn", false)
 	_in_debt = snap.get("in_debt", false)
+	_debt_player_id = snap.get("debt_player", -1)
+	_debt_amount = snap.get("debt_amount", 0)
 	_awaiting_buy_decision = snap.get("awaiting_buy", false)
 	_casting_spell = snap.get("casting_spell", false)
+	_buying_house_or_unmortgaging = snap.get("buying_ho", false)
+	_selling_house_or_mortgaging = snap.get("selling_hm", false)
+	_picking_promised_land_property = snap.get("picking_pl", false)
 	_response_window_open = snap.get("response_window_open", false)
 	_response_window_paused_by = _net_bool_array(snap.get("paused_by", []))
 	_trading = snap.get("trading", false)
