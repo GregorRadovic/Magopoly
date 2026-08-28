@@ -655,7 +655,7 @@ func _on_admin_properties_pressed() -> void:
 	# without ever emitting "closed", which used to leave pick mode
 	# unarmed and the buttons disabled forever.
 	_admin_picking_property = true
-	info_prompt.open("Click the property you want to gain.")
+	_info_open("Click the property you want to gain.")
 
 
 func _admin_assign_property(index: int) -> void:
@@ -701,8 +701,8 @@ func _on_admin_spells_pressed() -> void:
 	for i in spell_names.size():
 		var spell_info: Dictionary = SpellData.SPELLS.get(spell_names[i], {})
 		entries.append({"index": i, "name": spell_names[i], "icon": load(spell_info.get("icon", ""))})
-	card_picker.open("Admin Spells: choose a spell to add to your hand.", entries)
-	var choice: int = await card_picker.card_chosen
+	_cp_open("Admin Spells: choose a spell to add to your hand.", entries)
+	var choice: int = await _cp_result()
 	_refresh_action_buttons()
 	if choice < 0 or choice >= spell_names.size():
 		return
@@ -726,7 +726,7 @@ func _on_buy_house_unmortgage_pressed() -> void:
 	# dismisses the popup via Godot's default outside-click behavior without
 	# emitting "closed", so pick mode can't be left waiting on that signal.
 	_buying_house_or_unmortgaging = true
-	info_prompt.open("Click a property to build a house on it, or to unmortgage it if it's mortgaged.")
+	_info_open("Click a property to build a house on it, or to unmortgage it if it's mortgaged.")
 
 
 # Dispatches to unmortgaging or house-building depending on the clicked
@@ -799,7 +799,7 @@ func _on_sell_house_mortgage_pressed() -> void:
 	trade_button.disabled = true
 	# Armed immediately, same reasoning as Buy House / Admin Properties.
 	_selling_house_or_mortgaging = true
-	info_prompt.open("Click a property to sell a house from it, or to mortgage it if it has no houses.")
+	_info_open("Click a property to sell a house from it, or to mortgage it if it has no houses.")
 
 
 # Dispatches to house-selling or mortgaging depending on whether the clicked
@@ -1550,8 +1550,8 @@ func _visit_magic_forest(player: Node2D) -> void:
 			var spell_name: String = player.spell_hand[i]
 			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 			entries.append({"index": i, "name": spell_name, "icon": load(spell_info.get("icon", ""))})
-		card_picker.open("Magic Forest: choose a spell to discard.", entries, true)
-		hand_index = await card_picker.card_chosen
+		_cp_open("Magic Forest: choose a spell to discard.", entries, true)
+		hand_index = await _cp_result()
 
 	var discarded: String = player.spell_hand[hand_index]
 	player.spell_hand.remove_at(hand_index)
@@ -1585,8 +1585,8 @@ func _visit_spell_shop(player: Node2D) -> void:
 		for i in top_cards.size():
 			var spell_info: Dictionary = SpellData.SPELLS.get(top_cards[i], {})
 			entries.append({"index": i, "name": top_cards[i], "icon": load(spell_info.get("icon", ""))})
-		card_picker.open("Spell Shop: pick a spell for $100, or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX)
-		choice = await card_picker.card_chosen
+		_cp_open("Spell Shop: pick a spell for $100, or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX)
+		choice = await _cp_result()
 
 	if choice >= 0 and choice < top_cards.size():
 		if player.money < 100:
@@ -1756,8 +1756,8 @@ func _on_trade_pressed() -> void:
 		_refresh_action_buttons()
 		return
 
-	player_picker.open("Trade with which player?", entries)
-	var chosen: int = await player_picker.player_chosen
+	_pp_open("Trade with which player?", entries)
+	var chosen: int = await _pp_result()
 	if chosen == -1:
 		_refresh_action_buttons()
 		return
@@ -2176,8 +2176,8 @@ func _on_declare_bankruptcy_pressed() -> void:
 	declare_bankruptcy_button.disabled = true
 	trade_button.disabled = true
 
-	confirm_prompt.open("Are you sure you want to declare bankruptcy?")
-	var yes: bool = await confirm_prompt.answered
+	_cf_open("Are you sure you want to declare bankruptcy?")
+	var yes: bool = await _cf_result()
 	if yes:
 		var player: Node2D = players[_acting_player_id()]
 		var forfeiting_name: String = _player_display_name(player.player_id)
@@ -2228,8 +2228,8 @@ func _ask_buy_property(property_name: String, price: int) -> bool:
 	var player: Node2D = players[current_player]
 	var result: bool = false
 	while true:
-		confirm_prompt.open("Buy %s for $%d?" % [property_name, price])
-		var yes: bool = await confirm_prompt.answered
+		_cf_open("Buy %s for $%d?" % [property_name, price])
+		var yes: bool = await _cf_result()
 		if not yes:
 			break
 		if player.money >= price:
@@ -2243,8 +2243,10 @@ func _ask_buy_property(property_name: String, price: int) -> bool:
 
 
 func _reassert_buy_prompt_if_needed() -> void:
-	if _awaiting_buy_decision and not confirm_prompt.visible:
-		confirm_prompt.open("Buy %s for $%d?" % [_pending_buy_property_name, _pending_buy_price])
+	# Only meaningful for a prompt shown locally -- a buy decision routed to a
+	# remote player lives on their screen, not behind a host board click.
+	if _awaiting_buy_decision and _prompt_is_local() and not confirm_prompt.visible:
+		_cf_open("Buy %s for $%d?" % [_pending_buy_property_name, _pending_buy_price])
 
 
 func _sort_owned_properties(player: Node2D) -> void:
@@ -2448,7 +2450,7 @@ func _show_property_details(index: int) -> void:
 	var lines: Array[String] = [space_name]
 	if info.has("price"):
 		lines.append("Cost: $%d" % info["price"])
-	info_prompt.open("\n".join(lines))
+	_info_open("\n".join(lines))
 
 
 # Shows the full card art for a spell, regardless of whose turn it is --
@@ -2493,6 +2495,10 @@ func _on_spell_clicked(hand_index: int, player_index: int) -> void:
 	var color_name: String = spell_info.get("color", "")
 
 	_casting_spell = true
+	# The caster -- not necessarily whoever's turn it is -- owns every prompt
+	# this cast raises (level, then targets). Matters once a remote player can
+	# cast during someone else's response window (Phase 5); harmless now.
+	_prompt_slot = player_index
 	_refresh_action_buttons()
 
 	var level_entries: Array = []
@@ -2505,8 +2511,8 @@ func _on_spell_clicked(hand_index: int, player_index: int) -> void:
 	if color_name != "utility":
 		level_entries.append({"index": BURN_FOR_ATTUNEMENT_INDEX, "name": "Burn for Attunement (+1 %s Attunement)" % color_name.capitalize(), "color": Color.WHITE})
 
-	player_picker.open("Cast %s at what level?" % spell_name, level_entries)
-	var choice: int = await player_picker.player_chosen
+	_pp_open("Cast %s at what level?" % spell_name, level_entries)
+	var choice: int = await _pp_result()
 
 	# Only actually push a cast onto the stack -- and open/extend the
 	# response window for it -- once _casting_spell is released below, so
@@ -2531,6 +2537,7 @@ func _on_spell_clicked(hand_index: int, player_index: int) -> void:
 					post_cast = _finish_cast.bind(caster, spell_name, choice, resolve)
 
 	_casting_spell = false
+	_prompt_slot = -1
 	_refresh_action_buttons()
 
 	if post_cast.is_valid():
@@ -2762,8 +2769,8 @@ func _prepare_t1_burn_spell(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no opponent to burn."
 		return Callable()
 
-	player_picker.open("T1 Burn Spell: choose an opponent to pay you.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("T1 Burn Spell: choose an opponent to pay you.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 
@@ -2809,8 +2816,8 @@ func _prepare_t2_counter(caster: Node2D) -> Callable:
 		dice_label.text += "\nThere's no spell on the stack to counter."
 		return Callable()
 
-	player_picker.open("T2 Response Spell: choose a spell to counter.", entries)
-	var target_id: int = await player_picker.player_chosen
+	_pp_open("T2 Response Spell: choose a spell to counter.", entries)
+	var target_id: int = await _pp_result()
 	if target_id == -1:
 		return Callable()
 	return _resolve_counter_spell.bind(caster, "T2 Response Spell (Level 1)", target_id)
@@ -2824,8 +2831,8 @@ func _prepare_counterbalance(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no Level %d spell on the stack to counter." % level
 		return Callable()
 
-	player_picker.open("Counterbalance: choose a Level %d spell to counter." % level, entries)
-	var target_id: int = await player_picker.player_chosen
+	_pp_open("Counterbalance: choose a Level %d spell to counter." % level, entries)
+	var target_id: int = await _pp_result()
 	if target_id == -1:
 		return Callable()
 	return _resolve_counter_spell.bind(caster, "Counterbalance (Level %d)" % level, target_id)
@@ -2900,8 +2907,8 @@ func _prepare_snatch_purse(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no opponent to snatch from."
 		return Callable()
 
-	player_picker.open("Snatch Purse: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Snatch Purse: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 
@@ -3006,8 +3013,8 @@ func _prepare_migraine(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
 
-	player_picker.open("Migraine: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Migraine: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 
@@ -3044,8 +3051,8 @@ func _prepare_impossible_architecture(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no property to build on."
 		return Callable()
 
-	player_picker.open("Impossible Architecture: choose a property to build on.", entries)
-	var space_index: int = await player_picker.player_chosen
+	_pp_open("Impossible Architecture: choose a property to build on.", entries)
+	var space_index: int = await _pp_result()
 	if space_index == -1:
 		return Callable()
 
@@ -3103,8 +3110,8 @@ func _prepare_promised_land(caster: Node2D, level: int) -> Callable:
 				{"index": 2, "name": "Top Side", "color": Color.WHITE},
 				{"index": 3, "name": "Right Side", "color": Color.WHITE},
 			]
-			player_picker.open("Promised Land: choose a side of the board.", side_entries)
-			var side: int = await player_picker.player_chosen
+			_pp_open("Promised Land: choose a side of the board.", side_entries)
+			var side: int = await _pp_result()
 			if side == -1:
 				return Callable()
 			var pool: Array[int] = _unowned_property_indices_on_side(side)
@@ -3114,7 +3121,7 @@ func _prepare_promised_land(caster: Node2D, level: int) -> Callable:
 			space_index = pool[randi_range(0, pool.size() - 1)]
 		3:
 			_picking_promised_land_property = true
-			info_prompt.open("Promised Land: click an unowned property to (maybe) buy.")
+			_info_open("Promised Land: click an unowned property to (maybe) buy.")
 			var clicked: int = await board_space_picked
 			if info_prompt.visible:
 				info_prompt.hide()
@@ -3126,8 +3133,8 @@ func _prepare_promised_land(caster: Node2D, level: int) -> Callable:
 
 	var info: Dictionary = board.get_space_info(space_index)
 	var price: int = info.get("price", 0)
-	confirm_prompt.open("Promised Land: buy %s for $%d?" % [info.get("name", ""), price])
-	var yes: bool = await confirm_prompt.answered
+	_cf_open("Promised Land: buy %s for $%d?" % [info.get("name", ""), price])
+	var yes: bool = await _cf_result()
 	if not yes:
 		return Callable()
 	return _resolve_promised_land.bind(caster, level, space_index, price)
@@ -3231,8 +3238,8 @@ func _prepare_divine_protection(caster: Node2D, level: int) -> Callable:
 			{"index": 1, "name": "Subtract 1 from your roll", "color": Color.WHITE},
 			{"index": 2, "name": "Subtract 2 from your roll", "color": Color.WHITE},
 		]
-		player_picker.open("Divine Protection: subtract how much from your roll?", entries)
-		var amount: int = await player_picker.player_chosen
+		_pp_open("Divine Protection: subtract how much from your roll?", entries)
+		var amount: int = await _pp_result()
 		if amount == -1:
 			return Callable()
 		return _resolve_divine_protection.bind(caster, level, amount)
@@ -3269,16 +3276,16 @@ func _prepare_art_of_the_deal(caster: Node2D, hand_index: int, level: int) -> Ca
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
 
-	player_picker.open("Art of the Deal: choose an opponent.", opponent_entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Art of the Deal: choose an opponent.", opponent_entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 
 	var give_entries: Array = []
 	for i in giveable_indices:
 		give_entries.append({"index": i, "name": caster.spell_hand[i], "color": Color.WHITE})
-	player_picker.open("Art of the Deal: choose a spell to give away.", give_entries)
-	var give_index: int = await player_picker.player_chosen
+	_pp_open("Art of the Deal: choose a spell to give away.", give_entries)
+	var give_index: int = await _pp_result()
 	if give_index == -1:
 		return Callable()
 
@@ -3370,8 +3377,8 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no eligible property to take."
 		return Callable()
 
-	player_picker.open("Offer You Can't Refuse: choose an opponent's property without houses.", target_entries)
-	var target_space_index: int = await player_picker.player_chosen
+	_pp_open("Offer You Can't Refuse: choose an opponent's property without houses.", target_entries)
+	var target_space_index: int = await _pp_result()
 	if target_space_index == -1:
 		return Callable()
 
@@ -3393,8 +3400,8 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 			if entries.is_empty():
 				dice_label.text += "\n%s doesn't have enough property value to make this offer." % _player_display_name(caster.player_id)
 				return Callable()
-			player_picker.open("Offer You Can't Refuse: give properties worth $%d or more (have $%d so far)." % [target_price, total_value], entries)
-			var picked: int = await player_picker.player_chosen
+			_pp_open("Offer You Can't Refuse: give properties worth $%d or more (have $%d so far)." % [target_price, total_value], entries)
+			var picked: int = await _pp_result()
 			if picked == -1:
 				return Callable()
 			given.append(picked)
@@ -3411,8 +3418,8 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 		if entries.is_empty():
 			dice_label.text += "\n%s has no property to give in return." % _player_display_name(caster.player_id)
 			return Callable()
-		player_picker.open("Offer You Can't Refuse: choose a property to give in return.", entries)
-		var picked: int = await player_picker.player_chosen
+		_pp_open("Offer You Can't Refuse: choose a property to give in return.", entries)
+		var picked: int = await _pp_result()
 		if picked == -1:
 			return Callable()
 		return _resolve_offer_you_cant_refuse.bind(caster, level, target_space_index, target_owner_id, [picked] as Array[int], 0)
@@ -3480,8 +3487,8 @@ func _prepare_burn_to_the_ground(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere are no houses to destroy."
 		return Callable()
 
-	player_picker.open("Burn to the Ground: choose a property.", entries)
-	var space_index: int = await player_picker.player_chosen
+	_pp_open("Burn to the Ground: choose a property.", entries)
+	var space_index: int = await _pp_result()
 	if space_index == -1:
 		return Callable()
 	var houses: int = SpellData.SPELLS["Burn to the Ground"]["levels"][level].get("houses", 0)
@@ -3507,8 +3514,8 @@ func _prepare_line_of_fire(caster: Node2D, level: int) -> Callable:
 		{"index": 2, "name": "Top Side", "color": Color.WHITE},
 		{"index": 3, "name": "Right Side", "color": Color.WHITE},
 	]
-	player_picker.open("Line of Fire: choose a side of the board.", side_entries)
-	var side: int = await player_picker.player_chosen
+	_pp_open("Line of Fire: choose a side of the board.", side_entries)
+	var side: int = await _pp_result()
 	if side == -1:
 		return Callable()
 	var amount: int = SpellData.SPELLS["Line of Fire"]["levels"][level].get("amount", 0)
@@ -3585,8 +3592,8 @@ func _prepare_threaten(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no eligible property to threaten."
 		return Callable()
 
-	player_picker.open("Threaten: choose an opponent's property without houses.", entries)
-	var space_index: int = await player_picker.player_chosen
+	_pp_open("Threaten: choose an opponent's property without houses.", entries)
+	var space_index: int = await _pp_result()
 	if space_index == -1:
 		return Callable()
 	var amount: int = SpellData.SPELLS["Threaten"]["levels"][level].get("amount", 0)
@@ -3609,8 +3616,8 @@ func _resolve_threaten(caster: Node2D, level: int, space_index: int, amount: int
 			{"index": 0, "name": "Give up %s" % property_name, "color": Color.WHITE},
 			{"index": 1, "name": "Pay $%d" % amount, "color": Color.WHITE},
 		]
-		player_picker.open("%s's Threaten (Level %d): give up %s, or pay $%d?" % [_player_display_name(caster.player_id), level, property_name, amount], entries)
-		var choice: int = await player_picker.player_chosen
+		_pp_open("%s's Threaten (Level %d): give up %s, or pay $%d?" % [_player_display_name(caster.player_id), level, property_name, amount], entries)
+		var choice: int = await _pp_result()
 		give_up_property = choice != 1
 
 	if give_up_property:
@@ -3649,8 +3656,8 @@ func _prepare_royal_aid(caster: Node2D, level: int) -> Callable:
 			entries.append({"index": space_index, "name": "%s ($%d)" % [display_name, cost], "color": Color.WHITE})
 		if entries.is_empty():
 			break
-		player_picker.open("Royal Aid: choose a mortgaged property to unmortgage (%d/%d)." % [chosen.size() + 1, count], entries)
-		var picked: int = await player_picker.player_chosen
+		_pp_open("Royal Aid: choose a mortgaged property to unmortgage (%d/%d)." % [chosen.size() + 1, count], entries)
+		var picked: int = await _pp_result()
 		if picked == -1:
 			break
 		chosen.append(picked)
@@ -3691,8 +3698,8 @@ func _prepare_taxes(caster: Node2D, level: int) -> Callable:
 	if entries.is_empty():
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
-	player_picker.open("Taxes: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Taxes: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 	var divisor: int = SpellData.SPELLS["Taxes"]["levels"][level].get("divisor", 1)
@@ -3723,8 +3730,8 @@ func _prepare_far_reaching_empire(caster: Node2D, level: int) -> Callable:
 	if entries.is_empty():
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
-	player_picker.open("Far-Reaching Empire: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Far-Reaching Empire: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 	var amount: int = SpellData.SPELLS["Far-Reaching Empire"]["levels"][level].get("amount", 0)
@@ -3772,8 +3779,8 @@ func _prepare_annexation(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no eligible property to annex."
 		return Callable()
 
-	player_picker.open("Annexation: choose a property without houses.", entries)
-	var target_space_index: int = await player_picker.player_chosen
+	_pp_open("Annexation: choose a property without houses.", entries)
+	var target_space_index: int = await _pp_result()
 	if target_space_index == -1:
 		return Callable()
 	var target_owner_id: int = board.spaces[target_space_index].owner_id
@@ -3832,8 +3839,8 @@ func _prepare_sinkhole(caster: Node2D, level: int) -> Callable:
 	if entries.is_empty():
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
-	player_picker.open("Sinkhole: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Sinkhole: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 	var amount: int = SpellData.SPELLS["Sinkhole"]["levels"][level].get("amount", 0)
@@ -3886,8 +3893,8 @@ func _prepare_decompose(caster: Node2D, level: int) -> Callable:
 			entries.append({"index": space_index, "name": "%s (%s)" % [info.get("name", ""), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
 		if entries.is_empty():
 			break
-		player_picker.open("Decompose: choose a mortgaged property to return to the bank (%d/%d)." % [chosen.size() + 1, count], entries)
-		var picked: int = await player_picker.player_chosen
+		_pp_open("Decompose: choose a mortgaged property to return to the bank (%d/%d)." % [chosen.size() + 1, count], entries)
+		var picked: int = await _pp_result()
 		if picked == -1:
 			break
 		chosen.append(picked)
@@ -3928,8 +3935,8 @@ func _prepare_sanity_grinding(caster: Node2D, level: int) -> Callable:
 	if entries.is_empty():
 		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
-	player_picker.open("Sanity Grinding: choose an opponent.", entries)
-	var target_index: int = await player_picker.player_chosen
+	_pp_open("Sanity Grinding: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 	var amount: int = SpellData.SPELLS["Sanity Grinding"]["levels"][level].get("amount", 0)
@@ -3956,8 +3963,8 @@ func _prepare_spell_mastery(caster: Node2D, level: int) -> Callable:
 	if entries.is_empty():
 		dice_label.text += "\nThere's no spell on the stack to counter."
 		return Callable()
-	player_picker.open("Spell Mastery: choose a spell to counter.", entries)
-	var target_id: int = await player_picker.player_chosen
+	_pp_open("Spell Mastery: choose a spell to counter.", entries)
+	var target_id: int = await _pp_result()
 	if target_id == -1:
 		return Callable()
 	return _resolve_spell_mastery.bind(caster, level, target_id)
@@ -4033,8 +4040,8 @@ func _prepare_manastone(caster: Node2D, level: int) -> Callable:
 	for i in ATTUNABLE_COLORS.size():
 		var color_name: String = ATTUNABLE_COLORS[i]
 		color_entries.append({"index": i, "name": color_name.capitalize(), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
-	player_picker.open("Manastone: choose a color to gain Temporary Attunement for.", color_entries)
-	var chosen_index: int = await player_picker.player_chosen
+	_pp_open("Manastone: choose a color to gain Temporary Attunement for.", color_entries)
+	var chosen_index: int = await _pp_result()
 	if chosen_index == -1:
 		return Callable()
 	var color_name: String = ATTUNABLE_COLORS[chosen_index]
@@ -4112,8 +4119,8 @@ func _prepare_cult_of_terminus_buy_railroad(caster: Node2D) -> Callable:
 		dice_label.text += "\n%s can't afford $%d." % [_player_display_name(caster.player_id), price]
 		return Callable()
 
-	player_picker.open("The Cult of Terminus: choose a railroad to buy for $%d." % price, entries)
-	var target_space_index: int = await player_picker.player_chosen
+	_pp_open("The Cult of Terminus: choose a railroad to buy for $%d." % price, entries)
+	var target_space_index: int = await _pp_result()
 	if target_space_index == -1:
 		return Callable()
 	var target_owner_id: int = board.spaces[target_space_index].owner_id
@@ -4474,4 +4481,210 @@ func _net_bool_array(a) -> Array[bool]:
 	var out: Array[bool] = [false, false, false, false]
 	for i in mini(a.size(), 4):
 		out[i] = bool(a[i])
+	return out
+
+
+# ============================================================================
+# Online multiplayer -- prompt router (Phase 4)
+#
+# The host runs all game logic, but a question meant for a specific player
+# (buy this property? which spell to discard?) must be answered on THAT
+# player's machine. Every popup the host would open now goes through an
+# _xx_open / _xx_result wrapper: if the target player is local -- or it's a
+# local game -- the real popup opens here exactly as before; otherwise the
+# host asks that player's client over RPC and awaits the reply.
+#
+# Pickers are used strictly one-at-a-time (each caller awaits its result
+# before opening the next), so a single pending-request slot suffices.
+# ============================================================================
+
+# Which player should see prompts right now. -1 == "derive it" (whoever is
+# acting). Reserved for Phase 5, when a remote player can cast spells and the
+# caster -- not the current player -- owns the follow-up prompts.
+var _prompt_slot: int = -1
+var _net_prompt_seq: int = 0
+var _net_prompt_replies: Dictionary = {}
+var _net_pending_req: int = 0
+var _net_pending_peer: int = 0
+var _net_pending_kind: String = ""
+
+
+func _prompt_target() -> int:
+	return _prompt_slot if _prompt_slot >= 0 else _acting_player_id()
+
+
+func _prompt_is_local() -> bool:
+	return not GameState.online or GameState.is_slot_local(_prompt_target())
+
+
+func _peer_for_slot(slot: int) -> int:
+	return GameState.slot_peer[slot] if slot >= 0 and slot < GameState.slot_peer.size() else 1
+
+
+# --- confirm_prompt (yes / no) ----------------------------------------
+
+func _cf_open(text: String) -> void:
+	if _prompt_is_local():
+		confirm_prompt.open(text)
+	else:
+		_net_open_remote("confirm", {"text": text})
+
+
+func _cf_result() -> bool:
+	if _prompt_is_local():
+		return await confirm_prompt.answered
+	return bool(await _net_await_reply())
+
+
+# --- player_picker (choice list) ------------------------------------
+
+func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
+	if _prompt_is_local():
+		player_picker.open(text, entries, mandatory)
+	else:
+		_net_open_remote("pick", {
+			"text": text, "entries": _net_pack_entries(entries), "mandatory": mandatory,
+		})
+
+
+func _pp_result() -> int:
+	if _prompt_is_local():
+		return await player_picker.player_chosen
+	return int(await _net_await_reply())
+
+
+# --- card_picker --------------------------------------------------
+
+func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2) -> void:
+	if _prompt_is_local():
+		card_picker.open(text, entries, mandatory, skip_text, skip_index)
+	else:
+		_net_open_remote("card", {
+			"text": text, "entries": _net_pack_card_entries(entries),
+			"mandatory": mandatory, "skip_text": skip_text, "skip_index": skip_index,
+		})
+
+
+func _cp_result() -> int:
+	if _prompt_is_local():
+		return await card_picker.card_chosen
+	return int(await _net_await_reply())
+
+
+# --- info_prompt (no reply) --------------------------------------
+
+func _info_open(text: String) -> void:
+	if _prompt_is_local():
+		info_prompt.open(text)
+	else:
+		_net_show_info.rpc_id(_peer_for_slot(_prompt_target()), text)
+
+
+# --- host side: dispatch + await ----------------------------------
+
+func _net_open_remote(kind: String, payload: Dictionary) -> void:
+	_net_prompt_seq += 1
+	_net_pending_req = _net_prompt_seq
+	_net_pending_peer = _peer_for_slot(_prompt_target())
+	_net_pending_kind = kind
+	_net_prompt_replies.erase(_net_pending_req)
+	_net_show_prompt.rpc_id(_net_pending_peer, _net_pending_req, kind, payload)
+
+
+func _net_await_reply() -> Variant:
+	var req: int = _net_pending_req
+	var peer: int = _net_pending_peer
+	while not _net_prompt_replies.has(req):
+		if not multiplayer.get_peers().has(peer):
+			# The player we were waiting on is gone -- resolve to a safe
+			# default so host logic never hangs. (Phase 6 handles this
+			# properly; for now the turn just proceeds as a decline.)
+			return false if _net_pending_kind == "confirm" else -1
+		await get_tree().process_frame
+	var value: Variant = _net_prompt_replies[req]
+	_net_prompt_replies.erase(req)
+	return value
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_prompt_reply(req_id: int, value: Variant) -> void:
+	if not GameState.is_authority():
+		return
+	_net_prompt_replies[req_id] = value
+
+
+# --- client side: show the popup, send the answer back --------------
+
+@rpc("authority", "call_remote", "reliable")
+func _net_show_prompt(req_id: int, kind: String, payload: Dictionary) -> void:
+	var result: Variant = await _net_client_run_prompt(kind, payload)
+	_net_prompt_reply.rpc_id(1, req_id, result)
+
+
+func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
+	match kind:
+		"confirm":
+			confirm_prompt.open(str(payload.get("text", "")))
+			return await confirm_prompt.answered
+		"pick":
+			player_picker.open(str(payload.get("text", "")),
+				_net_unpack_entries(payload.get("entries", [])),
+				bool(payload.get("mandatory", false)))
+			return await player_picker.player_chosen
+		"card":
+			card_picker.open(str(payload.get("text", "")),
+				_net_unpack_card_entries(payload.get("entries", [])),
+				bool(payload.get("mandatory", false)),
+				str(payload.get("skip_text", "")),
+				int(payload.get("skip_index", -2)))
+			return await card_picker.card_chosen
+	return -1
+
+
+@rpc("authority", "call_remote", "reliable")
+func _net_show_info(text: String) -> void:
+	info_prompt.open(text)
+
+
+# --- entry (de)serialization ------------------------------------
+
+func _net_pack_entries(entries: Array) -> Array:
+	var out: Array = []
+	for e in entries:
+		out.append({
+			"index": int(e["index"]), "name": str(e["name"]),
+			"color": e.get("color", Color.WHITE),
+		})
+	return out
+
+
+func _net_unpack_entries(entries: Array) -> Array:
+	var out: Array = []
+	for e in entries:
+		out.append({
+			"index": int(e["index"]), "name": str(e["name"]),
+			"color": e.get("color", Color.WHITE),
+		})
+	return out
+
+
+func _net_pack_card_entries(entries: Array) -> Array:
+	var out: Array = []
+	for e in entries:
+		var icon: Variant = e.get("icon", null)
+		out.append({
+			"index": int(e["index"]), "name": str(e.get("name", "")),
+			"icon_path": icon.resource_path if icon != null else "",
+		})
+	return out
+
+
+func _net_unpack_card_entries(entries: Array) -> Array:
+	var out: Array = []
+	for e in entries:
+		var path: String = str(e.get("icon_path", ""))
+		out.append({
+			"index": int(e["index"]), "name": str(e.get("name", "")),
+			"icon": load(path) if path != "" else null,
+		})
 	return out
