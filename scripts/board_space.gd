@@ -3,6 +3,17 @@ class_name BoardSpace
 
 signal clicked(index: int)
 
+# Border thickness, colour-banner height (top strip) and ownership-banner
+# thickness -- the ownership banner juts OUTSIDE the tile toward the board's
+# centre, offset by OWNER_GAP.
+const BORDER: float = 2.0
+const BANNER_H: float = 18.0
+const OWNER_T: float = 16.0
+const OWNER_GAP: float = 2.0
+
+const MAGIC_FOREST_COLOR: Color = Color(0.6, 0.2, 0.85)
+const SPELL_SHOP_COIN_COLOR: Color = Color(0.9, 0.75, 0.15)
+
 @export var index: int = 0:
 	set(value):
 		index = value
@@ -26,16 +37,21 @@ signal clicked(index: int)
 
 # Which side of the board this space is on (0 = bottom, 1 = left, 2 = top,
 # 3 = right -- matches board.gd's own side numbering, i / SPACES_PER_SIDE).
-# Determines which direction the ownership banner juts toward the board's
-# center. Set once by board.gd right after instancing.
+# Determines which way the ownership banner juts. Set by board.gd on spawn.
 @export var board_side: int = 0:
 	set(value):
 		board_side = value
-		_position_owner_banner()
+		_apply_layout()
 
-const MAGIC_FOREST_COLOR: Color = Color(0.6, 0.2, 0.85)
-const SPELL_SHOP_COIN_COLOR: Color = Color(0.9, 0.75, 0.15)
+# Full pixel size of this tile. Corner tiles are square; edge tiles are
+# oblong (see board.gd's _tile_rect). Set by board.gd on spawn.
+@export var tile_size: Vector2 = Vector2(72, 72):
+	set(value):
+		tile_size = value
+		_apply_layout()
 
+@onready var border: ColorRect = $Border
+@onready var background: ColorRect = $Background
 @onready var label: Label = $IndexLabel
 @onready var click_area: Control = $ClickArea
 @onready var banner: ColorRect = $ColorBanner
@@ -60,17 +76,66 @@ var is_mortgaged: bool = false
 
 
 func _ready() -> void:
+	_apply_layout()
 	_update_label()
 	_update_banner()
 	_update_house_display()
 	_update_special_marker()
-	_position_owner_banner()
 	click_area.gui_input.connect(_on_click_area_gui_input)
 
 
 func _on_click_area_gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		clicked.emit(index)
+
+
+# Sizes every child to the current tile_size. A no-op until the @onready
+# nodes exist (the setters can fire before _ready during board generation);
+# _ready() calls it again once they do.
+func _apply_layout() -> void:
+	var w: float = tile_size.x
+	var h: float = tile_size.y
+
+	if border:
+		border.offset_right = w
+		border.offset_bottom = h
+	if background:
+		background.offset_left = BORDER
+		background.offset_top = BORDER
+		background.offset_right = w - BORDER
+		background.offset_bottom = h - BORDER
+	if banner:
+		banner.offset_left = BORDER
+		banner.offset_top = BORDER
+		banner.offset_right = w - BORDER
+		banner.offset_bottom = BORDER + BANNER_H
+	if house_icon:
+		_center_in_banner(house_icon, 16.0)
+	if house_count_label:
+		_center_in_banner(house_count_label, 16.0)
+	if label:
+		label.offset_left = 1.0
+		label.offset_top = 1.0
+		label.offset_right = w - 1.0
+		label.offset_bottom = h - 1.0
+	if special_marker_label:
+		special_marker_label.offset_left = BORDER + 1.0
+		special_marker_label.offset_top = BORDER + BANNER_H + 1.0
+		special_marker_label.offset_right = BORDER + 19.0
+		special_marker_label.offset_bottom = BORDER + BANNER_H + 19.0
+	if click_area:
+		click_area.offset_right = w
+		click_area.offset_bottom = h
+
+	_position_owner_banner()
+
+
+func _center_in_banner(node: Control, sz: float) -> void:
+	var cx: float = tile_size.x * 0.5
+	node.offset_left = cx - sz * 0.5
+	node.offset_top = BORDER + (BANNER_H - sz) * 0.5
+	node.offset_right = cx + sz * 0.5
+	node.offset_bottom = BORDER + (BANNER_H + sz) * 0.5
 
 
 func _update_label() -> void:
@@ -91,70 +156,66 @@ func _update_house_display() -> void:
 		house_count_label.text = str(house_count)
 
 
-# Positions the ownership banner just outside this tile's edge, jutting
-# toward the board's center -- which direction that is depends entirely on
-# which side of the board this space is on. The left/right column banners
-# end up tall and narrow (16x74) rather than wide and short (74x16), so the
-# label inside has to rotate to actually fit within it -- see
-# _reset_owner_banner_label()/_rotate_owner_banner_label().
+# Positions the ownership banner just outside the tile edge that faces the
+# board's centre. Bottom/top rows get a flat horizontal banner; the left/
+# right columns get a tall narrow one, so its label rotates 90 degrees to
+# fit (see _layout_owner_label_rotated).
 func _position_owner_banner() -> void:
 	if not owner_banner:
 		return
+	var w: float = tile_size.x
+	var h: float = tile_size.y
 	match board_side:
 		0:  # bottom row -- jut up
-			owner_banner.offset_left = 2.0
-			owner_banner.offset_top = -18.0
-			owner_banner.offset_right = 76.0
-			owner_banner.offset_bottom = -2.0
-			_reset_owner_banner_label()
-		1:  # left column -- jut right
-			owner_banner.offset_left = 80.0
-			owner_banner.offset_top = 2.0
-			owner_banner.offset_right = 96.0
-			owner_banner.offset_bottom = 76.0
-			_rotate_owner_banner_label()
+			owner_banner.offset_left = BORDER
+			owner_banner.offset_top = -(OWNER_T + OWNER_GAP)
+			owner_banner.offset_right = w - BORDER
+			owner_banner.offset_bottom = -OWNER_GAP
+			_layout_owner_label_flat()
 		2:  # top row -- jut down
-			owner_banner.offset_left = 2.0
-			owner_banner.offset_top = 80.0
-			owner_banner.offset_right = 76.0
-			owner_banner.offset_bottom = 96.0
-			_reset_owner_banner_label()
+			owner_banner.offset_left = BORDER
+			owner_banner.offset_top = h + OWNER_GAP
+			owner_banner.offset_right = w - BORDER
+			owner_banner.offset_bottom = h + OWNER_GAP + OWNER_T
+			_layout_owner_label_flat()
+		1:  # left column -- jut right
+			owner_banner.offset_left = w + OWNER_GAP
+			owner_banner.offset_top = BORDER
+			owner_banner.offset_right = w + OWNER_GAP + OWNER_T
+			owner_banner.offset_bottom = h - BORDER
+			_layout_owner_label_rotated()
 		_:  # right column -- jut left
-			owner_banner.offset_left = -18.0
-			owner_banner.offset_top = 2.0
-			owner_banner.offset_right = -2.0
-			owner_banner.offset_bottom = 76.0
-			_rotate_owner_banner_label()
+			owner_banner.offset_left = -(OWNER_T + OWNER_GAP)
+			owner_banner.offset_top = BORDER
+			owner_banner.offset_right = -OWNER_GAP
+			owner_banner.offset_bottom = h - BORDER
+			_layout_owner_label_rotated()
 
 
-# Bottom/top rows: the banner is wide and short (74x16), matching the
-# label's natural (unrotated) layout exactly, so it just fills it directly.
-func _reset_owner_banner_label() -> void:
+func _layout_owner_label_flat() -> void:
 	if not owner_banner_label:
 		return
 	owner_banner_label.rotation = 0.0
 	owner_banner_label.pivot_offset = Vector2.ZERO
 	owner_banner_label.offset_left = 0.0
 	owner_banner_label.offset_top = 0.0
-	owner_banner_label.offset_right = 74.0
-	owner_banner_label.offset_bottom = 16.0
+	owner_banner_label.offset_right = tile_size.x - 2.0 * BORDER
+	owner_banner_label.offset_bottom = OWNER_T
 
 
-# Left/right columns: the banner is tall and narrow (16x74) -- the opposite
-# aspect ratio from the label's natural 74x16 layout. Rather than cramming
-# "P1" into a 16px-wide box (where it wouldn't fit), the label keeps its
-# normal 74x16 size (so the text lays out exactly as it does everywhere
-# else) and rotates 90 degrees around its own center; with that center
-# aligned to the parent banner's center (8, 37 in the banner's own 16x74
-# local space), the rotated 16x74 footprint exactly fills the banner.
-func _rotate_owner_banner_label() -> void:
+# The banner here is OWNER_T wide x `band` tall. The label keeps its natural
+# `band` x OWNER_T shape (so text lays out as elsewhere) and rotates 90 deg
+# about its own centre, which is pinned to the banner's centre -- the rotated
+# footprint then exactly fills the banner.
+func _layout_owner_label_rotated() -> void:
 	if not owner_banner_label:
 		return
-	owner_banner_label.offset_left = -29.0
-	owner_banner_label.offset_top = 29.0
-	owner_banner_label.offset_right = 45.0
-	owner_banner_label.offset_bottom = 45.0
-	owner_banner_label.pivot_offset = Vector2(37.0, 8.0)
+	var band: float = tile_size.y - 2.0 * BORDER
+	owner_banner_label.offset_left = OWNER_T * 0.5 - band * 0.5
+	owner_banner_label.offset_top = band * 0.5 - OWNER_T * 0.5
+	owner_banner_label.offset_right = OWNER_T * 0.5 + band * 0.5
+	owner_banner_label.offset_bottom = band * 0.5 + OWNER_T * 0.5
+	owner_banner_label.pivot_offset = Vector2(band * 0.5, OWNER_T * 0.5)
 	owner_banner_label.rotation = PI / 2.0
 
 
