@@ -354,7 +354,7 @@ func _ready() -> void:
 	_update_turn_label()
 	_update_player_panels()
 	_refresh_action_buttons()
-	if players[current_player].is_ai:
+	if GameState.is_authority() and players[current_player].is_ai:
 		_run_ai_turn()
 
 
@@ -481,7 +481,7 @@ func _advance_turn() -> void:
 	_awaiting_end_turn = false
 	_advance_to_next_active_player()
 	_update_turn_label()
-	if players[current_player].is_ai:
+	if GameState.is_authority() and players[current_player].is_ai:
 		_run_ai_turn()
 
 
@@ -1658,6 +1658,15 @@ func _maybe_resolve_debt() -> void:
 # turns into End Turn and stays enabled while Admin (a stand-in for rolling)
 # turns off until that's clicked.
 func _refresh_action_buttons() -> void:
+	# Online, Phase 1: only the host runs the real game. Clients load the
+	# board but every control stays locked until in-game networking lands in
+	# a later phase.
+	if not GameState.is_authority():
+		for button in [roll_button, admin_button, admin_properties_button, admin_spells_button,
+				buy_house_unmortgage_button, sell_house_mortgage_button,
+				declare_bankruptcy_button, trade_button]:
+			button.disabled = true
+		return
 	var limited_to_selling: bool = _in_debt or _awaiting_buy_decision
 	# A Computer player's turn plays itself -- lock every button so the
 	# human at the keyboard can't act (or trade) on its behalf while it's

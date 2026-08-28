@@ -10,6 +10,7 @@ const TYPE_VALUES: Array[GameState.PlayerType] = [
 const DEFAULT_SELECTIONS: Array[int] = [0, 2, 1, 1]
 
 @onready var start_button: Button = $VBox/StartButton
+@onready var online_button: Button = $VBox/OnlineButton
 @onready var close_game_button: Button = $VBox/CloseGameButton
 @onready var admin_mode_checkbox: CheckBox = $VBox/AdminModeCheckBox
 @onready var quickstart_mode_checkbox: CheckBox = $VBox/QuickstartModeCheckBox
@@ -29,6 +30,7 @@ func _ready() -> void:
 			option.add_item(label)
 		option.selected = DEFAULT_SELECTIONS[i]
 	start_button.pressed.connect(_on_start_pressed)
+	online_button.pressed.connect(_on_online_pressed)
 	close_game_button.pressed.connect(_on_close_game_pressed)
 
 
@@ -48,7 +50,12 @@ func _on_start_pressed() -> void:
 	GameState.player_types = types
 	GameState.admin_mode = admin_mode_checkbox.button_pressed
 	GameState.quickstart_mode = quickstart_mode_checkbox.button_pressed
+	GameState.online = false
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+
+func _on_online_pressed() -> void:
+	get_tree().change_scene_to_file("res://scenes/lobby.tscn")
 
 
 func _on_close_game_pressed() -> void:
