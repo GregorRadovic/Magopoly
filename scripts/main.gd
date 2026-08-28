@@ -365,23 +365,40 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel") and not _quit_prompt_open:
 		_confirm_quit()
 		return
-	# Online: pausing the response window is host-only until Phase 5 wires it
-	# over the network. Quit (above) still works everywhere.
-	if not GameState.is_authority():
+	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
-	if event is InputEventKey and event.pressed and not event.echo:
-		# Space Bar always pauses from P1's perspective, same as "1" --
-		# with multiple local humans, "2"/"3"/"4" pause from that player's
-		# own perspective instead. See _response_window_paused_by.
+	var pause_keys: Array = [KEY_SPACE, KEY_1, KEY_2, KEY_3, KEY_4]
+	if not pause_keys.has(event.keycode):
+		return
+
+	if GameState.online:
+		# A client controls one seat, so any pause key pauses that seat; the
+		# press is sent to the host. The host's own keys pause only the
+		# seat(s) it controls -- another player's seat is paused by that
+		# player's own client.
+		if not GameState.is_authority():
+			var mine: Array[int] = GameState.local_slots()
+			if not mine.is_empty():
+				_net_pause_intent.rpc_id(1, mine[0])
+			return
 		match event.keycode:
-			KEY_SPACE, KEY_1:
-				_toggle_pause_for_player(0)
-			KEY_2:
-				_toggle_pause_for_player(1)
-			KEY_3:
-				_toggle_pause_for_player(2)
-			KEY_4:
-				_toggle_pause_for_player(3)
+			KEY_SPACE, KEY_1: _try_local_pause(0)
+			KEY_2: _try_local_pause(1)
+			KEY_3: _try_local_pause(2)
+			KEY_4: _try_local_pause(3)
+		return
+
+	# Local hotseat: Space/1 = P1's perspective, 2/3/4 = that player's.
+	match event.keycode:
+		KEY_SPACE, KEY_1: _toggle_pause_for_player(0)
+		KEY_2: _toggle_pause_for_player(1)
+		KEY_3: _toggle_pause_for_player(2)
+		KEY_4: _toggle_pause_for_player(3)
+
+
+func _try_local_pause(slot: int) -> void:
+	if GameState.is_slot_local(slot):
+		_toggle_pause_for_player(slot)
 
 
 func _confirm_quit() -> void:
@@ -501,6 +518,27 @@ func _net_roll_intent() -> void:
 	if not _can_take_roll_action():
 		return
 	_perform_roll_button_action()
+
+
+# A remote player clicked one of their own spell cards (own turn, or during a
+# response window they've paused). Validated and run as that seat.
+@rpc("any_peer", "call_remote", "reliable")
+func _net_spell_click_intent(hand_index: int, slot: int) -> void:
+	if not GameState.is_authority():
+		return
+	if _peer_for_slot(slot) != multiplayer.get_remote_sender_id():
+		return
+	_begin_spell_cast(hand_index, slot)
+
+
+# A remote player pressed a pause key during a response window.
+@rpc("any_peer", "call_remote", "reliable")
+func _net_pause_intent(slot: int) -> void:
+	if not GameState.is_authority():
+		return
+	if _peer_for_slot(slot) != multiplayer.get_remote_sender_id():
+		return
+	_toggle_pause_for_player(slot)
 
 
 # Called when the button (showing "End Turn" at this point) is pressed after
@@ -1098,14 +1136,21 @@ func _ai_house_check(player: Node2D) -> void:
 # arrives while it's already open (e.g. a second spell cast in response to
 # the first) just pushes _window_deadline_msec back out, extending the
 # window the first call is waiting on, and returns immediately.
+func _response_window_seconds() -> float:
+	# Online, widen the window so a remote player's pause has time to reach
+	# the host before the countdown expires.
+	return RESPONSE_WINDOW_SECONDS * 2.0 if GameState.online else RESPONSE_WINDOW_SECONDS
+
+
 func _ensure_response_window() -> void:
-	_window_deadline_msec = Time.get_ticks_msec() + int(RESPONSE_WINDOW_SECONDS * 1000.0)
+	var seconds: float = _response_window_seconds()
+	_window_deadline_msec = Time.get_ticks_msec() + int(seconds * 1000.0)
 	if _response_window_open:
 		return
 	_response_window_open = true
 	_response_window_paused_by = [false, false, false, false]
 	_refresh_action_buttons()
-	dice_label.text += "\n(Press Space/1/2/3/4 within %ds to pause from that player's perspective and react with an Instant spell.)" % int(RESPONSE_WINDOW_SECONDS)
+	dice_label.text += "\n(Press Space/1/2/3/4 within %ds to pause from that player's perspective and react with an Instant spell.)" % int(seconds)
 
 	while _response_window_paused_by.has(true) or Time.get_ticks_msec() < _window_deadline_msec:
 		await get_tree().process_frame
@@ -2475,8 +2520,20 @@ func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
 # levels are only usable responding to a roll or another spell) and then
 # Attunement (_color_attunement() must be >= the level).
 func _on_spell_clicked(hand_index: int, player_index: int) -> void:
-	if not GameState.is_authority():
+	# Online: you may only cast from your own hand. A client sends the click
+	# to the host, which runs it for that seat exactly as a hotseat player
+	# would (turn spells on your turn, Instant spells once you've paused a
+	# response window). Intents arriving via _net_spell_click_intent skip
+	# this and call _begin_spell_cast directly, already validated.
+	if GameState.online and not GameState.is_slot_local(player_index):
 		return
+	if GameState.online and not GameState.is_authority():
+		_net_spell_click_intent.rpc_id(1, hand_index, player_index)
+		return
+	_begin_spell_cast(hand_index, player_index)
+
+
+func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 	if _trading:
 		_handle_trade_spell_click(hand_index, player_index)
 		return

@@ -49,3 +49,15 @@ func is_slot_local(player_id: int) -> bool:
 # local game; online, true only on the host (peer id 1).
 func is_authority() -> bool:
 	return not online or local_peer_id == 1
+
+
+# The player slots this machine controls (online only; empty for a local
+# game, where "local" isn't slot-specific).
+func local_slots() -> Array[int]:
+	var out: Array[int] = []
+	if not online:
+		return out
+	for i in slot_peer.size():
+		if slot_peer[i] == local_peer_id:
+			out.append(i)
+	return out
