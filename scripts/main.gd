@@ -463,12 +463,44 @@ func _first_active_player() -> int:
 
 
 func _on_roll_pressed() -> void:
+	# Online: only the machine controlling the current player may act, and a
+	# client sends the press to the host rather than running it locally.
+	if GameState.online:
+		if not GameState.is_slot_local(current_player):
+			return
+		if not GameState.is_authority():
+			_net_roll_intent.rpc_id(1)
+			return
+	_perform_roll_button_action()
+
+
+# The actual effect of the Roll / End Turn button, run only on the authority
+# (locally on the host, or via _net_roll_intent for a remote player).
+func _perform_roll_button_action() -> void:
 	if _awaiting_end_turn:
 		_end_turn()
 		return
-	var die1: int = randi_range(1, 6)
-	var die2: int = randi_range(1, 6)
-	_perform_roll(die1, die2)
+	_perform_roll(randi_range(1, 6), randi_range(1, 6))
+
+
+# Whether the current player could press Roll / End Turn right now. Shared by
+# button enablement and the host's validation of a remote roll intent.
+func _can_take_roll_action() -> bool:
+	if _in_debt or _awaiting_buy_decision or _trading or _casting_spell or _response_window_open:
+		return false
+	var p: Node2D = players[current_player]
+	return not p.is_ai and not p.is_bankrupt
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func _net_roll_intent() -> void:
+	if not GameState.is_authority():
+		return
+	if GameState.slot_peer[current_player] != multiplayer.get_remote_sender_id():
+		return
+	if not _can_take_roll_action():
+		return
+	_perform_roll_button_action()
 
 
 # Called when the button (showing "End Turn" at this point) is pressed after
@@ -1669,12 +1701,22 @@ func _refresh_action_buttons() -> void:
 	# board but every control stays locked until in-game networking lands in
 	# a later phase.
 	if not GameState.is_authority():
-		for button in [roll_button, admin_button, admin_properties_button, admin_spells_button,
+		# Client: everything stays locked except Roll / End Turn on this
+		# machine's own turn -- that intent is sent to the host (Phase 3).
+		# Houses, trades and spells wait for the Phase 4 prompt router.
+		for button in [admin_button, admin_properties_button, admin_spells_button,
 				buy_house_unmortgage_button, sell_house_mortgage_button,
 				declare_bankruptcy_button, trade_button]:
 			button.disabled = true
+		var my_roll: bool = GameState.is_slot_local(current_player) and _can_take_roll_action()
+		roll_button.disabled = not my_roll
+		roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
 		return
 	var limited_to_selling: bool = _in_debt or _awaiting_buy_decision
+	# Online: the host must not act on a remote player's turn -- their client
+	# drives it. (Local hotseat play is unaffected: is_slot_local() is always
+	# true there.)
+	var remote_turn: bool = GameState.online and not GameState.is_slot_local(_acting_player_id())
 	# A Computer player's turn plays itself -- lock every button so the
 	# human at the keyboard can't act (or trade) on its behalf while it's
 	# "thinking". While a debt is outstanding, this needs to reflect whoever
@@ -1682,15 +1724,15 @@ func _refresh_action_buttons() -> void:
 	# into debt by a spell cast during an AI's turn would find Sell Houses/
 	# Mortgage, Declare Bankruptcy, and Trade all wrongly locked out.
 	var ai_turn: bool = players[_acting_player_id()].is_ai
-	roll_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
+	roll_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
 	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
-	admin_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or _awaiting_end_turn or ai_turn
-	admin_properties_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
-	admin_spells_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
-	buy_house_unmortgage_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn
-	sell_house_mortgage_button.disabled = _trading or _casting_spell or _response_window_open or ai_turn
-	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or _response_window_open or ai_turn
-	trade_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or _response_window_open or ai_turn
+	admin_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or _awaiting_end_turn or ai_turn or remote_turn
+	admin_properties_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
+	admin_spells_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
+	buy_house_unmortgage_button.disabled = limited_to_selling or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
+	sell_house_mortgage_button.disabled = _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
+	declare_bankruptcy_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
+	trade_button.disabled = _awaiting_buy_decision or _trading or _casting_spell or _response_window_open or ai_turn or remote_turn
 
 
 func _on_trade_pressed() -> void:
@@ -4295,6 +4337,9 @@ func _build_snapshot() -> Dictionary:
 		"current_player": current_player,
 		"free_parking": free_parking_amount,
 		"awaiting_end_turn": _awaiting_end_turn,
+		"in_debt": _in_debt,
+		"awaiting_buy": _awaiting_buy_decision,
+		"casting_spell": _casting_spell,
 		"dice_text": dice_label.text,
 		"turn_text": turn_label.text,
 		"response_window_open": _response_window_open,
@@ -4366,6 +4411,9 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	current_player = snap.get("current_player", 0)
 	free_parking_amount = snap.get("free_parking", 0)
 	_awaiting_end_turn = snap.get("awaiting_end_turn", false)
+	_in_debt = snap.get("in_debt", false)
+	_awaiting_buy_decision = snap.get("awaiting_buy", false)
+	_casting_spell = snap.get("casting_spell", false)
 	_response_window_open = snap.get("response_window_open", false)
 	_response_window_paused_by = _net_bool_array(snap.get("paused_by", []))
 	_trading = snap.get("trading", false)
