@@ -4740,6 +4740,10 @@ func _request_snapshot() -> void:
 
 
 func _net_request_initial_snapshot() -> void:
+	# Both peers swap into main.tscn from _recv_start on the same tick; give
+	# the host a moment to finish attaching its Main node before the first
+	# request, so the RPC doesn't arrive at an empty /root.
+	await get_tree().create_timer(0.3).timeout
 	for _attempt in 12:
 		if not _net_last_snapshot.is_empty():
 			return
