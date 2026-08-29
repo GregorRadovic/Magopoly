@@ -1393,7 +1393,13 @@ func _ensure_response_window() -> void:
 	_refresh_action_buttons()
 	dice_label.text += "\n(Press Space/1/2/3/4 within %ds to pause from that player's perspective and react with an Instant spell.)" % int(seconds)
 
-	while _response_window_paused_by.has(true) or Time.get_ticks_msec() < _window_deadline_msec:
+	# _casting_spell also holds the window open: Reveal and Burn-for-Attunement
+	# are pickable straight off a spell card without pausing first, so without
+	# this the countdown could expire and the roll resolve while
+	# _begin_spell_cast is still suspended in its own pickers -- at which point
+	# _prompt_slot still points at the caster, and the rolling player's buy
+	# prompt gets misrouted to them (see _prompt_target / _ask_buy_property).
+	while _response_window_paused_by.has(true) or _casting_spell or Time.get_ticks_msec() < _window_deadline_msec:
 		await get_tree().process_frame
 
 	_response_window_open = false
