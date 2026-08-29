@@ -1542,6 +1542,13 @@ func _perform_roll(die1: int, die2: int) -> void:
 	dice_roller.finish_now()
 	roll = _current_roll
 
+	# Belt-and-suspenders: _prompt_slot is only ever meant to be set mid
+	# _begin_spell_cast (routing that caster's own level/target pickers).
+	# The rest of this turn -- move, landing, buy decision -- must prompt
+	# whoever's turn it is, so make sure a spell someone cast/revealed during
+	# the response window can't leave it pointing elsewhere.
+	_prompt_slot = -1
+
 	var grants_extra_turn: bool = is_double
 
 	if player.in_jail:
