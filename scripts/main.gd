@@ -2764,8 +2764,32 @@ func _show_property_details(index: int) -> void:
 	var lines: Array[String] = [space_name]
 	if info.has("price"):
 		lines.append("Cost: $%d" % info["price"])
+	var description: String = _space_description(index, info)
+	if description != "":
+		lines.append(description)
 	# Local inspection popup -- never routed to another player.
 	info_prompt.open("\n".join(lines))
+
+
+# What a non-property tile does, for its inspection popup. "" for tiles with
+# no special behavior text to add.
+func _space_description(index: int, info: Dictionary) -> String:
+	match info.get("type", ""):
+		"free_parking":
+			return "Gain $%d" % free_parking_amount
+		"go_to_jail":
+			return "Go directly to Jail. Do not pass Go."
+		"magic_forest":
+			return "Draw 2 spell cards, then discard a spell card from your hand."
+		"spell_shop":
+			return "Look at 4 spell cards from the deck. You may buy one for $100."
+		"tax":
+			return "Pay $%d" % info.get("value", 0)
+	if index == 0:
+		return "When you pass this tile, gain $200 and draw a spell card."
+	if index == JAIL_SPACE_INDEX:
+		return "Does nothing."
+	return ""
 
 
 # Shows the full card art for a spell, regardless of whose turn it is --
