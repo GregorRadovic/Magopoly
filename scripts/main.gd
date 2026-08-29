@@ -129,6 +129,7 @@ signal board_space_picked(index: int)
 @onready var game_log: RichTextLabel = $UI/LogPanel/Log
 @onready var toast_panel: Panel = $UI/Toast
 @onready var toast_label: Label = $UI/Toast/ToastLabel
+@onready var dice_roller: Node2D = $UI/DiceRoller
 # The old on-screen status line is gone -- the scrollable log (see _log())
 # is the only record now. `dice_label` stays as a throwaway text sink so the
 # ~200 `dice_label.text = ...` / `+= ...` call sites don't all need touching.
@@ -250,6 +251,14 @@ var _current_roll: int = 0:
 	set(value):
 		_current_roll = value
 		_update_wizard_vision()
+
+# The physical dice of the roll in flight (0/0 = no dice shown) and a
+# counter bumped on every roll, so a client can tell one roll from the next
+# even if the faces happen to repeat. Drives the dice-rolling animation
+# (see dice_roller / _apply_dice_animation).
+var _die1: int = 0
+var _die2: int = 0
+var _roll_seq: int = 0
 
 
 # Wizard Vision: while a roll is in flight (the response window right after
@@ -758,6 +767,9 @@ func _end_turn() -> void:
 # would inherit an "End Turn" button before ever rolling.
 func _advance_turn() -> void:
 	_awaiting_end_turn = false
+	_die1 = 0
+	_die2 = 0
+	dice_roller.clear_dice()
 	_advance_to_next_active_player()
 	_update_turn_label()
 	if GameState.is_authority() and players[current_player].is_ai:
@@ -1468,6 +1480,8 @@ func _toggle_pause_for_player(player_index: int) -> void:
 		return
 	_response_window_paused_by[player_index] = not _response_window_paused_by[player_index]
 	if _response_window_paused_by[player_index]:
+		# Pausing during the tumble skips straight to the real faces.
+		dice_roller.finish_now()
 		dice_label.text += "\nPaused from %s's perspective -- press %d to resume." % [PLAYER_NAMES[player_index], player_index + 1]
 	_refresh_action_buttons()
 	_update_player_panels()
@@ -1486,6 +1500,12 @@ func _perform_roll(die1: int, die2: int) -> void:
 	var roll: int = die1 + die2
 	var is_double: bool = die1 == die2
 	var player: Node2D = players[current_player]
+	# Register the dice and start the tumble animation -- it runs for the
+	# first half of the response window, then settles on the real faces.
+	_die1 = die1
+	_die2 = die2
+	_roll_seq += 1
+	dice_roller.roll(die1, die2, _response_window_seconds() * 0.5)
 	dice_label.text = "%s rolled: %d + %d = %d" % [_player_display_name(current_player), die1, die2, roll]
 	_log("%s rolled %d + %d = %d." % [PLAYER_NAMES[current_player], die1, die2, roll])
 	if is_double:
@@ -1509,6 +1529,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	_roll_in_flight = true
 	await _ensure_response_window()
 	_roll_in_flight = false
+	dice_roller.finish_now()
 	roll = _current_roll
 
 	var grants_extra_turn: bool = is_double
@@ -4815,6 +4836,9 @@ func _build_snapshot() -> Dictionary:
 		"paused_by": _response_window_paused_by.duplicate(),
 		"roll_in_flight": _roll_in_flight,
 		"current_roll": _current_roll,
+		"die1": _die1,
+		"die2": _die2,
+		"roll_seq": _roll_seq,
 		"trading": _trading,
 		"trader1": _trader1,
 		"trader2": _trader2,
@@ -4939,9 +4963,24 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_current_roll = snap.get("current_roll", 0)
 	_roll_in_flight = snap.get("roll_in_flight", false)
 
+	_apply_dice_animation(snap.get("die1", 0), snap.get("die2", 0), snap.get("roll_seq", 0))
+
 	_update_player_panels()
 	_refresh_action_buttons()
 	_applying_snapshot = false
+
+
+# Client: mirror the host's dice-rolling animation from the snapshot.
+func _apply_dice_animation(d1: int, d2: int, seq: int) -> void:
+	if d1 == 0:
+		dice_roller.clear_dice()
+		_roll_seq = seq
+		return
+	if seq != _roll_seq:
+		_roll_seq = seq
+		dice_roller.roll(d1, d2, _response_window_seconds() * 0.5)
+	if not _roll_in_flight or _response_window_paused_by.has(true):
+		dice_roller.finish_now()
 
 
 func _net_int_array(a) -> Array[int]:
