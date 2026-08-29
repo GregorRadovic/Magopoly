@@ -1,8 +1,21 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/card_picker.gd" id="1"]
 
+[sub_resource type="StyleBoxFlat" id="PanelStyle"]
+bg_color = Color(0.11, 0.11, 0.13, 0.98)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_left = 14
+corner_radius_bottom_right = 14
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.4, 0.4, 0.45, 1)
+
 [node name="CardPicker" type="PopupPanel"]
+theme_override_styles/panel = SubResource("PanelStyle")
 script = ExtResource("1")
 
 [node name="VBox" type="VBoxContainer" parent="."]
@@ -22,7 +35,7 @@ text = "Choose a card."
 horizontal_alignment = 1
 
 [node name="CardScroll" type="ScrollContainer" parent="VBox"]
-custom_minimum_size = Vector2(0, 380)
+custom_minimum_size = Vector2(0, 320)
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
@@ -33,11 +46,20 @@ alignment = 1
 theme_override_constants/h_separation = 20
 theme_override_constants/v_separation = 20
 
-[node name="SkipButton" type="Button" parent="VBox"]
+[node name="ButtonRow" type="HBoxContainer" parent="VBox"]
+alignment = 1
+theme_override_constants/separation = 16
+
+[node name="SkipButton" type="Button" parent="VBox/ButtonRow"]
 visible = false
-custom_minimum_size = Vector2(0, 50)
+custom_minimum_size = Vector2(220, 50)
 text = "Skip"
 
-[node name="CancelButton" type="Button" parent="VBox"]
-custom_minimum_size = Vector2(0, 50)
+[node name="HideButton" type="Button" parent="VBox/ButtonRow"]
+visible = false
+custom_minimum_size = Vector2(220, 50)
+text = "Hide"
+
+[node name="CancelButton" type="Button" parent="VBox/ButtonRow"]
+custom_minimum_size = Vector2(220, 50)
 text = "Cancel"
