@@ -1247,14 +1247,13 @@ func _hypothetical_rent(space_index: int) -> int:
 	var color_name: String = info.get("color", "")
 	var rents: Array = info.get("rents", [])
 	if color_name == "railroad" and not rents.is_empty():
-		var owned_railroads: int = _count_owned_in_group(space.owner_id, "railroad")
-		var tier: int = clampi(owned_railroads, 1, rents.size()) - 1
-		return rents[tier]
+		var owned_railroads: int = _unmortgaged_railroad_count(space.owner_id)
+		return _railroad_rent(owned_railroads, rents)
 	if color_name == "utility":
 		var multipliers: Array = info.get("rent_multipliers", [])
 		if multipliers.is_empty():
 			return 0
-		var owned_utilities: int = _count_owned_in_group(space.owner_id, "utility")
+		var owned_utilities: int = _count_unmortgaged_in_group(space.owner_id, "utility")
 		var multiplier_tier: int = clampi(owned_utilities, 1, multipliers.size()) - 1
 		return multipliers[multiplier_tier] * 12
 	if rents.is_empty():
@@ -1622,7 +1621,7 @@ func _move_player(player: Node2D, roll: int) -> bool:
 	# anyway). "Go" landing/passing money above still applies independently.
 	if player.current_space == 0 and board.spaces[0].owner_id != -1 and board.spaces[0].owner_id != player.player_id and not board.spaces[0].is_mortgaged:
 		var terminus_owner: Node2D = players[board.spaces[0].owner_id]
-		var owned_railroads: int = _owned_railroad_count(board.spaces[0].owner_id)
+		var owned_railroads: int = _unmortgaged_railroad_count(board.spaces[0].owner_id)
 		var rent_amount: int = _apply_payment_reduction(player, _railroad_rent(owned_railroads, TERMINUS_RAILROAD_RENTS))
 		if rent_amount > player.money:
 			dice_label.text += "\nTerminus Station (owned by %s)! Owes $%d rent." % [PLAYER_NAMES[board.spaces[0].owner_id], rent_amount]
@@ -1726,19 +1725,19 @@ func _move_player(player: Node2D, roll: int) -> bool:
 			var charged: bool = false
 
 			if color_name == "railroad" and not rents.is_empty():
-				var owned_railroads: int = _owned_railroad_count(space.owner_id)
+				var owned_railroads: int = _unmortgaged_railroad_count(space.owner_id)
 				rent_amount = _railroad_rent(owned_railroads, rents)
-				note = " (%d railroad%s owned)" % [owned_railroads, "" if owned_railroads == 1 else "s"]
+				note = " (%d unmortgaged railroad%s)" % [owned_railroads, "" if owned_railroads == 1 else "s"]
 				charged = true
 			elif color_name == "utility":
 				var multipliers: Array = landed_info.get("rent_multipliers", [])
 				if not multipliers.is_empty():
-					var owned_utilities: int = _count_owned_in_group(space.owner_id, "utility")
+					var owned_utilities: int = _count_unmortgaged_in_group(space.owner_id, "utility")
 					var multiplier_tier: int = clampi(owned_utilities, 1, multipliers.size()) - 1
 					var multiplier: int = multipliers[multiplier_tier]
 					rent_amount = multiplier * roll
 					var utility_word: String = "utility" if owned_utilities == 1 else "utilities"
-					note = " (%d %s owned, %dx dice roll of %d)" % [owned_utilities, utility_word, multiplier, roll]
+					note = " (%d unmortgaged %s, %dx dice roll of %d)" % [owned_utilities, utility_word, multiplier, roll]
 					charged = true
 			elif not rents.is_empty():
 				# Price Gouging treats the property as having extra houses
@@ -2764,6 +2763,20 @@ func _count_owned_in_group(player_id: int, color_name: String) -> int:
 	return count
 
 
+# Like _count_owned_in_group but ignores mortgaged spaces -- used for
+# railroad / utility rent tiers, where a mortgaged railroad or utility
+# doesn't count towards "how many you own" (mortgaging one drops an
+# opponent's rent on the others).
+func _count_unmortgaged_in_group(player_id: int, color_name: String) -> int:
+	var group: Array = board.get_color_group(color_name)
+	var count: int = 0
+	for space_index in group:
+		var s: Node2D = board.spaces[space_index]
+		if s.owner_id == player_id and not s.is_mortgaged:
+			count += 1
+	return count
+
+
 # Terminus Station (index 0, once summoned) isn't part of board.gd's static
 # "railroad" color group -- it's an overlay on Go, not a real SPACE_DATA
 # property -- so it has to be added on top of the normal count by hand
@@ -2771,6 +2784,14 @@ func _count_owned_in_group(player_id: int, color_name: String) -> int:
 func _owned_railroad_count(player_id: int) -> int:
 	var count: int = _count_owned_in_group(player_id, "railroad")
 	if board.spaces[0].owner_id == player_id:
+		count += 1
+	return count
+
+
+# Unmortgaged railroads only (Terminus Station included), for rent tiers.
+func _unmortgaged_railroad_count(player_id: int) -> int:
+	var count: int = _count_unmortgaged_in_group(player_id, "railroad")
+	if board.spaces[0].owner_id == player_id and not board.spaces[0].is_mortgaged:
 		count += 1
 	return count
 
@@ -2908,6 +2929,7 @@ func _show_property_details(index: int) -> void:
 			"If 2 Railroads are owned: $%d" % rents[1],
 			"If 3 Railroads are owned: $%d" % rents[2],
 			"If 4 Railroads are owned: $%d" % rents[3],
+			"If 5 Railroads are owned: $%d" % TERMINUS_FIVE_RAILROAD_RENT,
 			"Mortgage Value: $%d" % mortgage_value,
 			"Unmortgage Value: $%d" % unmortgage_value,
 		]
@@ -2947,7 +2969,7 @@ func _space_description(index: int, info: Dictionary) -> String:
 		"magic_forest":
 			return "Draw 2 spell cards, then discard a spell card from your hand."
 		"spell_shop":
-			return "Look at 4 spell cards from the deck. You may buy one for $100."
+			return "Look at 4 spell cards from the deck. You may buy one for $100 -- and one of the four, chosen at random, is 50% off ($50)."
 		"tax":
 			return "Pay $%d" % info.get("value", 0)
 	if index == 0:
