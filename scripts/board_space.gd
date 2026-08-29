@@ -119,16 +119,36 @@ func _apply_layout() -> void:
 		_set_rect(border, 0.0, 0.0, w, h)
 	if background:
 		_set_rect(background, BORDER, BORDER, w - BORDER, h - BORDER)
-	if special_marker_label:
-		# Always the tile's local top-right corner.
-		_set_rect(special_marker_label, w - BORDER - 20.0, BORDER + 2.0, w - BORDER - 2.0, BORDER + 20.0)
 	if click_area:
 		_set_rect(click_area, 0.0, 0.0, w, h)
 
+	_position_special_marker()
 	_position_color_banner()
 	_position_price_label()
 	_position_name_label()
 	_position_owner_banner()
+
+
+# The special marker (Magic Forest star / Spell Shop coin) sits in the tile's
+# top-left corner *as the tile reads* -- so it steps clockwise round the
+# corners as the side rotation increases: screen top-left on the bottom row,
+# top-right on the left column, bottom-right on the top row, bottom-left on
+# the right column.
+func _position_special_marker() -> void:
+	if not special_marker_label:
+		return
+	var w: float = tile_size.x
+	var h: float = tile_size.y
+	var m: float = 18.0
+	var pad: float = BORDER + 2.0
+	var x: float
+	var y: float
+	match board_side:
+		0: x = pad;               y = pad
+		1: x = w - pad - m;       y = pad
+		2: x = w - pad - m;       y = h - pad - m
+		_: x = pad;               y = h - pad - m
+	_set_rect(special_marker_label, x, y, x + m, y + m)
 
 
 func _set_rect(node: Control, l: float, t: float, r: float, b: float) -> void:
@@ -209,12 +229,13 @@ func _rotated_edge_band(node: Control, center_x: float) -> void:
 
 # How far to turn text on this tile so it reads for a player sitting on its
 # side: bottom upright, top upside-down, and a quarter-turn each way for the
-# columns. A corner tile sits between two sides, so its text takes a fixed
-# 45-degree clockwise tilt instead. Board sides: 0 bottom, 1 left, 2 top,
-# 3 right.
+# columns. A corner tile sits between two sides, so its text points at the
+# board centre instead -- a 45-degree diagonal that steps a quarter-turn per
+# corner (GO 315, Jail 45, Free Parking 135, Go To Jail 225). Board sides:
+# 0 bottom, 1 left, 2 top, 3 right.
 func _side_rotation() -> float:
 	if is_corner:
-		return PI / 4.0
+		return -PI / 4.0 + board_side * PI / 2.0
 	match board_side:
 		1: return PI / 2.0
 		2: return PI
