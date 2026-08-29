@@ -3,6 +3,7 @@ extends Node2D
 const PLAYER_SCENE: PackedScene = preload("res://scenes/player.tscn")
 const MINI_CARD_SCENE: PackedScene = preload("res://scenes/mini_property_card.tscn")
 const MINI_SPELL_CARD_SCENE: PackedScene = preload("res://scenes/mini_spell_card.tscn")
+const CARDBACK_TEXTURE: Texture2D = preload("res://Magopoly Assets/Cardback.jpg")
 
 # The shared Spell Deck's starting contents -- T1/T2/T3 were placeholder
 # test cards and are no longer part of it; only real created cards belong
@@ -2477,6 +2478,7 @@ func _populate_trade_flow(flow: HFlowContainer, indices: Array[int]) -> void:
 # hand_index alone doesn't say whose hand it's from.
 func _populate_trade_spell_flow(flow: HFlowContainer, player_index: int, indices: Array[int]) -> void:
 	var hand: Array[String] = players[player_index].spell_hand
+	var face_up: bool = _hand_face_up(player_index)
 	for hand_index in indices:
 		if hand_index < 0 or hand_index >= hand.size():
 			continue
@@ -2484,9 +2486,18 @@ func _populate_trade_spell_flow(flow: HFlowContainer, player_index: int, indices
 		var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 		var mini_spell: Control = MINI_SPELL_CARD_SCENE.instantiate()
 		flow.add_child(mini_spell)
-		mini_spell.setup(hand_index, load(spell_info.get("icon", "")))
+		mini_spell.setup(hand_index, load(spell_info.get("icon", "")) if face_up else CARDBACK_TEXTURE, face_up)
 		mini_spell.card_clicked.connect(_handle_trade_spell_click.bind(player_index))
 		mini_spell.card_right_clicked.connect(_on_spell_right_clicked.bind(player_index))
+
+
+# Whether the local viewer sees `player_id`'s spell hand face-up. Own hand
+# always; in a local game every human's hand (AI hands stay face-down);
+# online, only this machine's own seats.
+func _hand_face_up(player_id: int) -> bool:
+	if GameState.online:
+		return GameState.is_slot_local(player_id)
+	return not players[player_id].is_ai
 
 
 # Liquidates a bankrupt player: all their houses are sold back for half cost,
@@ -4720,6 +4731,7 @@ func _update_player_panels() -> void:
 		var spell_flow: HFlowContainer = player_spells_flows[i]
 		for child in spell_flow.get_children():
 			child.queue_free()
+		var hand_face_up: bool = _hand_face_up(i)
 		for hand_index in players[i].spell_hand.size():
 			# Same reasoning as the property filter above -- a spell staged
 			# in the trade display has "moved" there visually.
@@ -4729,7 +4741,7 @@ func _update_player_panels() -> void:
 			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 			var mini_spell: Control = MINI_SPELL_CARD_SCENE.instantiate()
 			spell_flow.add_child(mini_spell)
-			mini_spell.setup(hand_index, load(spell_info.get("icon", "")))
+			mini_spell.setup(hand_index, load(spell_info.get("icon", "")) if hand_face_up else CARDBACK_TEXTURE, hand_face_up)
 			mini_spell.card_clicked.connect(_on_spell_clicked.bind(i))
 			mini_spell.card_right_clicked.connect(_on_spell_right_clicked.bind(i))
 
