@@ -9,6 +9,13 @@ const SPACE_SCENE: PackedScene = preload("res://scenes/board_space.tscn")
 const GO_TILE_TEXTURE: Texture2D = preload("res://Magopoly Assets/Go.png")
 const TERMINUS_TILE_TEXTURE: Texture2D = preload("res://Magopoly Assets/Terminus 2.png")
 
+# Art for the other three corner tiles, keyed by board index.
+const CORNER_TILE_TEXTURES: Dictionary = {
+	10: preload("res://Magopoly Assets/In Jail.png"),
+	20: preload("res://Magopoly Assets/Free Parking.png"),
+	30: preload("res://Magopoly Assets/Go To Jail.png"),
+}
+
 const SPACES_PER_SIDE: int = 10
 const TOTAL_SPACES: int = SPACES_PER_SIDE * 4
 
@@ -154,6 +161,8 @@ func _generate_board() -> void:
 			space.price_text = "$%d" % price
 		elif space_type == "tax":
 			space.price_text = "Pay $%d" % info.get("value", 0)
+		if CORNER_TILE_TEXTURES.has(i):
+			space.tile_texture = CORNER_TILE_TEXTURES[i]
 		space.clicked.connect(space_clicked.emit)
 		add_child(space)
 		spaces.append(space)

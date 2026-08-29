@@ -18,6 +18,7 @@ const SLOT_COLORS: Array[Color] = [
 @onready var back_button: Button = $VBox/ButtonRow/BackButton
 @onready var admin_checkbox: CheckBox = $VBox/OptionsRow/AdminModeCheckBox
 @onready var quickstart_checkbox: CheckBox = $VBox/OptionsRow/QuickstartModeCheckBox
+@onready var blitzstart_checkbox: CheckBox = $VBox/OptionsRow/BlitzstartModeCheckBox
 @onready var slot_rows: Array[HBoxContainer] = [
 	$VBox/Slots/SlotRow0, $VBox/Slots/SlotRow1, $VBox/Slots/SlotRow2, $VBox/Slots/SlotRow3,
 ]
@@ -31,7 +32,8 @@ func _ready() -> void:
 	back_button.pressed.connect(_on_back)
 	copy_button.pressed.connect(_on_copy_pressed)
 	start_button.pressed.connect(func():
-		Net.start_game(admin_checkbox.button_pressed, quickstart_checkbox.button_pressed))
+		Net.start_game(admin_checkbox.button_pressed, quickstart_checkbox.button_pressed,
+			blitzstart_checkbox.button_pressed))
 
 	for i in slot_rows.size():
 		var row: HBoxContainer = slot_rows[i]

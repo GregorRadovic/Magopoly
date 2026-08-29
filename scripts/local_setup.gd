@@ -14,6 +14,7 @@ const DEFAULT_SELECTIONS: Array[int] = [0, 1, 2, 2]
 @onready var back_button: Button = $VBox/ButtonRow/BackButton
 @onready var admin_checkbox: CheckBox = $VBox/OptionsRow/AdminModeCheckBox
 @onready var quickstart_checkbox: CheckBox = $VBox/OptionsRow/QuickstartModeCheckBox
+@onready var blitzstart_checkbox: CheckBox = $VBox/OptionsRow/BlitzstartModeCheckBox
 @onready var not_enough_players_dialog: AcceptDialog = $NotEnoughPlayersDialog
 @onready var type_options: Array[OptionButton] = [
 	$VBox/Players/PlayerRow0/TypeOption,
@@ -49,5 +50,6 @@ func _on_start_pressed() -> void:
 	GameState.player_types = types
 	GameState.admin_mode = admin_checkbox.button_pressed
 	GameState.quickstart_mode = quickstart_checkbox.button_pressed
+	GameState.blitzstart_mode = blitzstart_checkbox.button_pressed
 	GameState.online = false
 	get_tree().change_scene_to_file("res://scenes/main.tscn")

@@ -126,6 +126,11 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 24
 text = "Quickstart Mode"
 
+[node name="BlitzstartModeCheckBox" type="CheckBox" parent="VBox/OptionsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "BlitzStart Mode"
+
 [node name="ButtonRow" type="HBoxContainer" parent="VBox"]
 layout_mode = 2
 size_flags_horizontal = 4

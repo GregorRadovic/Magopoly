@@ -103,7 +103,7 @@ const INCOME_TAX_INDEX: int = 4
 # normal railroad's rent tiers, plus the extra 5th tier every railroad gains
 # once it exists.
 const TERMINUS_RAILROAD_RENTS: Array[int] = [25, 50, 100, 200]
-const TERMINUS_FIVE_RAILROAD_RENT: int = 400
+const TERMINUS_FIVE_RAILROAD_RENT: int = 300
 
 signal debt_resolved
 # Emitted whenever a trade negotiation reaches a conclusion (finalized or
@@ -496,8 +496,10 @@ func _spawn_players() -> void:
 		else:
 			if type == GameState.PlayerType.COMPUTER:
 				player.is_ai = true
-			if GameState.quickstart_mode:
-				_grant_quickstart_start(player)
+			if GameState.blitzstart_mode:
+				_grant_starting_hand(player, 6, 4)
+			elif GameState.quickstart_mode:
+				_grant_starting_hand(player, 3, 2)
 
 
 func _build_spell_deck() -> void:
@@ -508,17 +510,18 @@ func _build_spell_deck() -> void:
 	_spell_deck.shuffle()
 
 
-# Quickstart Mode: grants 3 random unowned properties and 2 random spells,
-# in place of the normal empty-handed, property-less start.
-func _grant_quickstart_start(player: Node2D) -> void:
+# Quickstart / BlitzStart: grants `property_count` random unowned properties
+# and `spell_count` random spells, in place of the normal empty-handed,
+# property-less start. (Quickstart: 3 / 2. BlitzStart: 6 / 4.)
+func _grant_starting_hand(player: Node2D, property_count: int, spell_count: int) -> void:
 	var unowned: Array[int] = _unowned_property_indices()
 	unowned.shuffle()
-	for i in mini(3, unowned.size()):
+	for i in mini(property_count, unowned.size()):
 		var space_index: int = unowned[i]
 		board.spaces[space_index].owner_id = player.player_id
 		player.owned_property_indices.append(space_index)
 	_sort_owned_properties(player)
-	for i in 2:
+	for i in spell_count:
 		_draw_spell(player)
 
 
