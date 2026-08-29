@@ -20,7 +20,7 @@ const BOARD_SIZE: float = 2.0 * CORNER_SIZE + 9.0 * EDGE_THIN
 # backward from Go, i.e. TOTAL_SPACES - 2 == 38.
 const SPACE_DATA: Dictionary = {
 	0: {"name": "GO"},
-	1: {"name": "Mediterranean Avenue", "type": "property", "price": 60, "rents": [2, 10, 30, 90, 160, 250], "color": "brown"},
+	1: {"name": "Mediter- ranean Avenue", "type": "property", "price": 60, "rents": [2, 10, 30, 90, 160, 250], "color": "brown"},
 	2: {"name": "Spell Shop", "type": "spell_shop"},
 	3: {"name": "Baltic Avenue", "type": "property", "price": 60, "rents": [4, 20, 60, 180, 320, 450], "color": "brown"},
 	4: {"name": "Income Tax", "type": "tax", "value": 200},

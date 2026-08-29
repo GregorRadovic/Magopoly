@@ -165,22 +165,27 @@ func _position_price_label() -> void:
 	var h: float = tile_size.y
 	match board_side:
 		0:  # bottom row -- price along the bottom
-			price_label.rotation = 0.0
-			price_label.pivot_offset = Vector2.ZERO
-			_set_rect(price_label, BORDER, h - BORDER - PRICE_H, w - BORDER, h - BORDER)
-		2:  # top row -- price along the top
-			price_label.rotation = 0.0
-			price_label.pivot_offset = Vector2.ZERO
-			_set_rect(price_label, BORDER, BORDER, w - BORDER, BORDER + PRICE_H)
+			_flat_strip(price_label, BORDER, h - BORDER - PRICE_H, w - BORDER, h - BORDER)
+		2:  # top row -- price along the top (upside-down, like the name)
+			_flat_strip(price_label, BORDER, BORDER, w - BORDER, BORDER + PRICE_H)
 		1:  # left column -- price down the left (outer) edge
 			_rotated_edge_band(price_label, BORDER + PRICE_H * 0.5)
 		_:  # right column -- price down the right (outer) edge
 			_rotated_edge_band(price_label, w - BORDER - PRICE_H * 0.5)
 
 
+# A horizontal strip, turned to this side's orientation (0 or PI) about its
+# own centre.
+func _flat_strip(node: Control, l: float, t: float, r: float, b: float) -> void:
+	_set_rect(node, l, t, r, b)
+	node.pivot_offset = Vector2((r - l) * 0.5, (b - t) * 0.5)
+	node.rotation = _side_rotation()
+
+
 # Lays `node` as a vertical band centred on x = `center_x`, spanning the
 # tile's height: the label keeps its natural (band-length x PRICE_H) shape
-# and rotates 90 deg about its centre, which is pinned to the band centre.
+# and rotates to that side's orientation about its centre, which is pinned
+# to the band centre.
 func _rotated_edge_band(node: Control, center_x: float) -> void:
 	var h: float = tile_size.y
 	var band: float = h - 2.0 * BORDER
@@ -190,11 +195,22 @@ func _rotated_edge_band(node: Control, center_x: float) -> void:
 	node.offset_right = center_x + band * 0.5
 	node.offset_bottom = cy + PRICE_H * 0.5
 	node.pivot_offset = Vector2(band * 0.5, PRICE_H * 0.5)
-	node.rotation = PI / 2.0
+	node.rotation = _side_rotation()
 
 
-# The tile name fills the space between the colour banner and the price
-# strip, inset from both so nothing overlaps.
+# How far to turn text on this side so it reads for a player sitting there:
+# bottom upright, top upside-down, and a quarter-turn each way for the
+# columns. Board sides: 0 bottom, 1 left, 2 top, 3 right.
+func _side_rotation() -> float:
+	match board_side:
+		1: return PI / 2.0
+		2: return PI
+		3: return -PI / 2.0
+		_: return 0.0
+
+
+# The tile name occupies the clear rectangle between the colour banner and
+# the price strip, turned to this side's orientation.
 func _position_name_label() -> void:
 	if not label:
 		return
@@ -202,11 +218,22 @@ func _position_name_label() -> void:
 	var h: float = tile_size.y
 	var b: float = BORDER + BANNER_H       # colour-banner side inset
 	var p: float = BORDER + PRICE_H        # price side inset
+	var area: Rect2
 	match board_side:
-		0: _set_rect(label, 1.0, b, w - 1.0, h - p)
-		2: _set_rect(label, 1.0, p, w - 1.0, h - b)
-		1: _set_rect(label, p, 1.0, w - b, h - 1.0)
-		_: _set_rect(label, b, 1.0, w - p, h - 1.0)
+		0: area = Rect2(1.0, b, w - 2.0, h - b - p)
+		2: area = Rect2(1.0, p, w - 2.0, h - b - p)
+		1: area = Rect2(p, 1.0, w - b - p, h - 2.0)
+		_: area = Rect2(b, 1.0, w - b - p, h - 2.0)
+
+	# A quarter-turn swaps the label's own width/height so its rotated
+	# footprint still fills `area`; it's then centred and pivoted on centre.
+	var swap: bool = board_side == 1 or board_side == 3
+	var lw: float = area.size.y if swap else area.size.x
+	var lh: float = area.size.x if swap else area.size.y
+	var c: Vector2 = area.position + area.size * 0.5
+	_set_rect(label, c.x - lw * 0.5, c.y - lh * 0.5, c.x + lw * 0.5, c.y + lh * 0.5)
+	label.pivot_offset = Vector2(lw * 0.5, lh * 0.5)
+	label.rotation = _side_rotation()
 
 
 func _update_price() -> void:
@@ -272,12 +299,13 @@ func _position_owner_banner() -> void:
 func _layout_owner_label_flat() -> void:
 	if not owner_banner_label:
 		return
-	owner_banner_label.rotation = 0.0
-	owner_banner_label.pivot_offset = Vector2.ZERO
+	var lw: float = tile_size.x - 2.0 * BORDER
 	owner_banner_label.offset_left = 0.0
 	owner_banner_label.offset_top = 0.0
-	owner_banner_label.offset_right = tile_size.x - 2.0 * BORDER
+	owner_banner_label.offset_right = lw
 	owner_banner_label.offset_bottom = OWNER_T
+	owner_banner_label.pivot_offset = Vector2(lw * 0.5, OWNER_T * 0.5)
+	owner_banner_label.rotation = _side_rotation()  # 0 bottom, PI (upside-down) top
 
 
 # The banner here is OWNER_T wide x `band` tall. The label keeps its natural
@@ -293,7 +321,7 @@ func _layout_owner_label_rotated() -> void:
 	owner_banner_label.offset_right = OWNER_T * 0.5 + band * 0.5
 	owner_banner_label.offset_bottom = band * 0.5 + OWNER_T * 0.5
 	owner_banner_label.pivot_offset = Vector2(band * 0.5, OWNER_T * 0.5)
-	owner_banner_label.rotation = PI / 2.0
+	owner_banner_label.rotation = _side_rotation()  # PI/2 left, -PI/2 right
 
 
 # `new_owner_id` of -1 hides the banner (unowned/returned to the bank).
