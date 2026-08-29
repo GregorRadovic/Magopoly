@@ -149,6 +149,8 @@ func _position_special_marker() -> void:
 		2: x = w - pad - m;       y = h - pad - m
 		_: x = pad;               y = h - pad - m
 	_set_rect(special_marker_label, x, y, x + m, y + m)
+	special_marker_label.pivot_offset = Vector2(m * 0.5, m * 0.5)
+	special_marker_label.rotation = _side_rotation()
 
 
 func _set_rect(node: Control, l: float, t: float, r: float, b: float) -> void:
