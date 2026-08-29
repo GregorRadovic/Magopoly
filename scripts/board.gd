@@ -4,16 +4,35 @@ signal space_clicked(index: int)
 
 const SPACE_SCENE: PackedScene = preload("res://scenes/board_space.tscn")
 
+# The GO corner shows the Go asset normally, and swaps to Terminus 2 while
+# Terminus Station (the GO overlay, space 0) is in play. See refresh_go_tile().
+const GO_TILE_TEXTURE: Texture2D = preload("res://Magopoly Assets/Go.png")
+const TERMINUS_TILE_TEXTURE: Texture2D = preload("res://Magopoly Assets/Terminus 2.png")
+
+# Art for the other three corner tiles, keyed by board index.
+const CORNER_TILE_TEXTURES: Dictionary = {
+	10: preload("res://Magopoly Assets/In Jail.png"),
+	20: preload("res://Magopoly Assets/Free Parking.png"),
+	30: preload("res://Magopoly Assets/Go To Jail.png"),
+}
+
 const SPACES_PER_SIDE: int = 10
 const TOTAL_SPACES: int = SPACES_PER_SIDE * 4
-const CELL_SIZE: float = 84.0
-const SPACE_VISUAL_SIZE: float = 78.0
+
+# A proper Monopoly-shaped board. Corner tiles are 3x3; the nine edge tiles
+# per side are 1.875 wide along the edge and 3 deep into the board (only the
+# ratios matter -- SCALE is just pixels per proportion-unit).
+const SCALE: float = 40.0
+const CORNER_SIZE: float = 3.0 * SCALE
+const EDGE_DEEP: float = 3.0 * SCALE
+const EDGE_THIN: float = 1.875 * SCALE
+const BOARD_SIZE: float = 2.0 * CORNER_SIZE + 9.0 * EDGE_THIN
 
 # Keys are resolved board indices (0..39). "-2" in the design spec counts
 # backward from Go, i.e. TOTAL_SPACES - 2 == 38.
 const SPACE_DATA: Dictionary = {
 	0: {"name": "GO"},
-	1: {"name": "Mediterranean Avenue", "type": "property", "price": 60, "rents": [2, 10, 30, 90, 160, 250], "color": "brown"},
+	1: {"name": "Mediter- ranean Avenue", "type": "property", "price": 60, "rents": [2, 10, 30, 90, 160, 250], "color": "brown"},
 	2: {"name": "Spell Shop", "type": "spell_shop"},
 	3: {"name": "Baltic Avenue", "type": "property", "price": 60, "rents": [4, 20, 60, 180, 320, 450], "color": "brown"},
 	4: {"name": "Income Tax", "type": "tax", "value": 200},
@@ -97,7 +116,7 @@ func _ready() -> void:
 
 func get_space_center(index: int) -> Vector2:
 	var space: Node2D = spaces[index]
-	return space.position + Vector2(SPACE_VISUAL_SIZE, SPACE_VISUAL_SIZE) / 2.0
+	return space.position + space.tile_size * 0.5
 
 
 func get_space_info(index: int) -> Dictionary:
@@ -121,6 +140,13 @@ func _build_color_groups() -> void:
 func _generate_board() -> void:
 	for i in TOTAL_SPACES:
 		var space: Node2D = SPACE_SCENE.instantiate()
+		# board_side + tile_size + is_corner drive the tile's own layout, so
+		# set them before the content setters (which lay text out within it).
+		space.board_side = i / SPACES_PER_SIDE
+		space.is_corner = i % SPACES_PER_SIDE == 0
+		var rect: Rect2 = _tile_rect(i)
+		space.position = rect.position
+		space.tile_size = rect.size
 		space.index = i
 		var info: Dictionary = get_space_info(i)
 		space.label_text = info.get("name", "")
@@ -130,26 +156,55 @@ func _generate_board() -> void:
 		var space_type: String = info.get("type", "")
 		if space_type == "magic_forest" or space_type == "spell_shop":
 			space.special_marker = space_type
-		space.board_side = i / SPACES_PER_SIDE
-		space.position = _grid_to_position(_index_to_grid(i))
+		var price: int = info.get("price", 0)
+		if price > 0:
+			space.price_text = "$%d" % price
+		elif space_type == "tax":
+			space.price_text = "Pay $%d" % info.get("value", 0)
+		if CORNER_TILE_TEXTURES.has(i):
+			space.tile_texture = CORNER_TILE_TEXTURES[i]
 		space.clicked.connect(space_clicked.emit)
 		add_child(space)
 		spaces.append(space)
 
+	refresh_go_tile()
 
-# Walks the perimeter of an 11x11 grid (indices 0..10), split into four
-# 10-space sides. Each side's first space is a shared corner; the corner
-# belongs to the side that starts there, so 4 sides * 10 spaces = 40 total
-# with no duplicated positions.
-func _index_to_grid(i: int) -> Vector2i:
+
+# GO shows the Go asset, unless Terminus Station (space 0) has been summoned,
+# in which case it shows the Terminus 2 asset -- swapped back if Terminus
+# ever leaves play (its owner going bankrupt to the bank). Called from
+# main.gd's _update_player_panels(), so it tracks ownership on host and
+# client alike; the tile_texture setter no-ops when nothing changed.
+func refresh_go_tile() -> void:
+	if spaces.is_empty():
+		return
+	spaces[0].tile_texture = TERMINUS_TILE_TEXTURE if spaces[0].owner_id != -1 else GO_TILE_TEXTURE
+
+
+# The rectangle (board-local top-left position + size) of tile `i`. Corner
+# tiles (pos 0 of each side) are square; the nine edge tiles per side are
+# EDGE_THIN along the side and EDGE_DEEP into the board. Side numbering and
+# walk direction match _index_to_grid's old scheme: 0 bottom (right->left),
+# 1 left (bottom->top), 2 top (left->right), 3 right (top->bottom).
+func _tile_rect(i: int) -> Rect2:
 	var side: int = i / SPACES_PER_SIDE
 	var pos: int = i % SPACES_PER_SIDE
+	var far: float = BOARD_SIZE - CORNER_SIZE
+
+	if pos == 0:
+		match side:
+			0: return Rect2(far, far, CORNER_SIZE, CORNER_SIZE)    # GO -- bottom-right
+			1: return Rect2(0.0, far, CORNER_SIZE, CORNER_SIZE)    # Jail -- bottom-left
+			2: return Rect2(0.0, 0.0, CORNER_SIZE, CORNER_SIZE)    # Free Parking -- top-left
+			_: return Rect2(far, 0.0, CORNER_SIZE, CORNER_SIZE)    # Go To Jail -- top-right
+
+	var along: float = CORNER_SIZE + (pos - 1) * EDGE_THIN
 	match side:
-		0: return Vector2i(SPACES_PER_SIDE - pos, SPACES_PER_SIDE) # bottom row, right -> left
-		1: return Vector2i(0, SPACES_PER_SIDE - pos)               # left column, bottom -> top
-		2: return Vector2i(pos, 0)                                 # top row, left -> right
-		_: return Vector2i(SPACES_PER_SIDE, pos)                   # right column, top -> bottom
-
-
-func _grid_to_position(grid: Vector2i) -> Vector2:
-	return Vector2(grid.x, grid.y) * CELL_SIZE
+		0:  # bottom row, walking right -> left
+			return Rect2(BOARD_SIZE - CORNER_SIZE - pos * EDGE_THIN, far, EDGE_THIN, EDGE_DEEP)
+		1:  # left column, walking bottom -> top
+			return Rect2(0.0, BOARD_SIZE - CORNER_SIZE - pos * EDGE_THIN, EDGE_DEEP, EDGE_THIN)
+		2:  # top row, walking left -> right
+			return Rect2(along, 0.0, EDGE_THIN, EDGE_DEEP)
+		_:  # right column, walking top -> bottom
+			return Rect2(far, along, EDGE_DEEP, EDGE_THIN)

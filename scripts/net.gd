@@ -192,7 +192,7 @@ func _recv_lobby(new_slots: Array, new_slot_peer: Array, new_names: Dictionary) 
 
 # --- Starting the game -------------------------------------------------
 
-func start_game(admin_mode: bool, quickstart: bool) -> void:
+func start_game(admin_mode: bool, quickstart: bool, blitzstart: bool) -> void:
 	if not hosting:
 		return
 	var types: Array[int] = []
@@ -204,17 +204,18 @@ func start_game(admin_mode: bool, quickstart: bool) -> void:
 				types.append(GameState.PlayerType.COMPUTER)
 			_:
 				types.append(GameState.PlayerType.DISABLED)
-	_recv_start.rpc(types, slot_peer, admin_mode, quickstart)
+	_recv_start.rpc(types, slot_peer, admin_mode, quickstart, blitzstart)
 
 
 @rpc("authority", "call_local", "reliable")
-func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bool) -> void:
+func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bool, blitzstart: bool) -> void:
 	var player_types: Array[GameState.PlayerType] = []
 	for t in types:
 		player_types.append(t)
 	GameState.player_types = player_types
 	GameState.admin_mode = admin_mode
 	GameState.quickstart_mode = quickstart
+	GameState.blitzstart_mode = blitzstart
 	GameState.online = true
 	GameState.slot_peer = _to_int_array(peer_map)
 	GameState.local_peer_id = multiplayer.get_unique_id()

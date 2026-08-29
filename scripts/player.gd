@@ -15,6 +15,10 @@ var is_bankrupt: bool = false
 var is_ai: bool = false
 # Spell names held in hand, one entry per copy (duplicates allowed, no limit).
 var spell_hand: Array[String] = []
+# Parallel to spell_hand: spell_revealed_to[i] is an Array[int] of the player
+# ids this player has revealed spell i to (they see it face-up too). Kept in
+# lockstep with spell_hand via main.gd's _spell_add / _spell_remove_* helpers.
+var spell_revealed_to: Array = []
 # Color name -> bonus Attunement from burning spells for it this turn. Wiped
 # at the start of this player's next turn.
 var temp_attunement: Dictionary = {}

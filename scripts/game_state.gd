@@ -22,6 +22,11 @@ var player_types: Array[PlayerType] = [
 # Start Menu's Quickstart Mode checkbox.
 var quickstart_mode: bool = false
 
+# Like Quickstart but bigger: every active player starts with 6 random
+# properties and 4 random spells. If both this and quickstart_mode are set,
+# BlitzStart wins.
+var blitzstart_mode: bool = false
+
 # --- Online play (set by Net._recv_start; see net.gd) ------------------
 # True when this session was launched from the online lobby rather than the
 # local Start Menu. Local games leave all of these at their defaults, and

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d07w0dmyq8p6e"
-path="res://.godot/imported/7 4 Decompose.png-f0ab4da87e6b78345b992ffff5bdfbb4.ctex"
+uid="uid://dij08esy08rcx"
+path="res://.godot/imported/Cardback.jpg-14990ac6af1c98b586c5138052f723a4.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Magopoly Assets/Cards/7 4 Decompose.png"
-dest_files=["res://.godot/imported/7 4 Decompose.png-f0ab4da87e6b78345b992ffff5bdfbb4.ctex"]
+source_file="res://Magopoly Assets/Cardback.jpg"
+dest_files=["res://.godot/imported/Cardback.jpg-14990ac6af1c98b586c5138052f723a4.ctex"]
 
 [params]
 

@@ -7,20 +7,24 @@ signal card_right_clicked(hand_index: int)
 @onready var click_area: Control = $ClickArea
 
 var hand_index: int = -1
+# False when the card is shown as a face-down cardback -- it can still be
+# clicked (e.g. to pick it for a trade) but not inspected.
+var face_up: bool = true
 
 
 func _ready() -> void:
 	click_area.gui_input.connect(_on_click_area_gui_input)
 
 
-func setup(index: int, icon: Texture2D) -> void:
+func setup(index: int, icon: Texture2D, is_face_up: bool = true) -> void:
 	hand_index = index
 	texture_rect.texture = icon
+	face_up = is_face_up
 
 
 func _on_click_area_gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			card_clicked.emit(hand_index)
-		elif event.button_index == MOUSE_BUTTON_RIGHT:
+		elif event.button_index == MOUSE_BUTTON_RIGHT and face_up:
 			card_right_clicked.emit(hand_index)

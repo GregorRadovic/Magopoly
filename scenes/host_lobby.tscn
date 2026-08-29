@@ -1,8 +1,8 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" path="res://scripts/lobby.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/host_lobby.gd" id="1"]
 
-[node name="Lobby" type="Control"]
+[node name="HostLobby" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -27,163 +27,173 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -450.0
-offset_top = -380.0
-offset_right = 450.0
-offset_bottom = 380.0
+offset_left = -440.0
+offset_top = -340.0
+offset_right = 440.0
+offset_bottom = 340.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 20
+theme_override_constants/separation = 22
 
-[node name="Title" type="Label" parent="VBox"]
+[node name="Header" type="Label" parent="VBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 56
-text = "Online Game"
+text = "Host Game"
 horizontal_alignment = 1
 
-[node name="NameRow" type="HBoxContainer" parent="VBox"]
+[node name="AddressRow" type="HBoxContainer" parent="VBox"]
 layout_mode = 2
+size_flags_horizontal = 4
 theme_override_constants/separation = 12
+alignment = 1
 
-[node name="NameLabel" type="Label" parent="VBox/NameRow"]
+[node name="AddressLabel" type="Label" parent="VBox/AddressRow"]
 layout_mode = 2
-custom_minimum_size = Vector2(120, 0)
-text = "Name"
+theme_override_font_sizes/font_size = 22
+text = "Others join with:"
 
-[node name="NameEdit" type="LineEdit" parent="VBox/NameRow"]
+[node name="AddressValue" type="LineEdit" parent="VBox/AddressRow"]
 layout_mode = 2
-size_flags_horizontal = 3
-text = "Player"
+custom_minimum_size = Vector2(260, 44)
+theme_override_font_sizes/font_size = 22
+editable = false
+alignment = 1
 
-[node name="ConnectRow" type="HBoxContainer" parent="VBox"]
+[node name="CopyButton" type="Button" parent="VBox/AddressRow"]
 layout_mode = 2
-theme_override_constants/separation = 12
-
-[node name="AddressEdit" type="LineEdit" parent="VBox/ConnectRow"]
-layout_mode = 2
-size_flags_horizontal = 3
-placeholder_text = "Host IP (to join)"
-
-[node name="PortEdit" type="LineEdit" parent="VBox/ConnectRow"]
-layout_mode = 2
-custom_minimum_size = Vector2(130, 0)
-text = "27015"
-
-[node name="HostButton" type="Button" parent="VBox/ConnectRow"]
-layout_mode = 2
-custom_minimum_size = Vector2(150, 52)
-text = "Host"
-
-[node name="JoinButton" type="Button" parent="VBox/ConnectRow"]
-layout_mode = 2
-custom_minimum_size = Vector2(150, 52)
-text = "Join"
+custom_minimum_size = Vector2(120, 44)
+theme_override_font_sizes/font_size = 20
+text = "Copy"
 
 [node name="StatusLabel" type="Label" parent="VBox"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 22
 text = ""
 horizontal_alignment = 1
 
 [node name="Slots" type="VBoxContainer" parent="VBox"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 12
 
 [node name="SlotRow0" type="HBoxContainer" parent="VBox/Slots"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 18
 
 [node name="Label" type="Label" parent="VBox/Slots/SlotRow0"]
 layout_mode = 2
 custom_minimum_size = Vector2(150, 0)
+theme_override_font_sizes/font_size = 24
 text = "Player 1"
 
 [node name="Status" type="Label" parent="VBox/Slots/SlotRow0"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 22
 text = "-"
 
 [node name="KindOption" type="OptionButton" parent="VBox/Slots/SlotRow0"]
 layout_mode = 2
-custom_minimum_size = Vector2(220, 0)
+custom_minimum_size = Vector2(220, 44)
+theme_override_font_sizes/font_size = 20
 
 [node name="SlotRow1" type="HBoxContainer" parent="VBox/Slots"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 18
 
 [node name="Label" type="Label" parent="VBox/Slots/SlotRow1"]
 layout_mode = 2
 custom_minimum_size = Vector2(150, 0)
+theme_override_font_sizes/font_size = 24
 text = "Player 2"
 
 [node name="Status" type="Label" parent="VBox/Slots/SlotRow1"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 22
 text = "-"
 
 [node name="KindOption" type="OptionButton" parent="VBox/Slots/SlotRow1"]
 layout_mode = 2
-custom_minimum_size = Vector2(220, 0)
+custom_minimum_size = Vector2(220, 44)
+theme_override_font_sizes/font_size = 20
 
 [node name="SlotRow2" type="HBoxContainer" parent="VBox/Slots"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 18
 
 [node name="Label" type="Label" parent="VBox/Slots/SlotRow2"]
 layout_mode = 2
 custom_minimum_size = Vector2(150, 0)
+theme_override_font_sizes/font_size = 24
 text = "Player 3"
 
 [node name="Status" type="Label" parent="VBox/Slots/SlotRow2"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 22
 text = "-"
 
 [node name="KindOption" type="OptionButton" parent="VBox/Slots/SlotRow2"]
 layout_mode = 2
-custom_minimum_size = Vector2(220, 0)
+custom_minimum_size = Vector2(220, 44)
+theme_override_font_sizes/font_size = 20
 
 [node name="SlotRow3" type="HBoxContainer" parent="VBox/Slots"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 18
 
 [node name="Label" type="Label" parent="VBox/Slots/SlotRow3"]
 layout_mode = 2
 custom_minimum_size = Vector2(150, 0)
+theme_override_font_sizes/font_size = 24
 text = "Player 4"
 
 [node name="Status" type="Label" parent="VBox/Slots/SlotRow3"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 22
 text = "-"
 
 [node name="KindOption" type="OptionButton" parent="VBox/Slots/SlotRow3"]
 layout_mode = 2
-custom_minimum_size = Vector2(220, 0)
+custom_minimum_size = Vector2(220, 44)
+theme_override_font_sizes/font_size = 20
 
 [node name="OptionsRow" type="HBoxContainer" parent="VBox"]
 layout_mode = 2
-theme_override_constants/separation = 24
+size_flags_horizontal = 4
+theme_override_constants/separation = 30
 alignment = 1
 
 [node name="AdminModeCheckBox" type="CheckBox" parent="VBox/OptionsRow"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 24
 text = "Admin Mode"
 
 [node name="QuickstartModeCheckBox" type="CheckBox" parent="VBox/OptionsRow"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 24
 text = "Quickstart Mode"
+
+[node name="BlitzstartModeCheckBox" type="CheckBox" parent="VBox/OptionsRow"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "BlitzStart Mode"
 
 [node name="ButtonRow" type="HBoxContainer" parent="VBox"]
 layout_mode = 2
-theme_override_constants/separation = 24
+size_flags_horizontal = 4
+theme_override_constants/separation = 30
 alignment = 1
 
 [node name="BackButton" type="Button" parent="VBox/ButtonRow"]
 layout_mode = 2
-custom_minimum_size = Vector2(180, 64)
+custom_minimum_size = Vector2(200, 68)
+theme_override_font_sizes/font_size = 28
 text = "Back"
 
 [node name="StartButton" type="Button" parent="VBox/ButtonRow"]
 layout_mode = 2
-custom_minimum_size = Vector2(240, 64)
+custom_minimum_size = Vector2(260, 68)
+theme_override_font_sizes/font_size = 28
 text = "Start Game"

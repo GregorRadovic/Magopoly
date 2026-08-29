@@ -300,9 +300,9 @@ const SPELLS: Dictionary = {
 			3: {"description": "Choose an opponent. They and all other opponents on the same space pay you $300.", "amount": 300, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
-	"Decompose": {
+	"Reclaimed by Nature": {
 		"color": "green",
-		"icon": "res://Magopoly Assets/Cards/7 4 Decompose.png",
+		"icon": "res://Magopoly Assets/Cards/7 4 Reclaimed By Nature.png",
 		"levels": {
 			1: {"description": "Return a mortgaged property to the bank.", "count": 1, "timings": ["turn", "roll_response", "spell_response"]},
 			2: {"description": "Return 2 mortgaged properties to the bank.", "count": 2, "timings": ["turn", "roll_response", "spell_response"]},
