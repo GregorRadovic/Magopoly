@@ -116,6 +116,13 @@ custom_minimum_size = Vector2(360, 76)
 theme_override_font_sizes/font_size = 32
 text = "Join Game"
 
+[node name="TutorialButton" type="Button" parent="VBox/Buttons"]
+layout_mode = 2
+size_flags_horizontal = 4
+custom_minimum_size = Vector2(360, 76)
+theme_override_font_sizes/font_size = 32
+text = "Tutorial"
+
 [node name="QuitButton" type="Button" parent="VBox/Buttons"]
 layout_mode = 2
 size_flags_horizontal = 4

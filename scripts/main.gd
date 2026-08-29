@@ -105,6 +105,20 @@ const INCOME_TAX_INDEX: int = 4
 const TERMINUS_RAILROAD_RENTS: Array[int] = [25, 50, 100, 200]
 const TERMINUS_FIVE_RAILROAD_RENT: int = 300
 
+# Tutorial mode script (Main Menu > Tutorial). Each step shows its "text" in
+# the bubble at the bottom of the screen. A step with an "action" forces the
+# player to make exactly that play -- anything else toasts "Follow the
+# instructions!"; a "forced_roll" makes the dice land on those faces when
+# that action is "roll". A step with no "action" advances on any click.
+# Append steps here to extend the walkthrough.
+const TUTORIAL_STEPS: Array[Dictionary] = [
+	{"text": "Welcome to the Magopoly tutorial!"},
+	{"text": "We assume you know the rules of regular Monopoly; this tutorial will tell you how spells work."},
+	{"text": "We've started you with a few properties and a few spells to make this easier."},
+	{"text": "Start your turn by clicking the roll button...", "action": "roll", "forced_roll": Vector2i(1, 3)},
+	{"text": "So far so good!"},
+]
+
 signal debt_resolved
 # Emitted whenever a trade negotiation reaches a conclusion (finalized or
 # declined), so an AI-initiated trade (see _ai_trade_check) can await the
@@ -199,6 +213,10 @@ var dice_label: DiceSink = DiceSink.new()
 @onready var spell_cast_hseparator: HSeparator = $UI/PlayersPanel/VBox/HSeparatorSpellCast
 @onready var spell_cast_display: VBoxContainer = $UI/PlayersPanel/VBox/SpellCastDisplay
 @onready var spell_cast_stack: Control = $UI/PlayersPanel/VBox/SpellCastDisplay/SpellCastStack
+@onready var tutorial_bubble: Panel = $UI/TutorialBubble
+@onready var tutorial_bubble_label: Label = $UI/TutorialBubble/Label
+@onready var tutorial_bubble_hint: Label = $UI/TutorialBubble/Hint
+@onready var tutorial_click_catcher: Control = $UI/TutorialClickCatcher
 
 var players: Array[Node2D] = []
 var current_player: int = 0
@@ -372,6 +390,16 @@ var _trade_can_accept: bool = false
 # (that's still what happens for a trade an AI didn't ask for).
 var _ai_initiated_trade: bool = false
 
+# --- Tutorial mode ----------------------------------------------------
+# Running the scripted walkthrough (see TUTORIAL_STEPS). While active, the
+# player may only make the play the current step asks for.
+var _tutorial_active: bool = false
+var _tutorial_step: int = -1
+# The play the current step demands ("" = advance on any click), and the
+# dice it forces when that play is "roll" (ZERO = a normal random roll).
+var _tutorial_expected_action: String = ""
+var _tutorial_forced_roll: Vector2i = Vector2i.ZERO
+
 
 func _ready() -> void:
 	admin_row.visible = GameState.admin_mode
@@ -394,6 +422,7 @@ func _ready() -> void:
 	trader2_money_edit.text_changed.connect(_on_trade_money_changed)
 	card_picker.zoom_requested.connect(spell_card.show_card)
 	board.space_clicked.connect(_on_space_clicked)
+	tutorial_click_catcher.gui_input.connect(_on_tutorial_catcher_input)
 	_build_log_markup()
 	game_log.meta_clicked.connect(_on_log_meta_clicked)
 	_update_turn_label()
@@ -409,6 +438,8 @@ func _ready() -> void:
 		return
 	# The first turn -- every later one is logged from _advance_to_next_active_player.
 	_log_turn_start(current_player)
+	if GameState.tutorial_mode:
+		_start_tutorial()
 	if GameState.is_authority() and players[current_player].is_ai:
 		_run_ai_turn()
 
@@ -433,6 +464,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	var pause_keys: Array = [KEY_SPACE, KEY_1, KEY_2, KEY_3, KEY_4]
 	if not pause_keys.has(event.keycode):
+		return
+
+	if _tutorial_active:
+		_toast("Follow the instructions!")
 		return
 
 	if GameState.online:
@@ -474,6 +509,63 @@ func _confirm_quit() -> void:
 		get_tree().quit()
 
 
+# ============================================================================
+# Tutorial mode -- a fixed script of steps (TUTORIAL_STEPS), each shown in a
+# bubble at the bottom of the screen. Steps with an "action" make the player
+# perform exactly that play; steps without one advance on any click, caught
+# by a full-screen invisible Control. When the script runs out the tutorial
+# ends and the game becomes ordinary free play.
+# ============================================================================
+
+func _start_tutorial() -> void:
+	_tutorial_active = true
+	_tutorial_step = -1
+	_tutorial_advance()
+
+
+func _tutorial_advance() -> void:
+	_tutorial_step += 1
+	if _tutorial_step >= TUTORIAL_STEPS.size():
+		_end_tutorial()
+		return
+	var step: Dictionary = TUTORIAL_STEPS[_tutorial_step]
+	_tutorial_expected_action = step.get("action", "")
+	_tutorial_forced_roll = step.get("forced_roll", Vector2i.ZERO)
+	tutorial_bubble_label.text = step.get("text", "")
+	tutorial_bubble.visible = true
+	var free_click: bool = _tutorial_expected_action == ""
+	tutorial_bubble_hint.visible = free_click
+	tutorial_click_catcher.visible = free_click
+	tutorial_click_catcher.mouse_filter = Control.MOUSE_FILTER_STOP if free_click else Control.MOUSE_FILTER_IGNORE
+
+
+func _end_tutorial() -> void:
+	_tutorial_active = false
+	_tutorial_expected_action = ""
+	_tutorial_forced_roll = Vector2i.ZERO
+	tutorial_bubble.visible = false
+	tutorial_click_catcher.visible = false
+	tutorial_click_catcher.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
+func _on_tutorial_catcher_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		tutorial_click_catcher.accept_event()
+		_tutorial_advance()
+
+
+# True (and shows the "Follow the instructions!" toast) when the tutorial is
+# waiting for a specific play and `action` isn't it. Action handlers call
+# this at the top and bail when it returns true.
+func _tutorial_blocks(action: String) -> bool:
+	if not _tutorial_active:
+		return false
+	if _tutorial_expected_action == action:
+		return false
+	_toast("Follow the instructions!")
+	return true
+
+
 func _spawn_players() -> void:
 	for i in PLAYER_COLORS.size():
 		var player: Node2D = PLAYER_SCENE.instantiate()
@@ -496,7 +588,12 @@ func _spawn_players() -> void:
 		else:
 			if type == GameState.PlayerType.COMPUTER:
 				player.is_ai = true
-			if GameState.blitzstart_mode:
+			if GameState.tutorial_mode:
+				# Only the human gets a head start; the tutorial script
+				# assumes P1 has a few properties and spells to work with.
+				if i == 0:
+					_grant_starting_hand(player, 3, 3)
+			elif GameState.blitzstart_mode:
 				_grant_starting_hand(player, 6, 4)
 			elif GameState.quickstart_mode:
 				_grant_starting_hand(player, 3, 2)
@@ -547,6 +644,10 @@ func _first_active_player() -> int:
 
 
 func _on_roll_pressed() -> void:
+	# Tutorial: the roll is only allowed on the step that asks for it. (End
+	# Turn presses go through -- no tutorial step gates those yet.)
+	if not _awaiting_end_turn and _tutorial_blocks("roll"):
+		return
 	# Online: only the machine controlling the current player may act, and a
 	# client sends the press to the host rather than running it locally.
 	if GameState.online:
@@ -563,6 +664,14 @@ func _on_roll_pressed() -> void:
 func _perform_roll_button_action() -> void:
 	if _awaiting_end_turn:
 		_end_turn()
+		return
+	# Tutorial: a step can pin the dice to fixed faces, then advance itself
+	# once that roll (and its landing) has fully resolved.
+	if _tutorial_active and _tutorial_forced_roll != Vector2i.ZERO:
+		var forced: Vector2i = _tutorial_forced_roll
+		_tutorial_forced_roll = Vector2i.ZERO
+		await _perform_roll(forced.x, forced.y)
+		_tutorial_advance()
 		return
 	_perform_roll(randi_range(1, 6), randi_range(1, 6))
 
@@ -1026,6 +1135,8 @@ func _on_admin_spells_pressed() -> void:
 # button (or the B key) is pressed again to turn it off. _refresh_action_
 # buttons() handles the outline and locks the other actions while it's on.
 func _on_buy_house_unmortgage_pressed() -> void:
+	if _tutorial_blocks("buy_house"):
+		return
 	if GameState.online and not GameState.is_authority():
 		_net_action_intent.rpc_id(1, "buy_house_unmortgage")
 		return
@@ -1096,6 +1207,8 @@ func _min_houses_in_group(color_name: String) -> int:
 
 
 func _on_sell_house_mortgage_pressed() -> void:
+	if _tutorial_blocks("sell_house"):
+		return
 	if GameState.online and not GameState.is_authority():
 		_net_action_intent.rpc_id(1, "sell_house_mortgage")
 		return
@@ -2216,6 +2329,8 @@ func _refresh_action_buttons() -> void:
 
 
 func _on_trade_pressed() -> void:
+	if _tutorial_blocks("trade"):
+		return
 	if GameState.online and not GameState.is_authority():
 		_net_action_intent.rpc_id(1, "trade")
 		return
@@ -2780,6 +2895,8 @@ func _check_for_winner() -> void:
 
 
 func _on_declare_bankruptcy_pressed() -> void:
+	if _tutorial_blocks("bankruptcy"):
+		return
 	if GameState.online and not GameState.is_authority():
 		_net_action_intent.rpc_id(1, "declare_bankruptcy")
 		return
@@ -3173,6 +3290,10 @@ func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
 # levels are only usable responding to a roll or another spell) and then
 # Attunement (_color_attunement() must be >= the level).
 func _on_spell_clicked(hand_index: int, player_index: int) -> void:
+	# Tutorial: casting is only allowed when a step asks for it. (Right-click
+	# to inspect a card stays available -- see _on_spell_right_clicked.)
+	if _tutorial_blocks("cast_spell"):
+		return
 	# During a trade a spell-card click toggles that spell in/out of the
 	# offer -- _handle_trade_spell_click self-routes to the host if this
 	# machine is the proposer.

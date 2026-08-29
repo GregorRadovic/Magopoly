@@ -27,6 +27,11 @@ var quickstart_mode: bool = false
 # BlitzStart wins.
 var blitzstart_mode: bool = false
 
+# Tutorial mode (Main Menu > Tutorial): a one-human, one-Computer game that
+# walks the player through a fixed script of moves. See main.gd's
+# TUTORIAL_STEPS. Overrides the Quickstart / BlitzStart toggles.
+var tutorial_mode: bool = false
+
 # --- Online play (set by Net._recv_start; see net.gd) ------------------
 # True when this session was launched from the online lobby rather than the
 # local Start Menu. Local games leave all of these at their defaults, and

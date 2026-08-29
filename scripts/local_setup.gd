@@ -51,5 +51,6 @@ func _on_start_pressed() -> void:
 	GameState.admin_mode = admin_checkbox.button_pressed
 	GameState.quickstart_mode = quickstart_checkbox.button_pressed
 	GameState.blitzstart_mode = blitzstart_checkbox.button_pressed
+	GameState.tutorial_mode = false
 	GameState.online = false
 	get_tree().change_scene_to_file("res://scenes/main.tscn")

@@ -216,6 +216,7 @@ func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bo
 	GameState.admin_mode = admin_mode
 	GameState.quickstart_mode = quickstart
 	GameState.blitzstart_mode = blitzstart
+	GameState.tutorial_mode = false
 	GameState.online = true
 	GameState.slot_peer = _to_int_array(peer_map)
 	GameState.local_peer_id = multiplayer.get_unique_id()
