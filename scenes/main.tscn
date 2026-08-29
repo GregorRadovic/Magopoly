@@ -26,6 +26,22 @@ corner_radius_top_right = 8
 corner_radius_bottom_left = 8
 corner_radius_bottom_right = 8
 
+[sub_resource type="StyleBoxFlat" id="ToastStyle"]
+content_margin_left = 22.0
+content_margin_top = 12.0
+content_margin_right = 22.0
+content_margin_bottom = 12.0
+bg_color = Color(0.12, 0.12, 0.14, 0.94)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.85, 0.3, 0.3, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_left = 10
+corner_radius_bottom_right = 10
+
 [node name="Main" type="Node2D"]
 script = ExtResource("1")
 
@@ -110,6 +126,31 @@ bbcode_enabled = true
 scroll_following = true
 selection_enabled = true
 theme_override_colors/default_color = Color(0, 0, 0, 1)
+
+[node name="Toast" type="Panel" parent="UI"]
+visible = false
+offset_left = 170.0
+offset_top = 26.0
+offset_right = 748.0
+offset_bottom = 110.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("ToastStyle")
+
+[node name="ToastLabel" type="Label" parent="UI/Toast"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 8.0
+offset_right = -16.0
+offset_bottom = -8.0
+theme_override_colors/font_color = Color(1, 0.92, 0.92, 1)
+theme_override_font_sizes/font_size = 22
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+text = ""
 
 [node name="NumberPrompt" parent="UI" instance=ExtResource("3")]
 

@@ -127,6 +127,8 @@ signal board_space_picked(index: int)
 @onready var trade_button: Button = $UI/Panel/VBox/TradeButton
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
 @onready var game_log: RichTextLabel = $UI/LogPanel/Log
+@onready var toast_panel: Panel = $UI/Toast
+@onready var toast_label: Label = $UI/Toast/ToastLabel
 # The old on-screen status line is gone -- the scrollable log (see _log())
 # is the only record now. `dice_label` stays as a throwaway text sink so the
 # ~200 `dice_label.text = ...` / `+= ...` call sites don't all need touching.
@@ -912,7 +914,7 @@ func _on_admin_properties_pressed() -> void:
 func _admin_assign_property(index: int) -> void:
 	var info: Dictionary = board.get_space_info(index)
 	if info.get("type", "") != "property":
-		dice_label.text = "Space %d is not a property." % index
+		_toast("Space %d is not a property." % index)
 	else:
 		var space: Node2D = board.spaces[index]
 		if space.owner_id != -1:
@@ -1008,19 +1010,19 @@ func _buy_house(index: int) -> void:
 		effective_cost = maxi(0, house_cost - (house_cost * player.haggling_discount_percent / 100))
 
 	if info.get("type", "") != "property" or not board.HOUSE_COSTS_BY_COLOR.has(color_name):
-		dice_label.text = "You can't build houses on that space."
+		_toast("You can't build houses on that space.")
 	elif space.owner_id != player.player_id:
-		dice_label.text = "You don't own %s." % property_name
+		_toast("You don't own %s." % property_name)
 	elif _group_has_mortgaged(color_name):
-		dice_label.text = "You can't build houses on %s while a property in its color set is mortgaged." % property_name
+		_toast("You can't build houses on %s while a property in its color set is mortgaged." % property_name)
 	elif not _owns_full_color_group(player.player_id, color_name):
-		dice_label.text = "You need the full color set to build a house on %s." % property_name
+		_toast("You need the full color set to build a house on %s." % property_name)
 	elif space.house_count >= 5:
-		dice_label.text = "%s already has the maximum of 5 houses." % property_name
+		_toast("%s already has the maximum of 5 houses." % property_name)
 	elif space.house_count > _min_houses_in_group(color_name):
-		dice_label.text = "You must build evenly -- other properties in the color set have fewer houses than %s." % property_name
+		_toast("You must build evenly -- other properties in the color set have fewer houses than %s." % property_name)
 	elif player.money < effective_cost:
-		dice_label.text = "%s can't afford a house on %s ($%d)." % [_player_display_name(player.player_id), property_name, effective_cost]
+		_toast("%s can't afford a house on %s ($%d)." % [_player_display_name(player.player_id), property_name, effective_cost])
 	else:
 		dice_label.text = ""
 		var final_cost: int = _apply_haggling_discount(player, house_cost)
@@ -1088,13 +1090,13 @@ func _sell_house(index: int) -> void:
 	var sale_price: int = house_cost / 2
 
 	if info.get("type", "") != "property" or not board.HOUSE_COSTS_BY_COLOR.has(color_name):
-		dice_label.text = "That space doesn't have houses to sell."
+		_toast("That space doesn't have houses to sell.")
 	elif space.owner_id != player.player_id:
-		dice_label.text = "You don't own %s." % property_name
+		_toast("You don't own %s." % property_name)
 	elif space.house_count <= 0:
-		dice_label.text = "%s has no houses to sell." % property_name
+		_toast("%s has no houses to sell." % property_name)
 	elif space.house_count < _max_houses_in_group(color_name):
-		dice_label.text = "You must sell evenly -- other properties in the color set have more houses than %s." % property_name
+		_toast("You must sell evenly -- other properties in the color set have more houses than %s." % property_name)
 	else:
 		space.house_count -= 1
 		player.money += sale_price
@@ -1134,13 +1136,13 @@ func _mortgage_property(index: int) -> void:
 	var mortgage_value: int = _mortgage_value(_terminus_aware_price(index))
 
 	if index != 0 and info.get("type", "") != "property":
-		dice_label.text = "That space can't be mortgaged."
+		_toast("That space can't be mortgaged.")
 	elif space.owner_id != player.player_id:
-		dice_label.text = "You don't own %s." % property_name
+		_toast("You don't own %s." % property_name)
 	elif space.is_mortgaged:
-		dice_label.text = "%s is already mortgaged." % property_name
+		_toast("%s is already mortgaged." % property_name)
 	elif _max_houses_in_group(color_name) > 0:
-		dice_label.text = "You can't mortgage %s while its color set has houses." % property_name
+		_toast("You can't mortgage %s while its color set has houses." % property_name)
 	else:
 		space.is_mortgaged = true
 		player.money += mortgage_value
@@ -1157,13 +1159,13 @@ func _unmortgage_property(index: int) -> void:
 	var unmortgage_value: int = _unmortgage_value(_terminus_aware_price(index))
 
 	if index != 0 and info.get("type", "") != "property":
-		dice_label.text = "That space can't be unmortgaged."
+		_toast("That space can't be unmortgaged.")
 	elif space.owner_id != player.player_id:
-		dice_label.text = "You don't own %s." % property_name
+		_toast("You don't own %s." % property_name)
 	elif not space.is_mortgaged:
-		dice_label.text = "%s isn't mortgaged." % property_name
+		_toast("%s isn't mortgaged." % property_name)
 	elif player.money < unmortgage_value:
-		dice_label.text = "%s can't afford to unmortgage %s ($%d)." % [_player_display_name(player.player_id), property_name, unmortgage_value]
+		_toast("%s can't afford to unmortgage %s ($%d)." % [_player_display_name(player.player_id), property_name, unmortgage_value])
 	else:
 		space.is_mortgaged = false
 		player.money -= unmortgage_value
@@ -2099,11 +2101,11 @@ func _handle_trade_click(index: int) -> void:
 func _apply_trade_click(index: int) -> void:
 	var space: Node2D = board.spaces[index]
 	if space.owner_id != _trader1 and space.owner_id != _trader2:
-		dice_label.text = "That property isn't part of this trade."
+		_toast("That property isn't part of this trade.")
 		return
 	var color_name: String = board.get_space_info(index).get("color", "")
 	if _max_houses_in_group(color_name) > 0:
-		dice_label.text = "That property can't be traded while a property in its color set has houses."
+		_toast("That property can't be traded while a property in its color set has houses.")
 		return
 
 	var offered: Array[int] = _trade1_offered if space.owner_id == _trader1 else _trade2_offered
@@ -2133,7 +2135,7 @@ func _handle_trade_spell_click(hand_index: int, player_index: int) -> void:
 
 func _apply_trade_spell_click(hand_index: int, player_index: int) -> void:
 	if player_index != _trader1 and player_index != _trader2:
-		dice_label.text = "That spell isn't part of this trade."
+		_toast("That spell isn't part of this trade.")
 		return
 	var offered: Array[int] = _trade1_spells_offered if player_index == _trader1 else _trade2_spells_offered
 	if offered.has(hand_index):
@@ -2220,10 +2222,10 @@ func _finalize_trade() -> void:
 	var p1_money: int = max(0, int(trader1_money_edit.text))
 	var p2_money: int = max(0, int(trader2_money_edit.text))
 	if p1_money > p1.money:
-		dice_label.text = "%s doesn't have enough money to offer $%d." % [PLAYER_NAMES[_trader1], p1_money]
+		_toast("%s doesn't have enough money to offer $%d." % [PLAYER_NAMES[_trader1], p1_money])
 		return
 	if p2_money > p2.money:
-		dice_label.text = "%s doesn't have enough money to offer $%d." % [PLAYER_NAMES[_trader2], p2_money]
+		_toast("%s doesn't have enough money to offer $%d." % [PLAYER_NAMES[_trader2], p2_money])
 		return
 
 	for index in _trade1_offered:
@@ -2945,13 +2947,13 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 	elif choice != -1:
 		var extra_rejection: String = _spell_extra_validation(caster, spell_name, choice)
 		if not _level_timing_allowed(caster, spell_name, choice):
-			dice_label.text = "%s can't cast %s at Level %d right now -- wrong timing." % [_player_display_name(caster.player_id), spell_name, choice]
+			_toast("%s can't cast %s at Level %d right now -- wrong timing." % [_player_display_name(caster.player_id), spell_name, choice])
 		elif extra_rejection != "":
-			dice_label.text = extra_rejection
+			_toast(extra_rejection)
 		else:
 			var attunement: int = _color_attunement(caster, color_name)
 			if attunement < choice:
-				dice_label.text = "%s doesn't have enough %s Attunement to cast %s at Level %d (has %d, needs %d)." % [_player_display_name(caster.player_id), color_name.capitalize(), spell_name, choice, attunement, choice]
+				_toast("%s doesn't have enough %s Attunement to cast %s at Level %d (has %d, needs %d)." % [_player_display_name(caster.player_id), color_name.capitalize(), spell_name, choice, attunement, choice])
 			else:
 				var resolve: Callable = await _prepare_spell_cast(caster, hand_index, spell_name, choice)
 				if resolve.is_valid():
@@ -5170,10 +5172,45 @@ func _net_unpack_card_entries(entries: Array) -> Array:
 
 
 # ============================================================================
+# Toasts -- a brief centred banner for "you can't do that" feedback, shown to
+# the player who attempted the action (routed like the prompts online).
+# ============================================================================
+
+var _toast_tween: Tween
+
+
+func _toast(msg: String) -> void:
+	if msg == "":
+		return
+	if GameState.online and GameState.is_authority():
+		var slot: int = _prompt_target()
+		if not GameState.is_slot_local(slot):
+			_net_toast.rpc_id(_peer_for_slot(slot), msg)
+			return
+	_show_toast(msg)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _net_toast(msg: String) -> void:
+	_show_toast(msg)
+
+
+func _show_toast(msg: String) -> void:
+	toast_label.text = msg
+	if _toast_tween and _toast_tween.is_valid():
+		_toast_tween.kill()
+	toast_panel.modulate.a = 1.0
+	toast_panel.visible = true
+	_toast_tween = create_tween()
+	_toast_tween.tween_interval(1.8)
+	_toast_tween.tween_property(toast_panel, "modulate:a", 0.0, 0.4)
+	_toast_tween.tween_callback(toast_panel.hide)
+
+
+# ============================================================================
 # Game log -- the permanent, scrollable record in the bottom panel. Only the
-# events listed below get logged; everything else (errors, prompts, per-step
-# narration) stays transient in `dice_label`. Turn-start lines are drawn in
-# the player's colour, everything else in black.
+# events listed below get logged; everything else stays transient (toasts).
+# Turn-start lines are drawn in the player's colour, everything else in black.
 # ============================================================================
 
 var _log_buffer: String = ""    # full bbcode text, for a client catching up
