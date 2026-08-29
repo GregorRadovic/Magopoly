@@ -126,10 +126,10 @@ signal board_space_picked(index: int)
 @onready var declare_bankruptcy_button: Button = $UI/Panel/VBox/DeclareBankruptcyButton
 @onready var trade_button: Button = $UI/Panel/VBox/TradeButton
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
-# Backed by a GameLog (see below) rather than a Label: `dice_label.text = X`
-# and `dice_label.text += X` still work at every call site, but each message
-# now also accumulates into the scrollable log panel and is never cleared.
-@onready var dice_label: GameLog = GameLog.new($UI/LogPanel/Log)
+# The transient status line (errors, prompts, per-action narration). The
+# permanent scrollable record is `game_log` -- see _log().
+@onready var dice_label: Label = $UI/Panel/VBox/StatusLabel
+@onready var game_log: RichTextLabel = $UI/LogPanel/Log
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
 @onready var confirm_prompt: PopupPanel = $UI/ConfirmPrompt
 @onready var quit_confirm_prompt: PopupPanel = $UI/QuitConfirmPrompt
@@ -277,6 +277,10 @@ func _update_wizard_vision() -> void:
 # _spell_deck itself instead. See _finish_cast().
 var _spell_stack: Array[Dictionary] = []
 var _next_stack_id: int = 0
+# Set by a _prepare_* step to the name of the target it just picked (an
+# opponent or a property), so _finish_cast can name it in the log line.
+# Read and cleared there.
+var _pending_spell_target: String = ""
 
 # The shared Spell Deck every player draws from (game start, and one card
 # whenever anyone passes Go). Every spell that leaves a hand -- resolved,
@@ -367,6 +371,8 @@ func _ready() -> void:
 	if GameState.online and not GameState.is_authority():
 		_net_request_initial_snapshot()
 		return
+	# The first turn -- every later one is logged from _advance_to_next_active_player.
+	_log_turn_start(current_player)
 	if GameState.is_authority() and players[current_player].is_ai:
 		_run_ai_turn()
 
@@ -672,6 +678,7 @@ func _on_peer_gone(peer_id: int) -> void:
 		players[slot].is_ai = true
 		_response_window_paused_by[slot] = false
 		dice_label.text += "\n%s disconnected -- a Computer takes over." % PLAYER_NAMES[slot]
+		_log("%s disconnected; a Computer takes over." % PLAYER_NAMES[slot])
 
 	# A trade with the departed player can't continue.
 	if _trading and (affected.has(_trader1) or affected.has(_trader2)):
@@ -1020,6 +1027,7 @@ func _buy_house(index: int) -> void:
 		space.house_count += 1
 		var house_word: String = "house" if space.house_count == 1 else "houses"
 		dice_label.text += "%s built a house on %s for $%d (now %d %s)." % [_player_display_name(player.player_id), property_name, final_cost, space.house_count, house_word]
+		_log("%s built a house on %s for $%d (now %d %s)." % [PLAYER_NAMES[player.player_id], property_name, final_cost, space.house_count, house_word])
 		_update_player_panels()
 
 
@@ -1091,6 +1099,7 @@ func _sell_house(index: int) -> void:
 		player.money += sale_price
 		var house_word: String = "house" if space.house_count == 1 else "houses"
 		dice_label.text = "%s sold a house on %s for $%d (now %d %s)." % [_player_display_name(player.player_id), property_name, sale_price, space.house_count, house_word]
+		_log("%s sold a house on %s for $%d (now %d %s)." % [PLAYER_NAMES[player.player_id], property_name, sale_price, space.house_count, house_word])
 		_update_player_panels()
 
 
@@ -1135,6 +1144,7 @@ func _mortgage_property(index: int) -> void:
 		space.is_mortgaged = true
 		player.money += mortgage_value
 		dice_label.text = "%s mortgaged %s for $%d." % [_player_display_name(player.player_id), property_name, mortgage_value]
+		_log("%s mortgaged %s for $%d." % [PLAYER_NAMES[player.player_id], property_name, mortgage_value])
 		_update_player_panels()
 
 
@@ -1157,6 +1167,7 @@ func _unmortgage_property(index: int) -> void:
 		space.is_mortgaged = false
 		player.money -= unmortgage_value
 		dice_label.text = "%s unmortgaged %s for $%d." % [_player_display_name(player.player_id), property_name, unmortgage_value]
+		_log("%s unmortgaged %s for $%d." % [PLAYER_NAMES[player.player_id], property_name, unmortgage_value])
 		_update_player_panels()
 
 
@@ -1473,6 +1484,9 @@ func _perform_roll(die1: int, die2: int) -> void:
 	var is_double: bool = die1 == die2
 	var player: Node2D = players[current_player]
 	dice_label.text = "%s rolled: %d + %d = %d" % [_player_display_name(current_player), die1, die2, roll]
+	_log("%s rolled %d + %d = %d." % [PLAYER_NAMES[current_player], die1, die2, roll])
+	if is_double:
+		_log("%s rolled doubles." % PLAYER_NAMES[current_player])
 
 	# Unstable Portal, then Hasty Exit Level 1 -- both set up before this
 	# roll, "before rolling"; the multiplier applies to the base roll first,
@@ -1480,10 +1494,12 @@ func _perform_roll(die1: int, die2: int) -> void:
 	if player.next_roll_multiplier != 1:
 		roll *= player.next_roll_multiplier
 		dice_label.text += "\nUnstable Portal multiplies by %d (now %d)." % [player.next_roll_multiplier, roll]
+		_log("%s's roll is multiplied by %d (now %d)." % [PLAYER_NAMES[current_player], player.next_roll_multiplier, roll])
 		player.next_roll_multiplier = 1
 	if player.next_roll_bonus != 0:
 		roll += player.next_roll_bonus
 		dice_label.text += "\nHasty Exit adds %d (now %d)." % [player.next_roll_bonus, roll]
+		_log("%s's roll is modified by %+d (now %d)." % [PLAYER_NAMES[current_player], player.next_roll_bonus, roll])
 		player.next_roll_bonus = 0
 
 	_current_roll = roll
@@ -1499,6 +1515,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 			player.in_jail = false
 			player.consecutive_doubles = 0
 			dice_label.text += "\nRolled doubles! Released from Jail."
+			_log("%s left Jail (rolled doubles)." % PLAYER_NAMES[current_player])
 			grants_extra_turn = false
 			await _move_player(player, roll)
 		else:
@@ -1508,6 +1525,8 @@ func _perform_roll(die1: int, die2: int) -> void:
 				free_parking_amount += 50
 				player.in_jail = false
 				dice_label.text += "\nSentence served, paid $50 to Free Parking."
+				_log_payment(current_player, 50, "Free Parking")
+				_log("%s left Jail." % PLAYER_NAMES[current_player])
 			else:
 				dice_label.text += "\nStill in Jail. %d turn(s) left." % player.jail_turns_left
 	else:
@@ -1549,10 +1568,12 @@ func _move_player(player: Node2D, roll: int) -> bool:
 			dice_label.text += "\nYou passed Go! (+200 Money, drew %s)" % drawn_spell
 		else:
 			dice_label.text += "\nYou passed Go! (+200 Money)"
+		_log("%s passed Go (+$200)." % PLAYER_NAMES[player.player_id])
 		_update_player_panels()
 
 	player.current_space = new_space_raw % board.TOTAL_SPACES
 	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+	_log("%s landed on %s." % [PLAYER_NAMES[player.player_id], _property_name(player.current_space)])
 
 	# Terminus Station: an overlay on Go, not a real SPACE_DATA space, so
 	# this is a standalone check rather than part of the "type" chain below
@@ -1569,6 +1590,7 @@ func _move_player(player: Node2D, roll: int) -> bool:
 		player.money -= rent_amount
 		terminus_owner.money += rent_amount
 		dice_label.text += "\nTerminus Station (owned by %s)! Paid $%d rent (%d railroads owned)." % [PLAYER_NAMES[board.spaces[0].owner_id], rent_amount, owned_railroads]
+		_log_payment(player.player_id, rent_amount, PLAYER_NAMES[board.spaces[0].owner_id])
 
 	var landed_info: Dictionary = board.get_space_info(player.current_space)
 	if landed_info.get("type", "") == "tax":
@@ -1588,6 +1610,7 @@ func _move_player(player: Node2D, roll: int) -> bool:
 			player.money -= owed
 			owner.money += owed
 			dice_label.text += "\nLanded on %s (owned by %s)! Paid $%d." % [landed_info.get("name", ""), PLAYER_NAMES[tax_space.owner_id], owed]
+			_log_payment(player.player_id, owed, PLAYER_NAMES[tax_space.owner_id])
 		else:
 			if tax_value > player.money:
 				dice_label.text += "\nLanded on %s! Owes $%d." % [landed_info.get("name", ""), tax_value]
@@ -1596,10 +1619,12 @@ func _move_player(player: Node2D, roll: int) -> bool:
 			player.money -= tax_value
 			free_parking_amount += tax_value
 			dice_label.text += "\nLanded on %s! -%d Money (added to Free Parking)" % [landed_info.get("name", ""), tax_value]
+			_log_payment(player.player_id, tax_value, "Free Parking")
 	elif landed_info.get("type", "") == "free_parking":
 		if free_parking_amount > 0:
 			player.money += free_parking_amount
 			dice_label.text += "\nLanded on Free Parking! +%d Money" % free_parking_amount
+			_log("%s collected $%d from Free Parking." % [PLAYER_NAMES[player.player_id], free_parking_amount])
 			free_parking_amount = 0
 		else:
 			dice_label.text += "\nLanded on Free Parking!"
@@ -1646,6 +1671,8 @@ func _move_player(player: Node2D, roll: int) -> bool:
 				player.owned_property_indices.append(player.current_space)
 				_sort_owned_properties(player)
 				dice_label.text += "\nBought %s for $%d!" % [property_name, final_price]
+				_log("%s bought %s for $%d." % [PLAYER_NAMES[player.player_id], property_name, final_price])
+				_note_ownership(player.current_space)
 			else:
 				dice_label.text += "\nDeclined to buy %s." % property_name
 		elif space.owner_id != player.player_id and space.is_mortgaged:
@@ -1699,6 +1726,7 @@ func _move_player(player: Node2D, roll: int) -> bool:
 				player.money -= rent_amount
 				owner.money += rent_amount
 				dice_label.text += "\nLanded on %s (owned by %s)! Paid $%d rent%s." % [property_name, PLAYER_NAMES[space.owner_id], rent_amount, note]
+				_log_payment(player.player_id, rent_amount, PLAYER_NAMES[space.owner_id])
 
 	return false
 
@@ -1743,6 +1771,7 @@ func _charge_spell_payment(payer: Node2D, amount: int, creditor: Node2D, resolve
 	payer.money -= amount
 	if creditor:
 		creditor.money += amount
+	_log_payment(payer.player_id, amount, PLAYER_NAMES[creditor.player_id] if creditor else "Free Parking")
 	if append:
 		dice_label.text += "\n" + resolve_message
 	else:
@@ -1930,6 +1959,8 @@ func _maybe_resolve_debt() -> void:
 	else:
 		free_parking_amount += _debt_amount
 	dice_label.text += "\n%s raised enough money and paid the $%d owed." % [_player_display_name(player.player_id), _debt_amount]
+	_log_payment(player.player_id, _debt_amount,
+		PLAYER_NAMES[_debt_creditor.player_id] if _debt_creditor else "Free Parking")
 
 	_in_debt = false
 	_debt_amount = 0
@@ -2198,10 +2229,12 @@ func _finalize_trade() -> void:
 		p1.owned_property_indices.erase(index)
 		p2.owned_property_indices.append(index)
 		board.spaces[index].owner_id = _trader2
+		_note_ownership(index)
 	for index in _trade2_offered:
 		p2.owned_property_indices.erase(index)
 		p1.owned_property_indices.append(index)
 		board.spaces[index].owner_id = _trader1
+		_note_ownership(index)
 
 	# Read every offered spell's name out by its (still-valid, since nothing
 	# has been removed yet) hand_index *before* removing any of them --
@@ -2233,6 +2266,25 @@ func _finalize_trade() -> void:
 	_sort_owned_properties(p1)
 	_sort_owned_properties(p2)
 	dice_label.text = "%s and %s completed a trade!" % [PLAYER_NAMES[_trader1], PLAYER_NAMES[_trader2]]
+	_log("%s and %s completed a trade." % [PLAYER_NAMES[_trader1], PLAYER_NAMES[_trader2]])
+	var gave1: Array[String] = []
+	for i in _trade1_offered:
+		gave1.append(_property_name(i))
+	for n in p1_spell_names:
+		gave1.append(n)
+	if p1_money > 0:
+		gave1.append("$%d" % p1_money)
+	var gave2: Array[String] = []
+	for i in _trade2_offered:
+		gave2.append(_property_name(i))
+	for n in p2_spell_names:
+		gave2.append(n)
+	if p2_money > 0:
+		gave2.append("$%d" % p2_money)
+	if not gave1.is_empty():
+		_log("  %s gave %s." % [PLAYER_NAMES[_trader1], ", ".join(gave1)])
+	if not gave2.is_empty():
+		_log("  %s gave %s." % [PLAYER_NAMES[_trader2], ", ".join(gave2)])
 	_end_trade()
 
 
@@ -2445,6 +2497,11 @@ func _bankrupt_player(player: Node2D, creditor: Node2D) -> void:
 	player.is_bankrupt = true
 	player.visible = false
 
+	if creditor:
+		_log("%s went bankrupt; everything passes to %s." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[creditor.player_id]])
+	else:
+		_log("%s went bankrupt." % PLAYER_NAMES[player.player_id])
+
 
 # Shared tail of every bankruptcy path (voluntary or debt-forced, human or
 # AI): liquidate, check for a winner, and refresh the panels. Callers are
@@ -2468,6 +2525,7 @@ func _check_for_winner() -> void:
 			remaining.append(player)
 	if remaining.size() == 1:
 		dice_label.text += "\n%s wins!" % PLAYER_NAMES[remaining[0].player_id]
+		_log("%s wins!" % PLAYER_NAMES[remaining[0].player_id], PLAYER_COLORS[remaining[0].player_id])
 
 
 func _on_declare_bankruptcy_pressed() -> void:
@@ -3115,6 +3173,9 @@ func _finish_cast(caster: Node2D, spell_name: String, level: int, resolve: Calla
 	var display_name: String = "%s (Level %d)" % [spell_name, level]
 	_spell_stack.append({"id": stack_id, "caster_id": caster.player_id, "spell_name": spell_name, "level": level, "display_name": display_name, "resolve": resolve})
 	dice_label.text += "\n%s casts %s!" % [_player_display_name(caster.player_id), display_name]
+	var target_suffix: String = "" if _pending_spell_target == "" else (" targeting %s" % _pending_spell_target)
+	_pending_spell_target = ""
+	_log("%s cast %s at Level %d%s." % [PLAYER_NAMES[caster.player_id], spell_name, level, target_suffix])
 	_update_player_panels()
 	await _ensure_response_window()
 
@@ -3167,6 +3228,7 @@ func _prepare_t3_escape_spell(caster: Node2D, level: int) -> Callable:
 func _resolve_t3_escape_spell(caster: Node2D, level: int, bonus: int) -> void:
 	_current_roll += bonus
 	dice_label.text = "%s's T3 Escape Spell (Level %d) resolves! Roll increased by %d (now %d)." % [_player_display_name(caster.player_id), level, bonus, _current_roll]
+	_log("%s's T3 Escape Spell modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
 
 
@@ -3239,6 +3301,7 @@ func _prepare_t2_decrease_roll(caster: Node2D) -> Callable:
 func _resolve_t2_decrease_roll(caster: Node2D) -> void:
 	_current_roll = maxi(0, _current_roll - 1)
 	dice_label.text = "%s's T2 Response Spell (Level 2) resolves! %s's roll decreased by 1 (now %d)." % [_player_display_name(caster.player_id), _player_display_name(current_player), _current_roll]
+	_log("%s's T2 Response Spell modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
 
 
@@ -3310,6 +3373,7 @@ func _prepare_hasty_exit_before_rolling(caster: Node2D) -> Callable:
 func _resolve_hasty_exit_before_rolling(caster: Node2D, bonus: int) -> void:
 	caster.next_roll_bonus += bonus
 	dice_label.text = "%s's Hasty Exit (Level 1) resolves! Their next roll this turn is +%d." % [_player_display_name(caster.player_id), caster.next_roll_bonus]
+	_log("%s's Hasty Exit modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
 
 
@@ -3323,6 +3387,7 @@ func _prepare_hasty_exit_current_roll(caster: Node2D) -> Callable:
 func _resolve_hasty_exit_current_roll(caster: Node2D, bonus: int) -> void:
 	_current_roll += bonus
 	dice_label.text = "%s's Hasty Exit (Level 2) resolves! Roll increased by %d (now %d)." % [_player_display_name(caster.player_id), bonus, _current_roll]
+	_log("%s's Hasty Exit modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
 
 
@@ -3613,6 +3678,7 @@ func _prepare_divine_protection(caster: Node2D, level: int) -> Callable:
 func _resolve_divine_protection(caster: Node2D, level: int, amount: int) -> void:
 	_current_roll = maxi(0, _current_roll - amount)
 	dice_label.text = "%s's Divine Protection (Level %d) resolves! Roll decreased by %d (now %d)." % [_player_display_name(caster.player_id), level, amount, _current_roll]
+	_log("%s's Divine Protection modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
 
 
@@ -3718,6 +3784,7 @@ func _resolve_escape_plan(caster: Node2D, level: int, steps: int, landing_index:
 	_current_roll += steps
 	var destination: String = board.get_space_info(landing_index).get("name", "")
 	dice_label.text = "%s's Escape Plan (Level %d) resolves! Roll increased by %d to land on %s (now %d)." % [_player_display_name(caster.player_id), level, steps, destination, _current_roll]
+	_log("%s's Escape Plan modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
 
 
@@ -3933,6 +4000,7 @@ func _prepare_unstable_portal(caster: Node2D, level: int) -> Callable:
 func _resolve_unstable_portal(caster: Node2D, level: int, multiplier: int) -> void:
 	caster.next_roll_multiplier = multiplier
 	dice_label.text = "%s's Unstable Portal (Level %d) resolves! Their next roll this turn is multiplied by %d." % [_player_display_name(caster.player_id), level, multiplier]
+	_log("%s's Unstable Portal modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
 
 
@@ -4078,6 +4146,7 @@ func _resolve_taxes(caster: Node2D, level: int, target_index: int, divisor: int)
 	var payment: int = mini(amount, opponent.money)
 	opponent.money -= payment
 	caster.money += payment
+	_log_payment(target_index, payment, PLAYER_NAMES[caster.player_id])
 	dice_label.text = "%s's Taxes (Level %d) resolves on %s for $%d!" % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], payment]
 	_update_player_panels()
 
@@ -4173,6 +4242,7 @@ func _prepare_adrenaline(caster: Node2D, level: int) -> Callable:
 func _resolve_adrenaline(caster: Node2D, level: int, bonus: int) -> void:
 	_current_roll += bonus
 	dice_label.text = "%s's Adrenaline (Level %d) resolves! Roll increased by %d (now %d)." % [_player_display_name(caster.player_id), level, bonus, _current_roll]
+	_log("%s's Adrenaline modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
 
 
@@ -4389,6 +4459,7 @@ func _resolve_step_forward(caster: Node2D, level: int, bonus: int) -> void:
 	caster.next_roll_bonus += bonus
 	_queue_spell_return_to_hand(caster, "Step Forward")
 	dice_label.text = "%s's Step Forward (Level %d) resolves! Their next roll this turn is +%d." % [_player_display_name(caster.player_id), level, caster.next_roll_bonus]
+	_log("%s's Step Forward modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
 
 
@@ -4457,6 +4528,7 @@ func _resolve_cult_of_terminus_advance(caster: Node2D, steps: int, landing_index
 	_current_roll += steps
 	var destination: String = "Terminus Station" if landing_index == 0 else board.get_space_info(landing_index).get("name", "")
 	dice_label.text = "%s's The Cult of Terminus (Level 2) resolves! Roll increased by %d to land on %s (now %d)." % [_player_display_name(caster.player_id), steps, destination, _current_roll]
+	_log("%s's The Cult of Terminus modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
 
 
@@ -4540,6 +4612,7 @@ func _send_to_jail(player: Node2D) -> void:
 	player.in_jail = true
 	player.jail_turns_left = JAIL_SENTENCE_TURNS
 	player.consecutive_doubles = 0
+	_log("%s was sent to Jail." % PLAYER_NAMES[player.player_id])
 
 
 # Skips bankrupt players, who no longer take turns. Bounded by players.size()
@@ -4570,6 +4643,7 @@ func _advance_to_next_active_player() -> void:
 			# Temporary Attunement (from burning spells) only lasts until the
 			# start of the turn it was gained on.
 			players[current_player].temp_attunement.clear()
+			_log_turn_start(current_player)
 			return
 
 
@@ -4589,6 +4663,7 @@ func _player_display_name(index: int) -> String:
 
 func _update_player_panels() -> void:
 	free_parking_label.text = "Free Parking: $%d" % free_parking_amount
+	_log_ownership_changes()
 	# Ownership banners: re-synced for every space on every panel refresh
 	# rather than tracked at each of the many places ownership can change
 	# (purchases, trades, bankruptcy, a dozen-plus spells) -- simpler and
@@ -4765,16 +4840,8 @@ func _request_snapshot() -> void:
 		return
 	var who: int = multiplayer.get_remote_sender_id()
 	_net_ready_peers[who] = true
-	_net_log_history.rpc_id(who, dice_label._buffer, dice_label.text)
+	_net_log_history.rpc_id(who, _log_buffer)
 	_recv_snapshot.rpc_id(who, _build_snapshot())
-
-
-# Host -> a joining client: the full accumulated game log, so the client's
-# log panel isn't empty. Regular snapshots then keep it in sync incrementally
-# via "dice_text".
-@rpc("authority", "call_remote", "reliable")
-func _net_log_history(full: String, current: String) -> void:
-	dice_label.set_history(full, current)
 
 
 func _net_request_initial_snapshot() -> void:
@@ -5104,47 +5171,86 @@ func _net_unpack_card_entries(entries: Array) -> Array:
 
 
 # ============================================================================
-# Game log
-#
-# Backs `dice_label`. Exposes a `text` property that acts like a Label's for
-# the ~200 `dice_label.text = ...` / `dice_label.text += ...` call sites, but
-# routes every change into a scrollable RichTextLabel that keeps the whole
-# history and is never cleared. `+=` desugars to `text = text + more`, so the
-# setter always sees the full new string; it diffs against the last value to
-# work out what to append.
+# Game log -- the permanent, scrollable record in the bottom panel. Only the
+# events listed below get logged; everything else (errors, prompts, per-step
+# narration) stays transient in `dice_label`. Turn-start lines are drawn in
+# the player's colour, everything else in black.
 # ============================================================================
-class GameLog:
-	extends RefCounted
 
-	var _rich: RichTextLabel
-	var _current: String = ""   # last value assigned to `.text` (the live "event")
-	var _buffer: String = ""    # the entire log, for a client catching up on join
+var _log_buffer: String = ""    # full bbcode text, for a client catching up
 
-	func _init(rich: RichTextLabel) -> void:
-		_rich = rich
 
-	var text: String:
-		get:
-			return _current
-		set(value):
-			if value == _current:
-				return
-			var delta: String
-			if _current != "" and value.begins_with(_current):
-				delta = value.substr(_current.length())              # continuation
-			elif value == "":
-				_current = ""                                        # a bare clear
-				return
-			else:
-				delta = ("\n" if not _buffer.is_empty() else "") + value  # new event
-			_current = value
-			_buffer += delta
-			_rich.add_text(delta)
+func _log(msg: String, color: Color = Color.BLACK) -> void:
+	var line: String = "[color=#%s]%s[/color]\n" % [color.to_html(false), msg]
+	_log_buffer += line
+	game_log.append_text(line)
+	if GameState.online and GameState.is_authority():
+		for peer in _net_ready_peers.keys():
+			if multiplayer.get_peers().has(peer):
+				_net_log_line.rpc_id(peer, msg, color)
 
-	# Replace the whole log at once -- used when a client joins mid-game and
-	# receives the host's accumulated history.
-	func set_history(full: String, current: String) -> void:
-		_buffer = full
-		_current = current
-		_rich.clear()
-		_rich.add_text(full)
+
+func _log_turn_start(player_id: int) -> void:
+	_log("%s's turn." % PLAYER_NAMES[player_id], PLAYER_COLORS[player_id])
+
+
+# Player X paid $Y to <recipient> ("Free Parking", or another player's name).
+func _log_payment(payer_id: int, amount: int, recipient: String) -> void:
+	if amount <= 0:
+		return
+	_log("%s paid $%d to %s." % [PLAYER_NAMES[payer_id], amount, recipient])
+
+
+# Owner id per space at the last _log_ownership_changes() -- empty until the
+# first call (which just records the baseline without logging).
+var _logged_owners: Array[int] = []
+
+
+# Host-only: log any property whose owner changed since the last panel
+# refresh. One place instead of the ~12 scattered owner_id assignments.
+# Clients get these lines pushed from the host via _net_log_line.
+func _log_ownership_changes() -> void:
+	if not GameState.is_authority():
+		return
+	if _logged_owners.size() != board.spaces.size():
+		_logged_owners.clear()
+		for s in board.spaces:
+			_logged_owners.append(s.owner_id)
+		return
+	for i in board.spaces.size():
+		var now: int = board.spaces[i].owner_id
+		if now == _logged_owners[i]:
+			continue
+		_logged_owners[i] = now
+		if now == -1:
+			_log("%s returned to the bank." % _property_name(i))
+		else:
+			_log("%s is now owned by %s." % [_property_name(i), PLAYER_NAMES[now]])
+
+
+# Suppress the next _log_ownership_changes() line for `space_index` -- used
+# right after a change that's already been logged with more detail (a
+# purchase, with its price).
+func _note_ownership(space_index: int) -> void:
+	if _logged_owners.size() == board.spaces.size():
+		_logged_owners[space_index] = board.spaces[space_index].owner_id
+
+
+func _property_name(space_index: int) -> String:
+	if space_index == 0 and board.spaces[0].owner_id != -1:
+		return "Terminus Station"
+	return board.get_space_info(space_index).get("name", "Space %d" % space_index)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _net_log_line(msg: String, color: Color) -> void:
+	var line: String = "[color=#%s]%s[/color]\n" % [color.to_html(false), msg]
+	_log_buffer += line
+	game_log.append_text(line)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _net_log_history(buffer: String) -> void:
+	_log_buffer = buffer
+	game_log.clear()
+	game_log.append_text(buffer)
