@@ -5161,6 +5161,10 @@ func _peer_for_slot(slot: int) -> int:
 
 func _cf_open(text: String) -> void:
 	if _prompt_is_local():
+		# Sticky: a yes/no the game is actively waiting on must never be
+		# resolved by the app losing focus (Godot auto-hides popups on
+		# alt-tab, which would otherwise fire popup_hide -> "No").
+		confirm_prompt.sticky = true
 		confirm_prompt.open(text)
 	else:
 		_net_open_remote("confirm", {"text": text})
@@ -5257,22 +5261,31 @@ func _net_show_prompt(req_id: int, kind: String, payload: Dictionary) -> void:
 	_net_prompt_reply.rpc_id(1, req_id, result)
 
 
+# Every prompt shown here is driven by the host over the network, so the
+# player it belongs to might be looking at a different window when it
+# arrives (in particular a second game instance on the same machine). All
+# three popups are opened "sticky" -- Godot auto-hides popups when the app
+# loses focus, and without this that would fire popup_hide and resolve the
+# prompt (a buy decision declined, a picker cancelled) behind the player's
+# back. Sticky makes any non-button dismissal reopen once the window has
+# focus again instead.
 func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
 	match kind:
 		"confirm":
+			confirm_prompt.sticky = true
 			confirm_prompt.open(str(payload.get("text", "")))
 			return await confirm_prompt.answered
 		"pick":
 			player_picker.open(str(payload.get("text", "")),
 				_net_unpack_entries(payload.get("entries", [])),
-				bool(payload.get("mandatory", false)))
+				bool(payload.get("mandatory", false)), true)
 			return await player_picker.player_chosen
 		"card":
 			card_picker.open(str(payload.get("text", "")),
 				_net_unpack_card_entries(payload.get("entries", [])),
 				bool(payload.get("mandatory", false)),
 				str(payload.get("skip_text", "")),
-				int(payload.get("skip_index", -2)))
+				int(payload.get("skip_index", -2)), true)
 			return await card_picker.card_chosen
 	return -1
 
