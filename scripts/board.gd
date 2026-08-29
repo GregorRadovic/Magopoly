@@ -128,9 +128,10 @@ func _build_color_groups() -> void:
 func _generate_board() -> void:
 	for i in TOTAL_SPACES:
 		var space: Node2D = SPACE_SCENE.instantiate()
-		# board_side + tile_size drive the tile's own layout, so set them
-		# before the content setters (which lay text/banners out within it).
+		# board_side + tile_size + is_corner drive the tile's own layout, so
+		# set them before the content setters (which lay text out within it).
 		space.board_side = i / SPACES_PER_SIDE
+		space.is_corner = i % SPACES_PER_SIDE == 0
 		var rect: Rect2 = _tile_rect(i)
 		space.position = rect.position
 		space.tile_size = rect.size
@@ -146,6 +147,8 @@ func _generate_board() -> void:
 		var price: int = info.get("price", 0)
 		if price > 0:
 			space.price_text = "$%d" % price
+		elif space_type == "tax":
+			space.price_text = "Pay $%d" % info.get("value", 0)
 		space.clicked.connect(space_clicked.emit)
 		add_child(space)
 		spaces.append(space)

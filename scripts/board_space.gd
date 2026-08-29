@@ -59,6 +59,14 @@ const SPELL_SHOP_COIN_COLOR: Color = Color(0.9, 0.75, 0.15)
 		tile_size = value
 		_apply_layout()
 
+# A corner tile (GO / Jail / Free Parking / Go To Jail). Its text sits at a
+# 45-degree tilt rather than one side's orientation, since it's shared
+# between two sides. Set by board.gd on spawn.
+@export var is_corner: bool = false:
+	set(value):
+		is_corner = value
+		_apply_layout()
+
 @onready var border: ColorRect = $Border
 @onready var background: ColorRect = $Background
 @onready var label: Label = $IndexLabel
@@ -112,7 +120,8 @@ func _apply_layout() -> void:
 	if background:
 		_set_rect(background, BORDER, BORDER, w - BORDER, h - BORDER)
 	if special_marker_label:
-		_set_rect(special_marker_label, BORDER + 2.0, BORDER + 2.0, BORDER + 20.0, BORDER + 20.0)
+		# Always the tile's local top-right corner.
+		_set_rect(special_marker_label, w - BORDER - 20.0, BORDER + 2.0, w - BORDER - 2.0, BORDER + 20.0)
 	if click_area:
 		_set_rect(click_area, 0.0, 0.0, w, h)
 
@@ -198,10 +207,14 @@ func _rotated_edge_band(node: Control, center_x: float) -> void:
 	node.rotation = _side_rotation()
 
 
-# How far to turn text on this side so it reads for a player sitting there:
-# bottom upright, top upside-down, and a quarter-turn each way for the
-# columns. Board sides: 0 bottom, 1 left, 2 top, 3 right.
+# How far to turn text on this tile so it reads for a player sitting on its
+# side: bottom upright, top upside-down, and a quarter-turn each way for the
+# columns. A corner tile sits between two sides, so its text takes a fixed
+# 45-degree clockwise tilt instead. Board sides: 0 bottom, 1 left, 2 top,
+# 3 right.
 func _side_rotation() -> float:
+	if is_corner:
+		return PI / 4.0
 	match board_side:
 		1: return PI / 2.0
 		2: return PI
@@ -219,15 +232,20 @@ func _position_name_label() -> void:
 	var b: float = BORDER + BANNER_H       # colour-banner side inset
 	var p: float = BORDER + PRICE_H        # price side inset
 	var area: Rect2
-	match board_side:
-		0: area = Rect2(1.0, b, w - 2.0, h - b - p)
-		2: area = Rect2(1.0, p, w - 2.0, h - b - p)
-		1: area = Rect2(p, 1.0, w - b - p, h - 2.0)
-		_: area = Rect2(b, 1.0, w - b - p, h - 2.0)
+	if is_corner:
+		# No colour strip or price -- just a centred square, tilted 45 deg.
+		var m: float = BORDER + 4.0
+		area = Rect2(m, m, w - 2.0 * m, h - 2.0 * m)
+	else:
+		match board_side:
+			0: area = Rect2(1.0, b, w - 2.0, h - b - p)
+			2: area = Rect2(1.0, p, w - 2.0, h - b - p)
+			1: area = Rect2(p, 1.0, w - b - p, h - 2.0)
+			_: area = Rect2(b, 1.0, w - b - p, h - 2.0)
 
 	# A quarter-turn swaps the label's own width/height so its rotated
 	# footprint still fills `area`; it's then centred and pivoted on centre.
-	var swap: bool = board_side == 1 or board_side == 3
+	var swap: bool = not is_corner and (board_side == 1 or board_side == 3)
 	var lw: float = area.size.y if swap else area.size.x
 	var lh: float = area.size.x if swap else area.size.y
 	var c: Vector2 = area.position + area.size * 0.5
