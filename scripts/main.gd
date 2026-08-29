@@ -1890,7 +1890,8 @@ func _visit_magic_forest(player: Node2D) -> void:
 
 
 # Spell Shop: look at the top 4 cards of the deck; pick one for $100 (to
-# Free Parking) or Skip. Either way, whatever isn't taken shuffles back in.
+# Free Parking) or Skip. One of the shown spells, chosen at random, is on
+# sale for $50 instead. Either way, whatever isn't taken shuffles back in.
 # An AI always skips for now (no purchasing strategy yet).
 func _visit_spell_shop(player: Node2D) -> void:
 	var top_cards: Array[String] = []
@@ -1905,25 +1906,29 @@ func _visit_spell_shop(player: Node2D) -> void:
 	_casting_spell = true
 	_refresh_action_buttons()
 
+	var sale_index: int = randi_range(0, top_cards.size() - 1)
+
 	var choice: int = SPELL_SHOP_SKIP_INDEX
 	if not player.is_ai:
 		var entries: Array = []
 		for i in top_cards.size():
 			var spell_info: Dictionary = SpellData.SPELLS.get(top_cards[i], {})
-			entries.append({"index": i, "name": top_cards[i], "icon": load(spell_info.get("icon", "")), "caption": "$100"})
-		_cp_open("Spell Shop: pick a spell for $100, or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX, true)
+			var caption: String = "[s]$100[/s]  [color=#e23c3c]$50[/color]" if i == sale_index else "$100"
+			entries.append({"index": i, "name": top_cards[i], "icon": load(spell_info.get("icon", "")), "caption": caption})
+		_cp_open("Spell Shop: buy a spell ($100, one on sale for $50), or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX, true)
 		choice = await _cp_result()
 
 	if choice >= 0 and choice < top_cards.size():
-		if player.money < 100:
-			dice_label.text += "\n%s can't afford the Spell Shop's $100 price and skips." % _player_display_name(player.player_id)
+		var price: int = 50 if choice == sale_index else 100
+		if player.money < price:
+			dice_label.text += "\n%s can't afford the Spell Shop's $%d price and skips." % [_player_display_name(player.player_id), price]
 		else:
 			var chosen_spell: String = top_cards[choice]
 			top_cards.remove_at(choice)
-			player.money -= 100
-			free_parking_amount += 100
+			player.money -= price
+			free_parking_amount += price
 			_spell_add(player, chosen_spell)
-			dice_label.text += "\n%s bought %s from the Spell Shop for $100!" % [_player_display_name(player.player_id), chosen_spell]
+			dice_label.text += "\n%s bought %s from the Spell Shop for $%d!" % [_player_display_name(player.player_id), chosen_spell, price]
 	else:
 		dice_label.text += "\n%s skipped the Spell Shop." % _player_display_name(player.player_id)
 

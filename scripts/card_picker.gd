@@ -43,7 +43,8 @@ func _ready() -> void:
 
 
 # entries: Array of {"index": int, "name": String, "icon": Texture2D,
-#   "caption": String (optional -- shown under the card, e.g. "$100")}.
+#   "caption": String (optional -- shown under the card; BBCode, so e.g.
+#   "$100" or "[s]$100[/s] [color=#e23c3c]$50[/color]" for a sale)}.
 # mandatory: same meaning as player_picker.gd's -- no Cancel button, and any
 # other way of dismissing it just reopens it instead of counting as a cancel.
 # sticky: reopen on non-button dismissal but keep Cancel/Skip (network use).
@@ -99,10 +100,16 @@ func _do_open(prompt: String, entries: Array, mandatory: bool, skip_text: String
 		if caption != "":
 			var box := VBoxContainer.new()
 			box.add_theme_constant_override("separation", 6)
-			var label := Label.new()
-			label.text = caption
-			label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			label.add_theme_font_size_override("font_size", 32 if _large else 18)
+			var cap_font: int = 32 if _large else 18
+			var label := RichTextLabel.new()
+			label.bbcode_enabled = true
+			label.fit_content = true
+			label.scroll_active = false
+			label.autowrap_mode = TextServer.AUTOWRAP_OFF
+			label.custom_minimum_size = Vector2(card_size.x, 0)
+			label.add_theme_font_size_override("normal_font_size", cap_font)
+			label.add_theme_font_size_override("bold_font_size", cap_font)
+			label.text = "[center]%s[/center]" % caption
 			box.add_child(mini)
 			box.add_child(label)
 			node = box
