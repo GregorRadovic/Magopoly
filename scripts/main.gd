@@ -1876,7 +1876,7 @@ func _visit_magic_forest(player: Node2D) -> void:
 			var spell_name: String = player.spell_hand[i]
 			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 			entries.append({"index": i, "name": spell_name, "icon": load(spell_info.get("icon", ""))})
-		_cp_open("Magic Forest: choose a spell to discard.", entries, true)
+		_cp_open("Magic Forest: choose a spell to discard.", entries, true, "", -2, true)
 		hand_index = await _cp_result()
 
 	var discarded: String = player.spell_hand[hand_index]
@@ -1910,8 +1910,8 @@ func _visit_spell_shop(player: Node2D) -> void:
 		var entries: Array = []
 		for i in top_cards.size():
 			var spell_info: Dictionary = SpellData.SPELLS.get(top_cards[i], {})
-			entries.append({"index": i, "name": top_cards[i], "icon": load(spell_info.get("icon", ""))})
-		_cp_open("Spell Shop: pick a spell for $100, or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX)
+			entries.append({"index": i, "name": top_cards[i], "icon": load(spell_info.get("icon", "")), "caption": "$100"})
+		_cp_open("Spell Shop: pick a spell for $100, or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX, true)
 		choice = await _cp_result()
 
 	if choice >= 0 and choice < top_cards.size():
@@ -5195,13 +5195,14 @@ func _pp_result() -> int:
 
 # --- card_picker --------------------------------------------------
 
-func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2) -> void:
+func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2, large: bool = false) -> void:
 	if _prompt_is_local():
-		card_picker.open(text, entries, mandatory, skip_text, skip_index)
+		card_picker.open(text, entries, mandatory, skip_text, skip_index, false, large)
 	else:
 		_net_open_remote("card", {
 			"text": text, "entries": _net_pack_card_entries(entries),
 			"mandatory": mandatory, "skip_text": skip_text, "skip_index": skip_index,
+			"large": large,
 		})
 
 
@@ -5285,7 +5286,8 @@ func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
 				_net_unpack_card_entries(payload.get("entries", [])),
 				bool(payload.get("mandatory", false)),
 				str(payload.get("skip_text", "")),
-				int(payload.get("skip_index", -2)), true)
+				int(payload.get("skip_index", -2)), true,
+				bool(payload.get("large", false)))
 			return await card_picker.card_chosen
 	return -1
 
@@ -5324,6 +5326,7 @@ func _net_pack_card_entries(entries: Array) -> Array:
 		out.append({
 			"index": int(e["index"]), "name": str(e.get("name", "")),
 			"icon_path": icon.resource_path if icon != null else "",
+			"caption": str(e.get("caption", "")),
 		})
 	return out
 
@@ -5335,6 +5338,7 @@ func _net_unpack_card_entries(entries: Array) -> Array:
 		out.append({
 			"index": int(e["index"]), "name": str(e.get("name", "")),
 			"icon": load(path) if path != "" else null,
+			"caption": str(e.get("caption", "")),
 		})
 	return out
 
