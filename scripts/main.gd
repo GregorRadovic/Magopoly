@@ -126,7 +126,10 @@ signal board_space_picked(index: int)
 @onready var declare_bankruptcy_button: Button = $UI/Panel/VBox/DeclareBankruptcyButton
 @onready var trade_button: Button = $UI/Panel/VBox/TradeButton
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
-@onready var dice_label: Label = $UI/Panel/VBox/DiceLabel
+# Backed by a GameLog (see below) rather than a Label: `dice_label.text = X`
+# and `dice_label.text += X` still work at every call site, but each message
+# now also accumulates into the scrollable log panel and is never cleared.
+@onready var dice_label: GameLog = GameLog.new($UI/LogPanel/Log)
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
 @onready var confirm_prompt: PopupPanel = $UI/ConfirmPrompt
 @onready var quit_confirm_prompt: PopupPanel = $UI/QuitConfirmPrompt
@@ -4760,7 +4763,16 @@ func _request_snapshot() -> void:
 		return
 	var who: int = multiplayer.get_remote_sender_id()
 	_net_ready_peers[who] = true
+	_net_log_history.rpc_id(who, dice_label._buffer, dice_label.text)
 	_recv_snapshot.rpc_id(who, _build_snapshot())
+
+
+# Host -> a joining client: the full accumulated game log, so the client's
+# log panel isn't empty. Regular snapshots then keep it in sync incrementally
+# via "dice_text".
+@rpc("authority", "call_remote", "reliable")
+func _net_log_history(full: String, current: String) -> void:
+	dice_label.set_history(full, current)
 
 
 func _net_request_initial_snapshot() -> void:
@@ -5087,3 +5099,50 @@ func _net_unpack_card_entries(entries: Array) -> Array:
 			"icon": load(path) if path != "" else null,
 		})
 	return out
+
+
+# ============================================================================
+# Game log
+#
+# Backs `dice_label`. Exposes a `text` property that acts like a Label's for
+# the ~200 `dice_label.text = ...` / `dice_label.text += ...` call sites, but
+# routes every change into a scrollable RichTextLabel that keeps the whole
+# history and is never cleared. `+=` desugars to `text = text + more`, so the
+# setter always sees the full new string; it diffs against the last value to
+# work out what to append.
+# ============================================================================
+class GameLog:
+	extends RefCounted
+
+	var _rich: RichTextLabel
+	var _current: String = ""   # last value assigned to `.text` (the live "event")
+	var _buffer: String = ""    # the entire log, for a client catching up on join
+
+	func _init(rich: RichTextLabel) -> void:
+		_rich = rich
+
+	var text: String:
+		get:
+			return _current
+		set(value):
+			if value == _current:
+				return
+			var delta: String
+			if _current != "" and value.begins_with(_current):
+				delta = value.substr(_current.length())              # continuation
+			elif value == "":
+				_current = ""                                        # a bare clear
+				return
+			else:
+				delta = ("\n" if not _buffer.is_empty() else "") + value  # new event
+			_current = value
+			_buffer += delta
+			_rich.add_text(delta)
+
+	# Replace the whole log at once -- used when a client joins mid-game and
+	# receives the host's accumulated history.
+	func set_history(full: String, current: String) -> void:
+		_buffer = full
+		_current = current
+		_rich.clear()
+		_rich.add_text(full)

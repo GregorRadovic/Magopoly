@@ -48,9 +48,6 @@ offset_bottom = 518.0
 [node name="TurnLabel" type="Label" parent="UI/Panel/VBox"]
 text = "Player 1's turn"
 
-[node name="DiceLabel" type="Label" parent="UI/Panel/VBox"]
-text = "Roll: -"
-
 [node name="RollButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
 text = "Roll"
@@ -84,6 +81,26 @@ text = "Declare Bankruptcy"
 [node name="TradeButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
 text = "Trade"
+
+[node name="LogPanel" type="Panel" parent="UI"]
+theme_override_styles/panel = SubResource("OpaquePanelStyle")
+offset_left = 20.0
+offset_top = 772.0
+offset_right = 640.0
+offset_bottom = 1064.0
+
+[node name="Log" type="RichTextLabel" parent="UI/LogPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 14.0
+offset_top = 14.0
+offset_right = -14.0
+offset_bottom = -14.0
+focus_mode = 2
+scroll_following = true
+selection_enabled = true
 
 [node name="NumberPrompt" parent="UI" instance=ExtResource("3")]
 
