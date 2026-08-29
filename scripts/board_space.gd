@@ -37,6 +37,16 @@ const SPELL_SHOP_COIN_COLOR: Color = Color(0.9, 0.75, 0.15)
 		special_marker = value
 		_update_special_marker()
 
+# A full-tile picture that stands in for the name text (GO uses the Go
+# asset; the GO corner swaps to the Terminus 2 asset while Terminus is in
+# play). null = ordinary text tile.
+@export var tile_texture: Texture2D = null:
+	set(value):
+		if value == tile_texture:
+			return
+		tile_texture = value
+		_update_tile_image()
+
 # e.g. "$120" -- shown on the tile edge opposite the colour banner. Empty for
 # spaces without a price (GO, Jail, taxes, ...).
 @export var price_text: String = "":
@@ -69,6 +79,7 @@ const SPELL_SHOP_COIN_COLOR: Color = Color(0.9, 0.75, 0.15)
 
 @onready var border: ColorRect = $Border
 @onready var background: ColorRect = $Background
+@onready var tile_image: TextureRect = $TileImage
 @onready var label: Label = $IndexLabel
 @onready var click_area: Control = $ClickArea
 @onready var banner: ColorRect = $ColorBanner
@@ -100,6 +111,7 @@ func _ready() -> void:
 	_update_house_display()
 	_update_special_marker()
 	_update_price()
+	_update_tile_image()
 	click_area.gui_input.connect(_on_click_area_gui_input)
 
 
@@ -119,6 +131,8 @@ func _apply_layout() -> void:
 		_set_rect(border, 0.0, 0.0, w, h)
 	if background:
 		_set_rect(background, BORDER, BORDER, w - BORDER, h - BORDER)
+	if tile_image:
+		_set_rect(tile_image, BORDER, BORDER, w - BORDER, h - BORDER)
 	if click_area:
 		_set_rect(click_area, 0.0, 0.0, w, h)
 
@@ -286,6 +300,15 @@ func _update_price() -> void:
 func _update_label() -> void:
 	if label:
 		label.text = label_text if label_text != "" else str(index)
+		label.visible = tile_texture == null
+
+
+func _update_tile_image() -> void:
+	if tile_image:
+		tile_image.texture = tile_texture
+		tile_image.visible = tile_texture != null
+	if label:
+		label.visible = tile_texture == null
 
 
 func _update_banner() -> void:

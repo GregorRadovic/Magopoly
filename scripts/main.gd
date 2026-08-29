@@ -3052,6 +3052,13 @@ func _on_space_clicked(index: int) -> void:
 # fallback above, and for right-clicking a mini card to inspect it without
 # disturbing whatever picking mode (e.g. a trade) is currently active.
 func _show_property_details(index: int) -> void:
+	# Terminus Station -- the GO overlay, once summoned -- is a railroad card
+	# in everything but its name.
+	if index == 0 and board.spaces[0].owner_id != -1:
+		_show_railroad_card("Terminus", TERMINUS_RAILROAD_RENTS, _terminus_aware_price(0),
+			load("res://Magopoly Assets/Railroad.png"))
+		return
+
 	var info: Dictionary = board.get_space_info(index)
 	var color_name: String = info.get("color", "")
 
@@ -3069,17 +3076,7 @@ func _show_property_details(index: int) -> void:
 		return
 
 	if color_name == "railroad" and info.has("rents"):
-		var rents: Array = info["rents"]
-		var lines: Array[String] = [
-			"Rent: $%d" % rents[0],
-			"If 2 Railroads are owned: $%d" % rents[1],
-			"If 3 Railroads are owned: $%d" % rents[2],
-			"If 4 Railroads are owned: $%d" % rents[3],
-			"If 5 Railroads are owned: $%d" % TERMINUS_FIVE_RAILROAD_RENT,
-			"Mortgage Value: $%d" % mortgage_value,
-			"Unmortgage Value: $%d" % unmortgage_value,
-		]
-		asset_card.show_card(info.get("name", ""), load(info.get("icon", "")), lines)
+		_show_railroad_card(info.get("name", ""), info["rents"], price, load(info.get("icon", "")))
 		return
 
 	if color_name == "utility" and info.has("rent_multipliers"):
@@ -3102,6 +3099,22 @@ func _show_property_details(index: int) -> void:
 		lines.append(description)
 	# Local inspection popup -- never routed to another player.
 	info_prompt.open("\n".join(lines))
+
+
+# The asset card for a railroad (or Terminus Station, which is one in all but
+# name). `base_rents` is the 4-tier [1,2,3,4]-railroad rent array; the 5th
+# tier is always TERMINUS_FIVE_RAILROAD_RENT.
+func _show_railroad_card(title: String, base_rents: Array, price: int, icon: Texture2D) -> void:
+	var lines: Array[String] = [
+		"Rent: $%d" % base_rents[0],
+		"If 2 Railroads are owned: $%d" % base_rents[1],
+		"If 3 Railroads are owned: $%d" % base_rents[2],
+		"If 4 Railroads are owned: $%d" % base_rents[3],
+		"If 5 Railroads are owned: $%d" % TERMINUS_FIVE_RAILROAD_RENT,
+		"Mortgage Value: $%d" % _mortgage_value(price),
+		"Unmortgage Value: $%d" % _unmortgage_value(price),
+	]
+	asset_card.show_card(title, icon, lines)
 
 
 # What a non-property tile does, for its inspection popup. "" for tiles with
@@ -4979,6 +4992,8 @@ func _update_player_panels() -> void:
 		var space: Node2D = board.spaces[space_index]
 		var owner_color: Color = PLAYER_COLORS[space.owner_id] if space.owner_id != -1 else Color.WHITE
 		space.set_owner_banner(space.owner_id, owner_color)
+	# GO shows the Go asset, or Terminus 2 while Terminus Station is in play.
+	board.refresh_go_tile()
 	for i in players.size():
 		var pause_marker: String = " (Paused)" if _response_window_paused_by[i] else ""
 		player_header_labels[i].text = "%s%s -- $%d" % [_player_display_name(i), pause_marker, players[i].money]
@@ -4992,11 +5007,14 @@ func _update_player_panels() -> void:
 			if _trading and (_trade1_offered.has(space_index) or _trade2_offered.has(space_index)):
 				continue
 			var info: Dictionary = board.get_space_info(space_index)
-			var color_name: String = info.get("color", "")
+			# Space 0 held as a property = Terminus Station (a railroad card).
+			var is_terminus: bool = space_index == 0
+			var color_name: String = "railroad" if is_terminus else info.get("color", "")
 			var color: Color = board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY)
+			var mc_name: String = "Terminus" if is_terminus else info.get("name", "")
 			var mini_card: Control = MINI_CARD_SCENE.instantiate()
 			flow.add_child(mini_card)
-			mini_card.setup(space_index, info.get("name", ""), color, board.spaces[space_index].house_count, board.spaces[space_index].is_mortgaged)
+			mini_card.setup(space_index, mc_name, color, board.spaces[space_index].house_count, board.spaces[space_index].is_mortgaged)
 			mini_card.card_clicked.connect(_on_space_clicked)
 			mini_card.card_right_clicked.connect(_show_property_details)
 

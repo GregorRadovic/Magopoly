@@ -18,6 +18,15 @@ offset_right = 76.0
 offset_bottom = 76.0
 color = Color(0.92, 0.92, 0.88, 1)
 
+[node name="TileImage" type="TextureRect" parent="." unique_id=407486700]
+visible = false
+offset_left = 2.0
+offset_top = 2.0
+offset_right = 76.0
+offset_bottom = 76.0
+expand_mode = 1
+stretch_mode = 0
+
 [node name="ColorBanner" type="ColorRect" parent="." unique_id=407486771]
 offset_left = 2.0
 offset_top = 2.0

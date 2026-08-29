@@ -4,6 +4,11 @@ signal space_clicked(index: int)
 
 const SPACE_SCENE: PackedScene = preload("res://scenes/board_space.tscn")
 
+# The GO corner shows the Go asset normally, and swaps to Terminus 2 while
+# Terminus Station (the GO overlay, space 0) is in play. See refresh_go_tile().
+const GO_TILE_TEXTURE: Texture2D = preload("res://Magopoly Assets/Go.png")
+const TERMINUS_TILE_TEXTURE: Texture2D = preload("res://Magopoly Assets/Terminus 2.png")
+
 const SPACES_PER_SIDE: int = 10
 const TOTAL_SPACES: int = SPACES_PER_SIDE * 4
 
@@ -152,6 +157,19 @@ func _generate_board() -> void:
 		space.clicked.connect(space_clicked.emit)
 		add_child(space)
 		spaces.append(space)
+
+	refresh_go_tile()
+
+
+# GO shows the Go asset, unless Terminus Station (space 0) has been summoned,
+# in which case it shows the Terminus 2 asset -- swapped back if Terminus
+# ever leaves play (its owner going bankrupt to the bank). Called from
+# main.gd's _update_player_panels(), so it tracks ownership on host and
+# client alike; the tile_texture setter no-ops when nothing changed.
+func refresh_go_tile() -> void:
+	if spaces.is_empty():
+		return
+	spaces[0].tile_texture = TERMINUS_TILE_TEXTURE if spaces[0].owner_id != -1 else GO_TILE_TEXTURE
 
 
 # The rectangle (board-local top-left position + size) of tile `i`. Corner
