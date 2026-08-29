@@ -54,6 +54,9 @@ const BURN_FOR_ATTUNEMENT_INDEX: int = -100
 # with a real top-of-deck card index (0..3).
 const SPELL_SHOP_SKIP_INDEX: int = -2
 
+# Sentinel for the "Reveal to a player" entry in the spell-interaction picker.
+const REVEAL_INDEX: int = -50
+
 # How long a response window (see _ensure_response_window()) lasts before
 # automatically continuing, if nobody pauses it (or extends it by casting
 # another spell in response).
@@ -495,7 +498,7 @@ func _draw_spell(player: Node2D) -> String:
 	if _spell_deck.is_empty():
 		return ""
 	var spell_name: String = _spell_deck.pop_back()
-	player.spell_hand.append(spell_name)
+	_spell_add(player, spell_name)
 	return spell_name
 
 
@@ -974,7 +977,7 @@ func _on_admin_spells_pressed() -> void:
 		return
 	var chosen_name: String = spell_names[choice]
 	var player: Node2D = players[current_player]
-	player.spell_hand.append(chosen_name)
+	_spell_add(player, chosen_name)
 	dice_label.text = "%s's hand admin-gained a copy of %s." % [_player_display_name(current_player), chosen_name]
 	_update_player_panels()
 
@@ -1448,7 +1451,7 @@ func _process_pending_spell_returns(player: Node2D) -> void:
 		for i in player.pending_return_spells[spell_name]:
 			if _spell_deck.has(spell_name):
 				_spell_deck.erase(spell_name)
-				player.spell_hand.append(spell_name)
+				_spell_add(player, spell_name)
 	player.pending_return_spells.clear()
 
 
@@ -1864,7 +1867,7 @@ func _visit_magic_forest(player: Node2D) -> void:
 		hand_index = await _cp_result()
 
 	var discarded: String = player.spell_hand[hand_index]
-	player.spell_hand.remove_at(hand_index)
+	_spell_remove_at(player, hand_index)
 	_return_spell_to_deck(discarded)
 	dice_label.text += "\n%s discarded %s." % [_player_display_name(player.player_id), discarded]
 
@@ -1906,7 +1909,7 @@ func _visit_spell_shop(player: Node2D) -> void:
 			top_cards.remove_at(choice)
 			player.money -= 100
 			free_parking_amount += 100
-			player.spell_hand.append(chosen_spell)
+			_spell_add(player, chosen_spell)
 			dice_label.text += "\n%s bought %s from the Spell Shop for $100!" % [_player_display_name(player.player_id), chosen_spell]
 	else:
 		dice_label.text += "\n%s skipped the Spell Shop." % _player_display_name(player.player_id)
@@ -2273,16 +2276,16 @@ func _finalize_trade() -> void:
 		if hand_index >= 0 and hand_index < p1.spell_hand.size():
 			p1_spell_names.append(p1.spell_hand[hand_index])
 	for spell_name in p1_spell_names:
-		p1.spell_hand.erase(spell_name)
-		p2.spell_hand.append(spell_name)
+		_spell_remove_first(p1, spell_name)
+		_spell_add(p2, spell_name)
 
 	var p2_spell_names: Array[String] = []
 	for hand_index in _trade2_spells_offered:
 		if hand_index >= 0 and hand_index < p2.spell_hand.size():
 			p2_spell_names.append(p2.spell_hand[hand_index])
 	for spell_name in p2_spell_names:
-		p2.spell_hand.erase(spell_name)
-		p1.spell_hand.append(spell_name)
+		_spell_remove_first(p2, spell_name)
+		_spell_add(p1, spell_name)
 
 	p1.money -= p1_money
 	p2.money += p1_money
@@ -2295,15 +2298,15 @@ func _finalize_trade() -> void:
 	var gave1: Array[String] = []
 	for i in _trade1_offered:
 		gave1.append(_property_name(i))
-	for n in p1_spell_names:
-		gave1.append(n)
+	if p1_spell_names.size() > 0:
+		gave1.append("%d spell%s" % [p1_spell_names.size(), "" if p1_spell_names.size() == 1 else "s"])
 	if p1_money > 0:
 		gave1.append("$%d" % p1_money)
 	var gave2: Array[String] = []
 	for i in _trade2_offered:
 		gave2.append(_property_name(i))
-	for n in p2_spell_names:
-		gave2.append(n)
+	if p2_spell_names.size() > 0:
+		gave2.append("%d spell%s" % [p2_spell_names.size(), "" if p2_spell_names.size() == 1 else "s"])
 	if p2_money > 0:
 		gave2.append("$%d" % p2_money)
 	if not gave1.is_empty():
@@ -2478,12 +2481,12 @@ func _populate_trade_flow(flow: HFlowContainer, indices: Array[int]) -> void:
 # hand_index alone doesn't say whose hand it's from.
 func _populate_trade_spell_flow(flow: HFlowContainer, player_index: int, indices: Array[int]) -> void:
 	var hand: Array[String] = players[player_index].spell_hand
-	var face_up: bool = _hand_face_up(player_index)
 	for hand_index in indices:
 		if hand_index < 0 or hand_index >= hand.size():
 			continue
 		var spell_name: String = hand[hand_index]
 		var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
+		var face_up: bool = _spell_face_up(player_index, hand_index)
 		var mini_spell: Control = MINI_SPELL_CARD_SCENE.instantiate()
 		flow.add_child(mini_spell)
 		mini_spell.setup(hand_index, load(spell_info.get("icon", "")) if face_up else CARDBACK_TEXTURE, face_up)
@@ -2491,13 +2494,59 @@ func _populate_trade_spell_flow(flow: HFlowContainer, player_index: int, indices
 		mini_spell.card_right_clicked.connect(_on_spell_right_clicked.bind(player_index))
 
 
-# Whether the local viewer sees `player_id`'s spell hand face-up. Own hand
-# always; in a local game every human's hand (AI hands stay face-down);
-# online, only this machine's own seats.
+# Whether the local viewer sees `player_id`'s spell hand face-up by default.
+# Own hand always; in a local game every human's hand (AI hands stay
+# face-down); online, only this machine's own seats.
 func _hand_face_up(player_id: int) -> bool:
 	if GameState.online:
 		return GameState.is_slot_local(player_id)
 	return not players[player_id].is_ai
+
+
+# Whether one specific spell card shows face-up here: the owner's default
+# visibility, or an explicit reveal to one of this machine's seats.
+func _spell_face_up(owner_id: int, hand_index: int) -> bool:
+	if _hand_face_up(owner_id):
+		return true
+	var owner: Node2D = players[owner_id]
+	if hand_index < 0 or hand_index >= owner.spell_revealed_to.size():
+		return false
+	var revealed: Array = owner.spell_revealed_to[hand_index]
+	for viewer in _local_viewer_ids():
+		if revealed.has(viewer):
+			return true
+	return false
+
+
+# The player ids "sitting at" this screen -- local seats online, every human
+# in a hotseat game.
+func _local_viewer_ids() -> Array:
+	if GameState.online:
+		return GameState.local_slots()
+	var out: Array = []
+	for p in players:
+		if not p.is_ai:
+			out.append(p.player_id)
+	return out
+
+
+# --- spell_hand mutations (keep spell_revealed_to in lockstep) ----------
+
+func _spell_add(player: Node2D, spell_name: String) -> void:
+	player.spell_hand.append(spell_name)
+	player.spell_revealed_to.append([])
+
+
+func _spell_remove_at(player: Node2D, index: int) -> void:
+	player.spell_hand.remove_at(index)
+	if index >= 0 and index < player.spell_revealed_to.size():
+		player.spell_revealed_to.remove_at(index)
+
+
+func _spell_remove_first(player: Node2D, spell_name: String) -> void:
+	var i: int = player.spell_hand.find(spell_name)
+	if i != -1:
+		_spell_remove_at(player, i)
 
 
 # Liquidates a bankrupt player: all their houses are sold back for half cost,
@@ -2965,9 +3014,17 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 	# for it at all; the option simply isn't offered.
 	if color_name != "utility":
 		level_entries.append({"index": BURN_FOR_ATTUNEMENT_INDEX, "name": "Burn for Attunement (+1 %s Attunement)" % color_name.capitalize(), "color": Color.WHITE})
+	level_entries.append({"index": REVEAL_INDEX, "name": "Reveal to a player", "color": Color.WHITE})
 
 	_pp_open("Cast %s at what level?" % spell_name, level_entries)
 	var choice: int = await _pp_result()
+
+	if choice == REVEAL_INDEX:
+		await _reveal_spell(caster, hand_index)
+		_casting_spell = false
+		_prompt_slot = -1
+		_refresh_action_buttons()
+		return
 
 	# Only actually push a cast onto the stack -- and open/extend the
 	# response window for it -- once _casting_spell is released below, so
@@ -2999,6 +3056,30 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 		await post_cast.call()
 
 
+# Reveal: pick an opponent, and the chosen spell becomes face-up for them
+# (and stays so as long as it's in this hand). Additive -- reveal the same
+# card to several players one at a time.
+func _reveal_spell(caster: Node2D, hand_index: int) -> void:
+	if hand_index < 0 or hand_index >= caster.spell_hand.size():
+		return
+	var entries: Array = []
+	for i in players.size():
+		if i != caster.player_id and not players[i].is_bankrupt:
+			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
+	if entries.is_empty():
+		_toast("There's no one to reveal it to.")
+		return
+	_pp_open("Reveal %s to which player?" % caster.spell_hand[hand_index], entries)
+	var target: int = await _pp_result()
+	if target < 0 or hand_index >= caster.spell_revealed_to.size():
+		return
+	var revealed: Array = caster.spell_revealed_to[hand_index]
+	if not revealed.has(target):
+		revealed.append(target)
+	_log("%s revealed a spell to %s." % [PLAYER_NAMES[caster.player_id], PLAYER_NAMES[target]])
+	_update_player_panels()
+
+
 # Discards a spell without its effect in exchange for +1 Temporary
 # Attunement of its color, lasting until the start of this player's next
 # turn (see _advance_to_next_active_player()). Always legal regardless of
@@ -3006,7 +3087,7 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 # Instant Speed for every spell. Shuffled back into the deck like any other
 # used spell.
 func _burn_spell_for_attunement(caster: Node2D, hand_index: int, spell_name: String, color_name: String) -> void:
-	caster.spell_hand.remove_at(hand_index)
+	_spell_remove_at(caster, hand_index)
 	if color_name != "":
 		caster.temp_attunement[color_name] = caster.temp_attunement.get(color_name, 0) + 1
 	dice_label.text = "%s burned %s for +1 %s Attunement." % [_player_display_name(caster.player_id), spell_name, color_name.capitalize()]
@@ -3202,7 +3283,7 @@ func _prepare_spell_cast(caster: Node2D, hand_index: int, spell_name: String, le
 # onto the stack, and opens (or, if one's already running, just extends)
 # the response window for it -- see _ensure_response_window().
 func _finish_cast(caster: Node2D, spell_name: String, level: int, resolve: Callable) -> void:
-	caster.spell_hand.erase(spell_name)
+	_spell_remove_first(caster, spell_name)
 	var stack_id: int = _next_stack_id
 	_next_stack_id += 1
 	var display_name: String = "%s (Level %d)" % [spell_name, level]
@@ -3386,8 +3467,8 @@ func _resolve_snatch_purse(caster: Node2D, level: int, target_index: int, count:
 	for i in actual_count:
 		var idx: int = randi_range(0, opponent.spell_hand.size() - 1)
 		var spell_name: String = opponent.spell_hand[idx]
-		opponent.spell_hand.remove_at(idx)
-		caster.spell_hand.append(spell_name)
+		_spell_remove_at(opponent, idx)
+		_spell_add(caster, spell_name)
 		taken.append(spell_name)
 
 	if taken.is_empty():
@@ -3753,8 +3834,8 @@ func _prepare_art_of_the_deal(caster: Node2D, hand_index: int, level: int) -> Ca
 		return Callable()
 
 	var given_spell: String = caster.spell_hand[give_index]
-	caster.spell_hand.remove_at(give_index)
-	players[target_index].spell_hand.append(given_spell)
+	_spell_remove_at(caster, give_index)
+	_spell_add(players[target_index], given_spell)
 	dice_label.text += "\n%s gives %s to %s as an additional cost." % [_player_display_name(caster.player_id), given_spell, PLAYER_NAMES[target_index]]
 	_update_player_panels()
 
@@ -4443,7 +4524,7 @@ func _resolve_spell_mastery(caster: Node2D, level: int, target_id: int) -> void:
 			var countered: Dictionary = _spell_stack[i]
 			_spell_stack.remove_at(i)
 			if level == 2:
-				caster.spell_hand.append(countered["spell_name"])
+				_spell_add(caster, countered["spell_name"])
 				dice_label.text = "%s's Spell Mastery (Level %d) counters %s's %s and keeps it!" % [_player_display_name(caster.player_id), level, _player_display_name(countered["caster_id"]), countered["display_name"]]
 			else:
 				_return_spell_to_deck(countered["spell_name"])
@@ -4731,7 +4812,6 @@ func _update_player_panels() -> void:
 		var spell_flow: HFlowContainer = player_spells_flows[i]
 		for child in spell_flow.get_children():
 			child.queue_free()
-		var hand_face_up: bool = _hand_face_up(i)
 		for hand_index in players[i].spell_hand.size():
 			# Same reasoning as the property filter above -- a spell staged
 			# in the trade display has "moved" there visually.
@@ -4739,9 +4819,10 @@ func _update_player_panels() -> void:
 				continue
 			var spell_name: String = players[i].spell_hand[hand_index]
 			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
+			var face_up: bool = _spell_face_up(i, hand_index)
 			var mini_spell: Control = MINI_SPELL_CARD_SCENE.instantiate()
 			spell_flow.add_child(mini_spell)
-			mini_spell.setup(hand_index, load(spell_info.get("icon", "")) if hand_face_up else CARDBACK_TEXTURE, hand_face_up)
+			mini_spell.setup(hand_index, load(spell_info.get("icon", "")) if face_up else CARDBACK_TEXTURE, face_up)
 			mini_spell.card_clicked.connect(_on_spell_clicked.bind(i))
 			mini_spell.card_right_clicked.connect(_on_spell_right_clicked.bind(i))
 
@@ -4819,6 +4900,7 @@ func _build_snapshot() -> Dictionary:
 			"visible": p.visible,
 			"owned": p.owned_property_indices.duplicate(),
 			"hand": p.spell_hand.duplicate(),
+			"revealed": p.spell_revealed_to.duplicate(true),
 			"attunement": p.temp_attunement.duplicate(),
 		})
 	var space_states: Array = []
@@ -4914,6 +4996,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		p.visible = ps.get("visible", true)
 		p.owned_property_indices = _net_int_array(ps.get("owned", []))
 		p.spell_hand = _net_string_array(ps.get("hand", []))
+		p.spell_revealed_to = _net_revealed(ps.get("revealed", []))
 		p.temp_attunement = (ps.get("attunement", {}) as Dictionary).duplicate()
 		p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
 
@@ -5006,6 +5089,14 @@ func _net_string_array(a) -> Array[String]:
 	var out: Array[String] = []
 	for v in a:
 		out.append(str(v))
+	return out
+
+
+# spell_revealed_to: an untyped Array of Array[int] (one per card in hand).
+func _net_revealed(a) -> Array:
+	var out: Array = []
+	for entry in a:
+		out.append(_net_int_array(entry))
 	return out
 
 
