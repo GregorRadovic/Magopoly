@@ -1913,7 +1913,7 @@ func _visit_spell_shop(player: Node2D) -> void:
 		var entries: Array = []
 		for i in top_cards.size():
 			var spell_info: Dictionary = SpellData.SPELLS.get(top_cards[i], {})
-			var caption: String = "[s]$100[/s]  [color=#e23c3c]$50[/color]" if i == sale_index else "$100"
+			var caption: String = "[color=#e23c3c]$50[/color]" if i == sale_index else "$100"
 			entries.append({"index": i, "name": top_cards[i], "icon": load(spell_info.get("icon", "")), "caption": caption})
 		_cp_open("Spell Shop: buy a spell ($100, one on sale for $50), or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX, true)
 		choice = await _cp_result()
