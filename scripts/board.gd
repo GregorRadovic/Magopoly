@@ -143,6 +143,9 @@ func _generate_board() -> void:
 		var space_type: String = info.get("type", "")
 		if space_type == "magic_forest" or space_type == "spell_shop":
 			space.special_marker = space_type
+		var price: int = info.get("price", 0)
+		if price > 0:
+			space.price_text = "$%d" % price
 		space.clicked.connect(space_clicked.emit)
 		add_child(space)
 		spaces.append(space)

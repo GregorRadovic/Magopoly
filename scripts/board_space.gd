@@ -10,6 +10,8 @@ const BORDER: float = 2.0
 const BANNER_H: float = 18.0
 const OWNER_T: float = 16.0
 const OWNER_GAP: float = 2.0
+# Price strip, along the tile edge opposite the colour banner.
+const PRICE_H: float = 16.0
 
 const MAGIC_FOREST_COLOR: Color = Color(0.6, 0.2, 0.85)
 const SPELL_SHOP_COIN_COLOR: Color = Color(0.9, 0.75, 0.15)
@@ -35,6 +37,13 @@ const SPELL_SHOP_COIN_COLOR: Color = Color(0.9, 0.75, 0.15)
 		special_marker = value
 		_update_special_marker()
 
+# e.g. "$120" -- shown on the tile edge opposite the colour banner. Empty for
+# spaces without a price (GO, Jail, taxes, ...).
+@export var price_text: String = "":
+	set(value):
+		price_text = value
+		_update_price()
+
 # Which side of the board this space is on (0 = bottom, 1 = left, 2 = top,
 # 3 = right -- matches board.gd's own side numbering, i / SPACES_PER_SIDE).
 # Determines which way the ownership banner juts. Set by board.gd on spawn.
@@ -58,6 +67,7 @@ const SPELL_SHOP_COIN_COLOR: Color = Color(0.9, 0.75, 0.15)
 @onready var house_icon: TextureRect = $ColorBanner/HouseIcon
 @onready var house_count_label: Label = $ColorBanner/HouseCountLabel
 @onready var special_marker_label: Label = $SpecialMarker
+@onready var price_label: Label = $PriceLabel
 @onready var owner_banner: ColorRect = $OwnerBanner
 @onready var owner_banner_label: Label = $OwnerBanner/OwnerBannerLabel
 
@@ -81,6 +91,7 @@ func _ready() -> void:
 	_update_banner()
 	_update_house_display()
 	_update_special_marker()
+	_update_price()
 	click_area.gui_input.connect(_on_click_area_gui_input)
 
 
@@ -106,6 +117,7 @@ func _apply_layout() -> void:
 		_set_rect(click_area, 0.0, 0.0, w, h)
 
 	_position_color_banner()
+	_position_price_label()
 	_position_name_label()
 	_position_owner_banner()
 
@@ -143,19 +155,64 @@ func _position_color_banner() -> void:
 			_set_rect(node, bw * 0.5 - 8.0, bh * 0.5 - 8.0, bw * 0.5 + 8.0, bh * 0.5 + 8.0)
 
 
-# The tile name fills the tile but is inset from whichever edge carries the
-# colour strip, so the two don't overlap.
+# The price sits along the tile edge OPPOSITE the colour banner (its local
+# "bottom"): bottom of the bottom row, top of the top row, and down the
+# outer vertical edge of each side column (rotated to read along it).
+func _position_price_label() -> void:
+	if not price_label:
+		return
+	var w: float = tile_size.x
+	var h: float = tile_size.y
+	match board_side:
+		0:  # bottom row -- price along the bottom
+			price_label.rotation = 0.0
+			price_label.pivot_offset = Vector2.ZERO
+			_set_rect(price_label, BORDER, h - BORDER - PRICE_H, w - BORDER, h - BORDER)
+		2:  # top row -- price along the top
+			price_label.rotation = 0.0
+			price_label.pivot_offset = Vector2.ZERO
+			_set_rect(price_label, BORDER, BORDER, w - BORDER, BORDER + PRICE_H)
+		1:  # left column -- price down the left (outer) edge
+			_rotated_edge_band(price_label, BORDER + PRICE_H * 0.5)
+		_:  # right column -- price down the right (outer) edge
+			_rotated_edge_band(price_label, w - BORDER - PRICE_H * 0.5)
+
+
+# Lays `node` as a vertical band centred on x = `center_x`, spanning the
+# tile's height: the label keeps its natural (band-length x PRICE_H) shape
+# and rotates 90 deg about its centre, which is pinned to the band centre.
+func _rotated_edge_band(node: Control, center_x: float) -> void:
+	var h: float = tile_size.y
+	var band: float = h - 2.0 * BORDER
+	var cy: float = h * 0.5
+	node.offset_left = center_x - band * 0.5
+	node.offset_top = cy - PRICE_H * 0.5
+	node.offset_right = center_x + band * 0.5
+	node.offset_bottom = cy + PRICE_H * 0.5
+	node.pivot_offset = Vector2(band * 0.5, PRICE_H * 0.5)
+	node.rotation = PI / 2.0
+
+
+# The tile name fills the space between the colour banner and the price
+# strip, inset from both so nothing overlaps.
 func _position_name_label() -> void:
 	if not label:
 		return
 	var w: float = tile_size.x
 	var h: float = tile_size.y
-	var pad: float = BORDER + BANNER_H
+	var b: float = BORDER + BANNER_H       # colour-banner side inset
+	var p: float = BORDER + PRICE_H        # price side inset
 	match board_side:
-		0: _set_rect(label, 1.0, pad, w - 1.0, h - 1.0)
-		2: _set_rect(label, 1.0, 1.0, w - 1.0, h - pad)
-		1: _set_rect(label, 1.0, 1.0, w - pad, h - 1.0)
-		_: _set_rect(label, pad, 1.0, w - 1.0, h - 1.0)
+		0: _set_rect(label, 1.0, b, w - 1.0, h - p)
+		2: _set_rect(label, 1.0, p, w - 1.0, h - b)
+		1: _set_rect(label, p, 1.0, w - b, h - 1.0)
+		_: _set_rect(label, b, 1.0, w - p, h - 1.0)
+
+
+func _update_price() -> void:
+	if price_label:
+		price_label.text = price_text
+		price_label.visible = price_text != ""
 
 
 func _update_label() -> void:
