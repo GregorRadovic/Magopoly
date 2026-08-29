@@ -194,6 +194,9 @@ var dice_label: DiceSink = DiceSink.new()
 @onready var trader2_money_edit: LineEdit = $UI/PlayersPanel/VBox/TradeDisplay/TradeMoneyRow/Trader2MoneyBox/Trader2MoneyEdit
 @onready var offer_trade_button: Button = $UI/PlayersPanel/VBox/TradeDisplay/TradeActions/OfferTradeButton
 @onready var decline_trade_button: Button = $UI/PlayersPanel/VBox/TradeDisplay/TradeActions/DeclineTradeButton
+@onready var spell_cast_hseparator: HSeparator = $UI/PlayersPanel/VBox/HSeparatorSpellCast
+@onready var spell_cast_display: VBoxContainer = $UI/PlayersPanel/VBox/SpellCastDisplay
+@onready var spell_cast_stack: Control = $UI/PlayersPanel/VBox/SpellCastDisplay/SpellCastStack
 
 var players: Array[Node2D] = []
 var current_player: int = 0
@@ -293,6 +296,10 @@ func _update_wizard_vision() -> void:
 # _spell_deck itself instead. See _finish_cast().
 var _spell_stack: Array[Dictionary] = []
 var _next_stack_id: int = 0
+# Client-side mirror of the stack's spell names (bottom -> top), from the
+# snapshot -- clients don't have the real _spell_stack. Drives the
+# spell-cast card display; see _spell_stack_names().
+var _net_spell_stack_names: Array = []
 # Set by a _prepare_* step to the name of the target it just picked (an
 # opponent or a property), so _finish_cast can name it in the log line.
 # Read and cleared there.
@@ -1431,6 +1438,8 @@ func _resolve_top_of_stack() -> void:
 	if _spell_stack.is_empty():
 		return
 	var entry: Dictionary = _spell_stack.pop_back()
+	# The card leaves the visual stack the moment it starts resolving.
+	_update_spell_stack_display()
 	var resolve: Callable = entry["resolve"]
 	if resolve.is_valid():
 		await resolve.call()
@@ -1443,6 +1452,59 @@ func _resolve_spell_stack() -> void:
 	_update_player_panels()
 	# A spell cast to earn money out of a raise-money window may have done it.
 	_maybe_resolve_debt()
+
+
+# Spell names on the stack, bottom (oldest) -> top (newest / resolves first).
+# From the real stack on the host; from the snapshot mirror on a client.
+func _spell_stack_names() -> Array:
+	if GameState.online and not GameState.is_authority():
+		return _net_spell_stack_names
+	var out: Array = []
+	for entry in _spell_stack:
+		out.append(entry["spell_name"])
+	return out
+
+
+# Shows the spell(s) currently being cast as big overlapping cards where the
+# trade display normally sits (the two never happen together). Each newer
+# card sits on top of and 50% of a card-width to the right of the previous
+# one, so the rightmost card -- which resolves first -- reads as "next".
+const SPELL_STACK_CARD_ASPECT: float = 375.0 / 523.0
+const SPELL_STACK_MAX_CARD_W: float = 168.0
+const SPELL_STACK_AVAIL_W: float = 810.0
+var _spell_stack_display_cache: Array = []
+
+func _update_spell_stack_display() -> void:
+	if spell_cast_stack == null:
+		return
+	var names: Array = _spell_stack_names()
+	if names == _spell_stack_display_cache:
+		return
+	_spell_stack_display_cache = names.duplicate()
+	var showing: bool = not names.is_empty()
+	spell_cast_display.visible = showing
+	spell_cast_hseparator.visible = showing
+	for child in spell_cast_stack.get_children():
+		child.queue_free()
+	if not showing:
+		return
+
+	var n: int = names.size()
+	var card_w: float = minf(SPELL_STACK_MAX_CARD_W, SPELL_STACK_AVAIL_W / (0.5 * n + 0.5))
+	var card_h: float = card_w / SPELL_STACK_CARD_ASPECT
+	spell_cast_stack.custom_minimum_size = Vector2(0, card_h)
+
+	for i in n:
+		var info: Dictionary = SpellData.SPELLS.get(names[i], {})
+		var tr := TextureRect.new()
+		if info.has("icon"):
+			tr.texture = load(info["icon"])
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tr.size = Vector2(card_w, card_h)
+		tr.position = Vector2(i * card_w * 0.5, 0.0)
+		# Added last = drawn on top, so the newest card overlaps the rest.
+		spell_cast_stack.add_child(tr)
 
 
 # Every spell that's used -- resolved here, countered (_resolve_t2_counter),
@@ -3529,6 +3591,7 @@ func _resolve_counter_spell(caster: Node2D, counter_display: String, target_id: 
 		if _spell_stack[i]["id"] == target_id:
 			var countered: Dictionary = _spell_stack[i]
 			_spell_stack.remove_at(i)
+			_update_spell_stack_display()
 			dice_label.text = "%s's %s counters %s's %s!" % [_player_display_name(caster.player_id), counter_display, _player_display_name(countered["caster_id"]), countered["display_name"]]
 			_return_spell_to_deck(countered["spell_name"])
 			return
@@ -4972,6 +5035,8 @@ func _update_player_panels() -> void:
 		_populate_trade_flow(trader2_flow, _trade2_offered)
 		_populate_trade_spell_flow(trader2_flow, _trader2, _trade2_spells_offered)
 
+	_update_spell_stack_display()
+
 
 # ============================================================================
 # Online multiplayer -- state replication (Phase 2)
@@ -5049,6 +5114,7 @@ func _build_snapshot() -> Dictionary:
 		"debt_player": _debt_player_id,
 		"debt_amount": _debt_amount,
 		"debt_cancellable": _debt_cancellable,
+		"spell_stack": _spell_stack_names(),
 		"awaiting_buy": _awaiting_buy_decision,
 		"casting_spell": _casting_spell,
 		"buying_ho": _buying_house_or_unmortgaging,
@@ -5146,6 +5212,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_debt_player_id = snap.get("debt_player", -1)
 	_debt_amount = snap.get("debt_amount", 0)
 	_debt_cancellable = snap.get("debt_cancellable", false)
+	_net_spell_stack_names = snap.get("spell_stack", [])
 	_awaiting_buy_decision = snap.get("awaiting_buy", false)
 	_casting_spell = snap.get("casting_spell", false)
 	_buying_house_or_unmortgaging = snap.get("buying_ho", false)
