@@ -36,7 +36,7 @@ const SPELL_DECK_STARTING_COUNTS: Dictionary = {
 	"Adrenaline": 1,
 	"Overflowing Bounty": 1,
 	"Sinkhole": 1,
-	"Decompose": 1,
+	"Reclaimed by Nature": 1,
 	"Sanity Grinding": 1,
 	"Spell Mastery": 1,
 	"Tax Haven": 1,
@@ -3454,8 +3454,8 @@ func _prepare_spell_cast(caster: Node2D, hand_index: int, spell_name: String, le
 			return _prepare_overflowing_bounty(caster, level)
 		"Sinkhole":
 			return await _prepare_sinkhole(caster, level)
-		"Decompose":
-			return await _prepare_decompose(caster, level)
+		"Reclaimed by Nature":
+			return await _prepare_reclaimed_by_nature(caster, level)
 		"Sanity Grinding":
 			return await _prepare_sanity_grinding(caster, level)
 		"Spell Mastery":
@@ -4628,10 +4628,10 @@ func _resolve_sinkhole(caster: Node2D, level: int, target_index: int, amount: in
 		await _charge_spell_payment(opponent, owed, caster, resolve_message, debt_message, true)
 
 
-# Decompose: loops picking up to `count` distinct mortgaged properties
-# (any player's, including the caster's own) to return to the bank.
-func _prepare_decompose(caster: Node2D, level: int) -> Callable:
-	var count: int = SpellData.SPELLS["Decompose"]["levels"][level].get("count", 1)
+# Reclaimed by Nature: loops picking up to `count` distinct mortgaged
+# properties (any player's, including the caster's own) to return to the bank.
+func _prepare_reclaimed_by_nature(caster: Node2D, level: int) -> Callable:
+	var count: int = SpellData.SPELLS["Reclaimed by Nature"]["levels"][level].get("count", 1)
 	var chosen: Array[int] = []
 	for i in count:
 		var entries: Array = []
@@ -4645,7 +4645,7 @@ func _prepare_decompose(caster: Node2D, level: int) -> Callable:
 			entries.append({"index": space_index, "name": "%s (%s)" % [info.get("name", ""), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
 		if entries.is_empty():
 			break
-		_pp_open("Decompose: choose a mortgaged property to return to the bank (%d/%d)." % [chosen.size() + 1, count], entries)
+		_pp_open("Reclaimed by Nature: choose a mortgaged property to return to the bank (%d/%d)." % [chosen.size() + 1, count], entries)
 		var picked: int = await _pp_result()
 		if picked == -1:
 			break
@@ -4654,10 +4654,10 @@ func _prepare_decompose(caster: Node2D, level: int) -> Callable:
 	if chosen.is_empty():
 		dice_label.text += "\nThere's nothing mortgaged to return to the bank."
 		return Callable()
-	return _resolve_decompose.bind(caster, level, chosen)
+	return _resolve_reclaimed_by_nature.bind(caster, level, chosen)
 
 
-func _resolve_decompose(caster: Node2D, level: int, chosen: Array[int]) -> void:
+func _resolve_reclaimed_by_nature(caster: Node2D, level: int, chosen: Array[int]) -> void:
 	var names: Array[String] = []
 	for space_index in chosen:
 		var space: Node2D = board.spaces[space_index]
@@ -4669,9 +4669,9 @@ func _resolve_decompose(caster: Node2D, level: int, chosen: Array[int]) -> void:
 		space.is_mortgaged = false
 		names.append(board.get_space_info(space_index).get("name", ""))
 	if names.is_empty():
-		dice_label.text = "%s's Decompose (Level %d) resolves, but nothing was returned." % [_player_display_name(caster.player_id), level]
+		dice_label.text = "%s's Reclaimed by Nature (Level %d) resolves, but nothing was returned." % [_player_display_name(caster.player_id), level]
 	else:
-		dice_label.text = "%s's Decompose (Level %d) resolves! Returned %s to the bank." % [_player_display_name(caster.player_id), level, ", ".join(names)]
+		dice_label.text = "%s's Reclaimed by Nature (Level %d) resolves! Returned %s to the bank." % [_player_display_name(caster.player_id), level, ", ".join(names)]
 	_update_player_panels()
 
 

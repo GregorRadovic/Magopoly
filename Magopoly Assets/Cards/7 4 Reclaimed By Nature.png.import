@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d07w0dmyq8p6e"
-path="res://.godot/imported/7 4 Decompose.png-f0ab4da87e6b78345b992ffff5bdfbb4.ctex"
+uid="uid://bgniseghwx267"
+path="res://.godot/imported/7 4 Reclaimed By Nature.png-857091d39ab605d096926cb74a5a1129.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Magopoly Assets/Cards/7 4 Decompose.png"
-dest_files=["res://.godot/imported/7 4 Decompose.png-f0ab4da87e6b78345b992ffff5bdfbb4.ctex"]
+source_file="res://Magopoly Assets/Cards/7 4 Reclaimed By Nature.png"
+dest_files=["res://.godot/imported/7 4 Reclaimed By Nature.png-857091d39ab605d096926cb74a5a1129.ctex"]
 
 [params]
 
