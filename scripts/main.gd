@@ -394,6 +394,8 @@ func _ready() -> void:
 	trader2_money_edit.text_changed.connect(_on_trade_money_changed)
 	card_picker.zoom_requested.connect(spell_card.show_card)
 	board.space_clicked.connect(_on_space_clicked)
+	_build_log_markup()
+	game_log.meta_clicked.connect(_on_log_meta_clicked)
 	_update_turn_label()
 	_update_player_panels()
 	_refresh_action_buttons()
@@ -2982,17 +2984,18 @@ func _railroad_space_indices() -> Array[int]:
 	return result
 
 
-# Attunement to a color: how many properties of that color the player owns,
-# plus any Temporary Attunement from burning spells of that color this turn.
+# Attunement to a color: how many UNMORTGAGED properties of that color the
+# player owns, plus any Temporary Attunement from burning spells of that
+# color this turn. A mortgaged property provides no Attunement.
 func _color_attunement(player: Node2D, color_name: String) -> int:
 	if color_name == "":
 		return 0
-	var attunement: int = _count_owned_in_group(player.player_id, color_name) + player.temp_attunement.get(color_name, 0)
+	var attunement: int = _count_unmortgaged_in_group(player.player_id, color_name) + player.temp_attunement.get(color_name, 0)
 	if color_name == "black":
 		# Railroads provide Black Attunement too, on top of any owned "black"
 		# properties (there are none) or burned/granted Temp Attunement --
 		# includes Terminus Station, which counts as a railroad once summoned.
-		attunement += _owned_railroad_count(player.player_id)
+		attunement += _unmortgaged_railroad_count(player.player_id)
 	return attunement
 
 
@@ -5596,9 +5599,80 @@ func _show_toast(msg: String) -> void:
 
 var _log_buffer: String = ""    # full bbcode text, for a client catching up
 
+# [{ "name": String, "bbcode": String }] for every spell and property name,
+# longest name first so "Baltic Avenue" wins over "Baltic". _markup_names()
+# swaps each occurrence in a log line for its coloured (and, for spells,
+# clickable) BBCode. Built once in _ready() -- SPELL_DATA and the board are
+# constant for the game's life.
+var _log_markup: Array = []
+
+
+func _build_log_markup() -> void:
+	_log_markup.clear()
+	for spell_name in SpellData.SPELLS:
+		var sc: Color = _log_name_color(board.COLOR_GROUP_COLORS.get(SpellData.SPELLS[spell_name].get("color", ""), Color.BLACK))
+		# [url] carries the meta clicked handlers see; colour goes inside it
+		# so the link text itself is the spell's colour.
+		_log_markup.append({
+			"name": spell_name,
+			"bbcode": "[url=spell:%s][color=#%s]%s[/color][/url]" % [spell_name, sc.to_html(false), spell_name],
+		})
+	for i in board.SPACE_DATA:
+		var info: Dictionary = board.SPACE_DATA[i]
+		if info.get("type", "") != "property":
+			continue
+		var pc: Color = _log_name_color(board.COLOR_GROUP_COLORS.get(info.get("color", ""), Color.BLACK))
+		_log_markup.append({
+			"name": info["name"],
+			"bbcode": "[color=#%s]%s[/color]" % [pc.to_html(false), info["name"]],
+		})
+	var rc: Color = _log_name_color(board.COLOR_GROUP_COLORS["railroad"])
+	_log_markup.append({"name": "Terminus Station", "bbcode": "[color=#%s]Terminus Station[/color]" % rc.to_html(false)})
+	_log_markup.sort_custom(func(a, b): return a["name"].length() > b["name"].length())
+
+
+# Nudges a colour dark enough to read on the light log background.
+func _log_name_color(c: Color) -> Color:
+	while c.get_luminance() > 0.42:
+		c = c.darkened(0.28)
+	return c
+
+
+# Replaces every spell / property name in `text` with its BBCode fragment,
+# scanning left to right so an inserted fragment is never re-scanned.
+func _markup_names(text: String) -> String:
+	var out: String = ""
+	var i: int = 0
+	while i < text.length():
+		var hit: Dictionary = {}
+		for entry in _log_markup:
+			if text.substr(i, entry["name"].length()) == entry["name"]:
+				hit = entry
+				break
+		if hit.is_empty():
+			out += text[i]
+			i += 1
+		else:
+			out += hit["bbcode"]
+			i += hit["name"].length()
+	return out
+
+
+func _on_log_meta_clicked(meta: Variant) -> void:
+	var m: String = str(meta)
+	if m.begins_with("spell:"):
+		var spell_name: String = m.substr(6)
+		var info: Dictionary = SpellData.SPELLS.get(spell_name, {})
+		if info.has("icon"):
+			spell_card.show_card(load(info["icon"]))
+
+
+func _log_line_bbcode(msg: String, color: Color) -> String:
+	return "[color=#%s]%s[/color]\n" % [color.to_html(false), _markup_names(msg)]
+
 
 func _log(msg: String, color: Color = Color.BLACK) -> void:
-	var line: String = "[color=#%s]%s[/color]\n" % [color.to_html(false), msg]
+	var line: String = _log_line_bbcode(msg, color)
 	_log_buffer += line
 	game_log.append_text(line)
 	if GameState.online and GameState.is_authority():
@@ -5661,7 +5735,7 @@ func _property_name(space_index: int) -> String:
 
 @rpc("authority", "call_remote", "reliable")
 func _net_log_line(msg: String, color: Color) -> void:
-	var line: String = "[color=#%s]%s[/color]\n" % [color.to_html(false), msg]
+	var line: String = _log_line_bbcode(msg, color)
 	_log_buffer += line
 	game_log.append_text(line)
 
