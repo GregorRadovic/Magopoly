@@ -55,10 +55,6 @@ offset_bottom = 518.0
 [node name="TurnLabel" type="Label" parent="UI/Panel/VBox"]
 text = "Player 1's turn"
 
-[node name="StatusLabel" type="Label" parent="UI/Panel/VBox"]
-autowrap_mode = 3
-text = "Roll to start."
-
 [node name="RollButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
 text = "Roll"

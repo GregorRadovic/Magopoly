@@ -126,10 +126,11 @@ signal board_space_picked(index: int)
 @onready var declare_bankruptcy_button: Button = $UI/Panel/VBox/DeclareBankruptcyButton
 @onready var trade_button: Button = $UI/Panel/VBox/TradeButton
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
-# The transient status line (errors, prompts, per-action narration). The
-# permanent scrollable record is `game_log` -- see _log().
-@onready var dice_label: Label = $UI/Panel/VBox/StatusLabel
 @onready var game_log: RichTextLabel = $UI/LogPanel/Log
+# The old on-screen status line is gone -- the scrollable log (see _log())
+# is the only record now. `dice_label` stays as a throwaway text sink so the
+# ~200 `dice_label.text = ...` / `+= ...` call sites don't all need touching.
+var dice_label: DiceSink = DiceSink.new()
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
 @onready var confirm_prompt: PopupPanel = $UI/ConfirmPrompt
 @onready var quit_confirm_prompt: PopupPanel = $UI/QuitConfirmPrompt
@@ -4807,7 +4808,6 @@ func _build_snapshot() -> Dictionary:
 		"buying_ho": _buying_house_or_unmortgaging,
 		"selling_hm": _selling_house_or_mortgaging,
 		"picking_pl": _picking_promised_land_property,
-		"dice_text": dice_label.text,
 		"turn_text": turn_label.text,
 		"response_window_open": _response_window_open,
 		"paused_by": _response_window_paused_by.duplicate(),
@@ -4912,7 +4912,6 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_trade_can_accept = snap.get("trade_can_accept", false)
 	_trade_proposer = snap.get("trade_proposer", -1)
 
-	dice_label.text = snap.get("dice_text", "")
 	turn_label.text = snap.get("turn_text", "")
 
 	trade_hseparator.visible = _trading
@@ -5254,3 +5253,11 @@ func _net_log_history(buffer: String) -> void:
 	_log_buffer = buffer
 	game_log.clear()
 	game_log.append_text(buffer)
+
+
+# Throwaway target for `dice_label.text = ...` / `+= ...`. The on-screen
+# status line was removed in favour of the scrollable log; keeping this sink
+# means those ~200 call sites don't all have to be edited away.
+class DiceSink:
+	extends RefCounted
+	var text: String = ""
