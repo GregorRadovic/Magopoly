@@ -84,10 +84,10 @@ text = "Trade"
 
 [node name="LogPanel" type="Panel" parent="UI"]
 theme_override_styles/panel = SubResource("OpaquePanelStyle")
-offset_left = 20.0
-offset_top = 772.0
-offset_right = 640.0
-offset_bottom = 1064.0
+offset_left = 16.0
+offset_top = 924.0
+offset_right = 912.0
+offset_bottom = 1072.0
 
 [node name="Log" type="RichTextLabel" parent="UI/LogPanel"]
 layout_mode = 1

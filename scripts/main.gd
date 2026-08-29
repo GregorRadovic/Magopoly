@@ -337,6 +337,8 @@ var _ai_initiated_trade: bool = false
 
 func _ready() -> void:
 	admin_row.visible = GameState.admin_mode
+	# Keep the log panel clear of the board, whatever size the board is.
+	$UI/LogPanel.offset_top = board.BOARD_SIZE + 12.0
 	_build_spell_deck()
 	_spawn_players()
 	current_player = _first_active_player()
