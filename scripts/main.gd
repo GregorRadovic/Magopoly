@@ -315,6 +315,15 @@ var _debt_creditor: Node2D = null
 # spell can force *any* player into debt regardless of whose turn it is.
 # See _acting_player_id().
 var _debt_player_id: int = -1
+# True when this "raise money" was entered by choosing to buy something
+# optional (a property, a Spell Shop spell) without the cash for it: the
+# player gets a Cancel button back to that choice instead of Declare
+# Bankruptcy, and reaching the amount does NOT auto-pay (the buy flow that
+# opened this does the actual charge).
+var _debt_cancellable: bool = false
+var _debt_auto_pay: bool = true
+# How the last raise-money window ended: "paid", "cancelled" or "bankrupt".
+var _debt_outcome: String = ""
 
 # Set while the current player is deciding whether to buy the property they
 # landed on, so they can sell houses / mortgage to raise the price first
@@ -732,13 +741,15 @@ func _ai_settle_debt_now(slot: int) -> void:
 		_ai_mortgage_properties(player, amount)
 	if player.money >= amount:
 		_maybe_resolve_debt()
+	elif _debt_cancellable:
+		_debt_outcome = "cancelled"
+		_clear_debt_state()
+		debt_resolved.emit()
 	else:
 		dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(slot)
 		_forfeit_to_bankruptcy(player, creditor)
-		_in_debt = false
-		_debt_amount = 0
-		_debt_creditor = null
-		_debt_player_id = -1
+		_debt_outcome = "bankrupt"
+		_clear_debt_state()
 		debt_resolved.emit()
 
 
@@ -1430,6 +1441,8 @@ func _resolve_spell_stack() -> void:
 	while not _spell_stack.is_empty():
 		await _resolve_top_of_stack()
 	_update_player_panels()
+	# A spell cast to earn money out of a raise-money window may have done it.
+	_maybe_resolve_debt()
 
 
 # Every spell that's used -- resolved here, countered (_resolve_t2_counter),
@@ -1914,8 +1927,23 @@ func _visit_spell_shop(player: Node2D) -> void:
 			var spell_info: Dictionary = SpellData.SPELLS.get(top_cards[i], {})
 			var caption: String = "[color=#e23c3c]$50[/color]" if i == sale_index else "$100"
 			entries.append({"index": i, "name": top_cards[i], "icon": load(spell_info.get("icon", "")), "caption": caption})
-		_cp_open("Spell Shop: buy a spell ($100, one on sale for $50), or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX, true)
-		choice = await _cp_result()
+		while true:
+			_cp_open("Spell Shop: buy a spell ($100, one on sale for $50), or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX, true)
+			choice = await _cp_result()
+			if choice < 0 or choice >= top_cards.size():
+				choice = SPELL_SHOP_SKIP_INDEX
+				break
+			var want_price: int = 50 if choice == sale_index else 100
+			if player.money >= want_price:
+				break
+			# Picked one they can't afford -- raise the money, or Cancel back
+			# to the shop. _casting_spell is dropped so a money spell can be cast.
+			_casting_spell = false
+			var outcome: String = await _raise_money(player, want_price, null, true, false)
+			_casting_spell = true
+			_refresh_action_buttons()
+			if outcome == "paid" and player.money >= want_price:
+				break
 
 	if choice >= 0 and choice < top_cards.size():
 		var price: int = 50 if choice == sale_index else 100
@@ -1940,29 +1968,48 @@ func _visit_spell_shop(player: Node2D) -> void:
 	_update_player_panels()
 
 
-# Gives the current player a chance to raise money (selling houses /
-# mortgaging properties) before being forced into bankruptcy. Restricts the
-# action buttons to just Sell Houses/Mortgage and Declare Bankruptcy until
-# either they raise enough to cover `amount` (auto-paid, see
-# _maybe_resolve_debt()) or they declare bankruptcy (see
-# _on_declare_bankruptcy_pressed()) -- both of which emit debt_resolved.
-# `creditor` is who they owe (null for a tax debt owed to the bank).
-# Mortgage/house/trade/bankruptcy actions, and the button-enablement logic
-# in _refresh_action_buttons(), all need to operate on whoever's actually
-# raising money right now -- which is current_player normally, but while a
-# debt is outstanding it's specifically whoever the debt is on, since a
-# spell can force *any* player into debt regardless of whose turn it is
-# (e.g. P2's AI casting T1 Burn Spell against P1 on P2's own turn).
+# Mortgage/house/trade/spell/bankruptcy actions, and the button-enablement
+# logic in _refresh_action_buttons(), all need to operate on whoever's
+# actually acting right now -- which is current_player normally, but while a
+# debt (the Raise Money window, see _raise_money()) is outstanding it's
+# specifically whoever the debt is on, since a spell can force *any* player
+# into debt regardless of whose turn it is (e.g. P2's AI casting T1 Burn
+# Spell against P1 on P2's own turn).
 func _acting_player_id() -> int:
 	return _debt_player_id if _in_debt else current_player
 
 
+# Forced debt: an opponent (or the bank) must be paid `amount` and the
+# player is short. They raise money or go bankrupt.
 func _collect_debt(player: Node2D, amount: int, creditor: Node2D) -> void:
+	await _raise_money(player, amount, creditor, false, true)
+
+
+func _clear_debt_state() -> void:
+	_in_debt = false
+	_debt_amount = 0
+	_debt_creditor = null
+	_debt_player_id = -1
+	_debt_cancellable = false
+	_debt_auto_pay = true
+
+
+# The "Raise Money" window. Restricts the acting player to the money-raising
+# actions -- Sell Houses / Mortgage, Trade, and casting a turn spell (to earn
+# their way out) -- plus either Declare Bankruptcy (forced debt) or Cancel
+# (an optional purchase they can't afford). Returns "paid", "cancelled" or
+# "bankrupt". `auto_pay` false means reaching the amount just ends the
+# window; whoever opened it does the actual charge.
+func _raise_money(player: Node2D, amount: int, creditor: Node2D, cancellable: bool, auto_pay: bool) -> String:
 	_in_debt = true
 	_debt_amount = amount
 	_debt_creditor = creditor
 	_debt_player_id = player.player_id
-	dice_label.text += "\n%s: sell houses or properties? Need to raise $%d" % [_player_display_name(player.player_id), amount]
+	_debt_cancellable = cancellable
+	_debt_auto_pay = auto_pay
+	_debt_outcome = ""
+	_log("%s needs to raise $%d." % [PLAYER_NAMES[player.player_id], amount])
+	dice_label.text += "\n%s: raise $%d (sell houses / mortgage, trade, or cast a spell)." % [_player_display_name(player.player_id), amount]
 
 	if player.is_ai:
 		# Mortgage what it can first; if that's not enough, start selling
@@ -1976,21 +2023,37 @@ func _collect_debt(player: Node2D, amount: int, creditor: Node2D) -> void:
 			_ai_mortgage_properties(player, amount)
 		if player.money >= amount:
 			_maybe_resolve_debt()
+		elif cancellable:
+			_debt_outcome = "cancelled"
+			_clear_debt_state()
 		else:
 			dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(player.player_id)
 			_forfeit_to_bankruptcy(player, creditor)
-			_in_debt = false
-			_debt_amount = 0
-			_debt_creditor = null
-			_debt_player_id = -1
-		return
+			_debt_outcome = "bankrupt"
+			_clear_debt_state()
+		return _debt_outcome
 
 	_refresh_action_buttons()
 	await debt_resolved
+	return _debt_outcome
 
 
-# Called after every sell-house/mortgage action. If it raised enough to cover
-# the outstanding debt, pays it automatically and lets the player continue.
+# Cancel button in a cancellable raise-money window (an optional purchase the
+# player decided against once they saw the price).
+func _cancel_raise_money() -> void:
+	if not _in_debt or not _debt_cancellable:
+		return
+	dice_label.text += "\n%s cancelled the purchase." % _player_display_name(_debt_player_id)
+	_debt_outcome = "cancelled"
+	_clear_debt_state()
+	_update_player_panels()
+	debt_resolved.emit()
+
+
+# Called after every action that can change the acting player's money while a
+# raise-money window is open (sell house, mortgage, trade, spell resolving).
+# Once they've got enough, pays the debt (unless _debt_auto_pay is off -- an
+# optional purchase pays itself) and lets play continue.
 func _maybe_resolve_debt() -> void:
 	if not _in_debt:
 		return
@@ -1998,19 +2061,20 @@ func _maybe_resolve_debt() -> void:
 	if player.money < _debt_amount:
 		return
 
-	player.money -= _debt_amount
-	if _debt_creditor:
-		_debt_creditor.money += _debt_amount
+	if _debt_auto_pay:
+		player.money -= _debt_amount
+		if _debt_creditor:
+			_debt_creditor.money += _debt_amount
+		else:
+			free_parking_amount += _debt_amount
+		dice_label.text += "\n%s raised enough money and paid the $%d owed." % [_player_display_name(player.player_id), _debt_amount]
+		_log_payment(player.player_id, _debt_amount,
+			PLAYER_NAMES[_debt_creditor.player_id] if _debt_creditor else "Free Parking")
 	else:
-		free_parking_amount += _debt_amount
-	dice_label.text += "\n%s raised enough money and paid the $%d owed." % [_player_display_name(player.player_id), _debt_amount]
-	_log_payment(player.player_id, _debt_amount,
-		PLAYER_NAMES[_debt_creditor.player_id] if _debt_creditor else "Free Parking")
+		dice_label.text += "\n%s raised the $%d." % [_player_display_name(player.player_id), _debt_amount]
 
-	_in_debt = false
-	_debt_amount = 0
-	_debt_creditor = null
-	_debt_player_id = -1
+	_debt_outcome = "paid"
+	_clear_debt_state()
 	_update_player_panels()
 	debt_resolved.emit()
 
@@ -2051,8 +2115,16 @@ func _refresh_action_buttons() -> void:
 	admin_spells_button.disabled = limited_to_selling or lock or host_only
 	buy_house_unmortgage_button.disabled = limited_to_selling or lock
 	sell_house_mortgage_button.disabled = lock
-	declare_bankruptcy_button.disabled = _awaiting_buy_decision or lock
 	trade_button.disabled = _awaiting_buy_decision or lock
+
+	# While raising money for something optional, Declare Bankruptcy is
+	# replaced by a Cancel that drops the purchase (see _cancel_raise_money).
+	if _in_debt and _debt_cancellable:
+		declare_bankruptcy_button.text = "Cancel purchase"
+		declare_bankruptcy_button.disabled = lock
+	else:
+		declare_bankruptcy_button.text = "Declare Bankruptcy"
+		declare_bankruptcy_button.disabled = _awaiting_buy_decision or lock
 
 	if _trading:
 		# During a trade only the current proposer's machine has controls;
@@ -2633,6 +2705,12 @@ func _on_declare_bankruptcy_pressed() -> void:
 	if GameState.online and not GameState.is_authority():
 		_net_action_intent.rpc_id(1, "declare_bankruptcy")
 		return
+	# Same button, relabelled "Cancel purchase" while raising money for an
+	# optional buy -- no confirmation, just drop it and go back to the prompt.
+	if _in_debt and _debt_cancellable:
+		_cancel_raise_money()
+		_refresh_action_buttons()
+		return
 	roll_button.disabled = true
 	admin_button.disabled = true
 	admin_properties_button.disabled = true
@@ -2654,10 +2732,8 @@ func _on_declare_bankruptcy_pressed() -> void:
 		dice_label.text = "%s declared bankruptcy and forfeits the game." % forfeiting_name
 		_forfeit_to_bankruptcy(player, creditor)
 		if _in_debt:
-			_in_debt = false
-			_debt_amount = 0
-			_debt_creditor = null
-			_debt_player_id = -1
+			_debt_outcome = "bankrupt"
+			_clear_debt_state()
 			debt_resolved.emit()
 		else:
 			_advance_turn()
@@ -2673,10 +2749,10 @@ func _on_declare_bankruptcy_pressed() -> void:
 # dismiss is suppressed here and _reassert_buy_prompt_if_needed() reopens it
 # after every board click while still awaiting a decision.
 #
-# Saying yes without enough money doesn't end the decision -- it's reported
-# and the prompt comes right back, so the player can keep raising money and
-# try again. Only an explicit "No", or an explicit "Yes" that they can
-# actually afford, returns.
+# Saying yes without enough money doesn't end the decision -- the player
+# drops into a raise-money window (sell houses / mortgage / trade / cast a
+# spell) with a Cancel that comes back here. Only an explicit "No", or a
+# "Yes" they can afford (already, or after raising it), returns.
 func _ask_buy_property(property_name: String, price: int) -> bool:
 	if players[current_player].is_ai:
 		# Always wants the property; mortgages (never sells houses) to
@@ -2701,7 +2777,15 @@ func _ask_buy_property(property_name: String, price: int) -> bool:
 		if player.money >= price:
 			result = true
 			break
-		dice_label.text += "\n%s doesn't have enough money to buy %s." % [_player_display_name(current_player), property_name]
+		# Said yes but can't afford it -- raise the money, or Cancel back here.
+		_awaiting_buy_decision = false
+		var outcome: String = await _raise_money(player, price, null, true, false)
+		_awaiting_buy_decision = true
+		_refresh_action_buttons()
+		if outcome == "paid" and player.money >= price:
+			result = true
+			break
+		# "cancelled" (or somehow still short) -- loop back to the buy prompt.
 	confirm_prompt.suppress_auto_decline = false
 	_awaiting_buy_decision = false
 	_refresh_action_buttons()
@@ -3168,6 +3252,10 @@ func _level_timing_allowed(caster: Node2D, spell_name: String, level: int) -> bo
 	if timings.has("turn") and not _response_window_open:
 		var already_rolled: bool = level_info.get("requires_not_yet_rolled", false) and _awaiting_end_turn
 		if is_caster_current and not _trading and not _in_debt and not _awaiting_buy_decision and not already_rolled:
+			return true
+		# Raise Money Mode: the player being made to raise money may cast a
+		# turn spell to try to earn their way out of it.
+		if _in_debt and caster.player_id == _debt_player_id and not _trading:
 			return true
 	if timings.has("spell_response") and caster_has_paused and not _spell_stack.is_empty() and not excludes_caster and not requires_caster:
 		return true
@@ -4960,6 +5048,7 @@ func _build_snapshot() -> Dictionary:
 		"in_debt": _in_debt,
 		"debt_player": _debt_player_id,
 		"debt_amount": _debt_amount,
+		"debt_cancellable": _debt_cancellable,
 		"awaiting_buy": _awaiting_buy_decision,
 		"casting_spell": _casting_spell,
 		"buying_ho": _buying_house_or_unmortgaging,
@@ -5056,6 +5145,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_in_debt = snap.get("in_debt", false)
 	_debt_player_id = snap.get("debt_player", -1)
 	_debt_amount = snap.get("debt_amount", 0)
+	_debt_cancellable = snap.get("debt_cancellable", false)
 	_awaiting_buy_decision = snap.get("awaiting_buy", false)
 	_casting_spell = snap.get("casting_spell", false)
 	_buying_house_or_unmortgaging = snap.get("buying_ho", false)
