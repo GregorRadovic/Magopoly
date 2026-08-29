@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/dice_roller.gd" id="12"]
@@ -26,6 +26,18 @@ corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_left = 8
 corner_radius_bottom_right = 8
+
+[sub_resource type="StyleBoxFlat" id="ModeOutlineStyle"]
+bg_color = Color(0, 0, 0, 0)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.45, 0.72, 1, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
 
 [sub_resource type="StyleBoxFlat" id="ToastStyle"]
 content_margin_left = 22.0
@@ -92,11 +104,25 @@ text = "Admin Spells"
 
 [node name="BuyHouseUnmortgageButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
-text = "Buy houses / unmortgage"
+text = "Buy Houses / Unmortgage (B)"
+
+[node name="ModeOutline" type="Panel" parent="UI/Panel/VBox/BuyHouseUnmortgageButton"]
+visible = false
+mouse_filter = 2
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_styles/panel = SubResource("ModeOutlineStyle")
 
 [node name="SellHouseMortgageButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
-text = "Sell houses / mortgage"
+text = "Sell Houses / Mortgage (S)"
+
+[node name="ModeOutline" type="Panel" parent="UI/Panel/VBox/SellHouseMortgageButton"]
+visible = false
+mouse_filter = 2
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_styles/panel = SubResource("ModeOutlineStyle")
 
 [node name="DeclareBankruptcyButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)

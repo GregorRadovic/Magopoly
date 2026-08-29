@@ -127,6 +127,8 @@ signal board_space_picked(index: int)
 @onready var admin_spells_button: Button = $UI/Panel/VBox/AdminRow/AdminSpellsButton
 @onready var buy_house_unmortgage_button: Button = $UI/Panel/VBox/BuyHouseUnmortgageButton
 @onready var sell_house_mortgage_button: Button = $UI/Panel/VBox/SellHouseMortgageButton
+@onready var buy_house_mode_outline: Panel = $UI/Panel/VBox/BuyHouseUnmortgageButton/ModeOutline
+@onready var sell_house_mode_outline: Panel = $UI/Panel/VBox/SellHouseMortgageButton/ModeOutline
 @onready var declare_bankruptcy_button: Button = $UI/Panel/VBox/DeclareBankruptcyButton
 @onready var trade_button: Button = $UI/Panel/VBox/TradeButton
 @onready var turn_label: Label = $UI/Panel/VBox/TurnLabel
@@ -415,6 +417,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
+
+	# S / B toggle Sell Houses / Buy Houses mode, exactly like clicking those
+	# buttons (which is also where a client forwards the intent to the host).
+	# Gated on the button being live so the key can't do anything the button
+	# couldn't -- and a focused text field eats the key before it reaches here.
+	if event.keycode == KEY_S and not sell_house_mortgage_button.disabled:
+		_on_sell_house_mortgage_pressed()
+		return
+	if event.keycode == KEY_B and not buy_house_unmortgage_button.disabled:
+		_on_buy_house_unmortgage_pressed()
+		return
+
 	var pause_keys: Array = [KEY_SPACE, KEY_1, KEY_2, KEY_3, KEY_4]
 	if not pause_keys.has(event.keycode):
 		return
@@ -789,6 +803,8 @@ func _end_turn() -> void:
 # would inherit an "End Turn" button before ever rolling.
 func _advance_turn() -> void:
 	_awaiting_end_turn = false
+	_buying_house_or_unmortgaging = false
+	_selling_house_or_mortgaging = false
 	_die1 = 0
 	_die2 = 0
 	dice_roller.clear_dice()
@@ -1000,23 +1016,18 @@ func _on_admin_spells_pressed() -> void:
 	_update_player_panels()
 
 
+# A sticky mode, not a one-shot: while it's on, a light-blue outline marks
+# the button and every tile click builds a house / unmortgages, until the
+# button (or the B key) is pressed again to turn it off. _refresh_action_
+# buttons() handles the outline and locks the other actions while it's on.
 func _on_buy_house_unmortgage_pressed() -> void:
 	if GameState.online and not GameState.is_authority():
 		_net_action_intent.rpc_id(1, "buy_house_unmortgage")
 		return
-	roll_button.disabled = true
-	admin_button.disabled = true
-	admin_properties_button.disabled = true
-	admin_spells_button.disabled = true
-	buy_house_unmortgage_button.disabled = true
-	sell_house_mortgage_button.disabled = true
-	declare_bankruptcy_button.disabled = true
-	trade_button.disabled = true
-	# Armed immediately, same as Admin Properties: clicking a tile directly
-	# dismisses the popup via Godot's default outside-click behavior without
-	# emitting "closed", so pick mode can't be left waiting on that signal.
-	_buying_house_or_unmortgaging = true
-	_info_open("Click a property to build a house on it, or to unmortgage it if it's mortgaged.")
+	_buying_house_or_unmortgaging = not _buying_house_or_unmortgaging
+	if _buying_house_or_unmortgaging:
+		_selling_house_or_mortgaging = false
+	_refresh_action_buttons()
 
 
 # Dispatches to unmortgaging or house-building depending on the clicked
@@ -1083,17 +1094,10 @@ func _on_sell_house_mortgage_pressed() -> void:
 	if GameState.online and not GameState.is_authority():
 		_net_action_intent.rpc_id(1, "sell_house_mortgage")
 		return
-	roll_button.disabled = true
-	admin_button.disabled = true
-	admin_properties_button.disabled = true
-	admin_spells_button.disabled = true
-	buy_house_unmortgage_button.disabled = true
-	sell_house_mortgage_button.disabled = true
-	declare_bankruptcy_button.disabled = true
-	trade_button.disabled = true
-	# Armed immediately, same reasoning as Buy House / Admin Properties.
-	_selling_house_or_mortgaging = true
-	_info_open("Click a property to sell a house from it, or to mortgage it if it has no houses.")
+	_selling_house_or_mortgaging = not _selling_house_or_mortgaging
+	if _selling_house_or_mortgaging:
+		_buying_house_or_unmortgaging = false
+	_refresh_action_buttons()
 
 
 # Dispatches to house-selling or mortgaging depending on whether the clicked
@@ -2169,15 +2173,22 @@ func _refresh_action_buttons() -> void:
 	# still gets Sell Houses / Mortgage / Declare Bankruptcy / Trade.
 	var ai_turn: bool = players[_acting_player_id()].is_ai
 	var lock: bool = _trading or _casting_spell or _response_window_open or ai_turn or not_my_seat
+	# The sticky Sell / Buy Houses modes: while one is on, everything else is
+	# locked and the two toggle buttons stay live so it can be switched or
+	# turned off (see _on_buy/sell_house_*_pressed).
+	var house_mode: bool = _buying_house_or_unmortgaging or _selling_house_or_mortgaging
 
-	roll_button.disabled = limited_to_selling or lock
+	roll_button.disabled = limited_to_selling or lock or house_mode
 	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
-	admin_button.disabled = limited_to_selling or lock or _awaiting_end_turn or host_only
-	admin_properties_button.disabled = limited_to_selling or lock or host_only
-	admin_spells_button.disabled = limited_to_selling or lock or host_only
+	admin_button.disabled = limited_to_selling or lock or _awaiting_end_turn or host_only or house_mode
+	admin_properties_button.disabled = limited_to_selling or lock or host_only or house_mode
+	admin_spells_button.disabled = limited_to_selling or lock or host_only or house_mode
 	buy_house_unmortgage_button.disabled = limited_to_selling or lock
 	sell_house_mortgage_button.disabled = lock
-	trade_button.disabled = _awaiting_buy_decision or lock
+	trade_button.disabled = _awaiting_buy_decision or lock or house_mode
+
+	buy_house_mode_outline.visible = _buying_house_or_unmortgaging and not not_my_seat
+	sell_house_mode_outline.visible = _selling_house_or_mortgaging and not not_my_seat
 
 	# While raising money for something optional, Declare Bankruptcy is
 	# replaced by a Cancel that drops the purchase (see _cancel_raise_money).
@@ -3016,17 +3027,13 @@ func _on_space_clicked(index: int) -> void:
 		_handle_trade_click(index)
 		return
 
+	# These are sticky modes -- the click acts, the mode stays on until the
+	# player turns it off (see _on_buy/sell_house_*_pressed).
 	if _buying_house_or_unmortgaging:
-		_buying_house_or_unmortgaging = false
-		if info_prompt.visible:
-			info_prompt.hide()
 		_buy_house_or_unmortgage(index)
 		return
 
 	if _selling_house_or_mortgaging:
-		_selling_house_or_mortgaging = false
-		if info_prompt.visible:
-			info_prompt.hide()
 		_sell_house_or_mortgage(index)
 		return
 
