@@ -21,6 +21,11 @@ var suppress_auto_decline: bool = false
 # player who owns the decision may well be looking at another window.
 var sticky: bool = false
 
+# Optional validator (Tutorial mode): called with the Yes/No answer; if it
+# returns false the press is rejected and the prompt stays open (the gate
+# handles any feedback).
+var _gate: Callable = Callable()
+
 @onready var prompt_label: Label = $VBox/PromptLabel
 @onready var yes_button: Button = $VBox/Buttons/YesButton
 @onready var no_button: Button = $VBox/Buttons/NoButton
@@ -33,14 +38,17 @@ func _ready() -> void:
 	set_process(false)
 
 
-func open(prompt: String) -> void:
+func open(prompt: String, gate: Callable = Callable()) -> void:
 	prompt_label.text = prompt
 	_answered = false
+	_gate = gate
 	popup_centered(POPUP_SIZE)
-	set_process(sticky)
+	set_process(sticky or gate.is_valid())
 
 
 func _on_yes() -> void:
+	if _gate.is_valid() and not _gate.call(true):
+		return
 	_answered = true
 	sticky = false
 	set_process(false)
@@ -49,6 +57,8 @@ func _on_yes() -> void:
 
 
 func _on_no() -> void:
+	if _gate.is_valid() and not _gate.call(false):
+		return
 	_answered = true
 	sticky = false
 	set_process(false)

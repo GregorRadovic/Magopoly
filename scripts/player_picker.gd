@@ -16,6 +16,11 @@ var _mandatory: bool = false
 # network-driven pickers: Godot auto-hides popups when the app loses focus
 # (alt-tab), which must not silently resolve the picker as a cancel.
 var _sticky: bool = false
+# Optional validator (Tutorial mode): called with the picked index; if it
+# returns false the pick is rejected and the picker stays open (the gate is
+# responsible for any feedback). A gated picker also hides its Cancel button
+# and reopens on any stray dismissal, like a mandatory one.
+var _gate: Callable = Callable()
 
 const POPUP_SIZE: Vector2i = Vector2i(420, 320)
 
@@ -45,14 +50,15 @@ func _ready() -> void:
 # silently clobbered back to hidden once that bookkeeping finally runs, or
 # have its own popup_hide notification wrongly read as an instant cancel of
 # the *new* session. Deferring this work queues it after that bookkeeping.
-func open(prompt: String, entries: Array, mandatory: bool = false, sticky: bool = false) -> void:
-	call_deferred("_do_open", prompt, entries, mandatory, sticky)
+func open(prompt: String, entries: Array, mandatory: bool = false, sticky: bool = false, gate: Callable = Callable()) -> void:
+	call_deferred("_do_open", prompt, entries, mandatory, sticky, gate)
 
 
-func _do_open(prompt: String, entries: Array, mandatory: bool, sticky: bool) -> void:
+func _do_open(prompt: String, entries: Array, mandatory: bool, sticky: bool, gate: Callable = Callable()) -> void:
 	_mandatory = mandatory
 	_sticky = sticky
-	cancel_button.visible = not mandatory
+	_gate = gate
+	cancel_button.visible = not mandatory and not gate.is_valid()
 	prompt_label.text = prompt
 	var answered_box: Array = [false]
 	_answered_box = answered_box
@@ -66,11 +72,13 @@ func _do_open(prompt: String, entries: Array, mandatory: bool, sticky: bool) -> 
 		btn.pressed.connect(_on_pick.bind(entry["index"], answered_box))
 		button_container.add_child(btn)
 	popup_centered(POPUP_SIZE)
-	set_process(_mandatory or _sticky)
+	set_process(_mandatory or _sticky or _gate.is_valid())
 	popup_hide.connect(_on_popup_hide.bind(answered_box), CONNECT_ONE_SHOT)
 
 
 func _on_pick(index: int, answered_box: Array) -> void:
+	if _gate.is_valid() and not _gate.call(index):
+		return
 	answered_box[0] = true
 	set_process(false)
 	hide()
@@ -91,7 +99,7 @@ func _on_cancel() -> void:
 func _on_popup_hide(answered_box: Array) -> void:
 	if answered_box[0]:
 		return
-	if _mandatory or _sticky:
+	if _mandatory or _sticky or _gate.is_valid():
 		return
 	player_chosen.emit(-1)
 
@@ -109,6 +117,6 @@ func _process(_delta: float) -> void:
 func _reshow_if_needed() -> void:
 	# The previous popup_hide fired its one-shot and disconnected before we
 	# got here (that's what hid us), so reconnecting for the next hide is safe.
-	if (_mandatory or _sticky) and not _answered_box[0] and not visible:
+	if (_mandatory or _sticky or _gate.is_valid()) and not _answered_box[0] and not visible:
 		popup_centered(POPUP_SIZE)
 		popup_hide.connect(_on_popup_hide.bind(_answered_box), CONNECT_ONE_SHOT)

@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/dice_roller.gd" id="12"]
@@ -38,6 +38,22 @@ corner_radius_top_left = 4
 corner_radius_top_right = 4
 corner_radius_bottom_left = 4
 corner_radius_bottom_right = 4
+
+[sub_resource type="StyleBoxFlat" id="TutorialBubbleStyle"]
+content_margin_left = 22.0
+content_margin_top = 12.0
+content_margin_right = 22.0
+content_margin_bottom = 12.0
+bg_color = Color(0.99, 0.973, 0.902, 0.98)
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.361, 0.549, 0.898, 1)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_left = 14
+corner_radius_bottom_right = 14
 
 [sub_resource type="StyleBoxFlat" id="ToastStyle"]
 content_margin_left = 22.0
@@ -182,6 +198,45 @@ horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 3
 text = ""
+
+[node name="TutorialBubble" type="Panel" parent="UI"]
+visible = false
+offset_left = 924.0
+offset_top = 948.0
+offset_right = 1898.0
+offset_bottom = 1076.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("TutorialBubbleStyle")
+
+[node name="Label" type="Label" parent="UI/TutorialBubble"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 12.0
+offset_right = -20.0
+offset_bottom = -32.0
+theme_override_colors/font_color = Color(0.1, 0.12, 0.18, 1)
+theme_override_font_sizes/font_size = 22
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+text = ""
+
+[node name="Hint" type="Label" parent="UI/TutorialBubble"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -30.0
+offset_bottom = -8.0
+theme_override_colors/font_color = Color(0.4, 0.447, 0.549, 1)
+theme_override_font_sizes/font_size = 16
+horizontal_alignment = 1
+vertical_alignment = 1
+text = "(click anywhere to continue)"
 
 [node name="NumberPrompt" parent="UI" instance=ExtResource("3")]
 
