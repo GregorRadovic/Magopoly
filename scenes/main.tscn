@@ -276,97 +276,12 @@ text = "Players"
 [node name="FreeParkingLabel" type="Label" parent="UI/PlayersPanel/VBox"]
 text = "Free Parking: $0"
 
-[node name="HSeparator0" type="HSeparator" parent="UI/PlayersPanel/VBox"]
+[node name="PlayersScroll" type="ScrollContainer" parent="UI/PlayersPanel/VBox"]
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 
-[node name="Player0" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
-
-[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player0"]
-autowrap_mode = 2
-text = "Player 1 -- $1500"
-
-[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player0"]
-theme_override_constants/separation = 10
-
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
+[node name="PlayerList" type="VBoxContainer" parent="UI/PlayersPanel/VBox/PlayersScroll"]
 size_flags_horizontal = 3
-
-[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
-
-[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
-
-[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
-
-[node name="HSeparator1" type="HSeparator" parent="UI/PlayersPanel/VBox"]
-
-[node name="Player1" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
-
-[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player1"]
-autowrap_mode = 2
-text = "Player 2 -- $1500"
-
-[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player1"]
-theme_override_constants/separation = 10
-
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
-
-[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
-
-[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
-
-[node name="HSeparator2" type="HSeparator" parent="UI/PlayersPanel/VBox"]
-
-[node name="Player2" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
-
-[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player2"]
-autowrap_mode = 2
-text = "Player 3 -- $1500"
-
-[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player2"]
-theme_override_constants/separation = 10
-
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
-
-[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
-
-[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
-
-[node name="HSeparator3" type="HSeparator" parent="UI/PlayersPanel/VBox"]
-
-[node name="Player3" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
-
-[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player3"]
-autowrap_mode = 2
-text = "Player 4 -- $1500"
-
-[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player3"]
-theme_override_constants/separation = 10
-
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
-
-[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
-
-[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
 
 [node name="HSeparatorTrade" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 visible = false

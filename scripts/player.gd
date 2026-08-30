@@ -1,6 +1,8 @@
 extends Node2D
 
-const RADIUS: float = 15.0
+# Small enough that a full 8-marker cluster fits on one board space (see
+# main.gd's MARKER_OFFSETS).
+const RADIUS: float = 10.0
 const STARTING_MONEY: int = 1500
 
 var player_id: int = 0

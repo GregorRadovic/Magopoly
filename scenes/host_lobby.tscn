@@ -28,9 +28,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -440.0
-offset_top = -340.0
+offset_top = -360.0
 offset_right = 440.0
-offset_bottom = 340.0
+offset_bottom = 360.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 22
@@ -71,93 +71,16 @@ theme_override_font_sizes/font_size = 22
 text = ""
 horizontal_alignment = 1
 
-[node name="Slots" type="VBoxContainer" parent="VBox"]
+[node name="SlotsScroll" type="ScrollContainer" parent="VBox"]
 layout_mode = 2
+custom_minimum_size = Vector2(760, 340)
+size_flags_horizontal = 4
+horizontal_scroll_mode = 0
+
+[node name="Slots" type="VBoxContainer" parent="VBox/SlotsScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 12
-
-[node name="SlotRow0" type="HBoxContainer" parent="VBox/Slots"]
-layout_mode = 2
-theme_override_constants/separation = 18
-
-[node name="Label" type="Label" parent="VBox/Slots/SlotRow0"]
-layout_mode = 2
-custom_minimum_size = Vector2(150, 0)
-theme_override_font_sizes/font_size = 24
-text = "Player 1"
-
-[node name="Status" type="Label" parent="VBox/Slots/SlotRow0"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 22
-text = "-"
-
-[node name="KindOption" type="OptionButton" parent="VBox/Slots/SlotRow0"]
-layout_mode = 2
-custom_minimum_size = Vector2(220, 44)
-theme_override_font_sizes/font_size = 20
-
-[node name="SlotRow1" type="HBoxContainer" parent="VBox/Slots"]
-layout_mode = 2
-theme_override_constants/separation = 18
-
-[node name="Label" type="Label" parent="VBox/Slots/SlotRow1"]
-layout_mode = 2
-custom_minimum_size = Vector2(150, 0)
-theme_override_font_sizes/font_size = 24
-text = "Player 2"
-
-[node name="Status" type="Label" parent="VBox/Slots/SlotRow1"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 22
-text = "-"
-
-[node name="KindOption" type="OptionButton" parent="VBox/Slots/SlotRow1"]
-layout_mode = 2
-custom_minimum_size = Vector2(220, 44)
-theme_override_font_sizes/font_size = 20
-
-[node name="SlotRow2" type="HBoxContainer" parent="VBox/Slots"]
-layout_mode = 2
-theme_override_constants/separation = 18
-
-[node name="Label" type="Label" parent="VBox/Slots/SlotRow2"]
-layout_mode = 2
-custom_minimum_size = Vector2(150, 0)
-theme_override_font_sizes/font_size = 24
-text = "Player 3"
-
-[node name="Status" type="Label" parent="VBox/Slots/SlotRow2"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 22
-text = "-"
-
-[node name="KindOption" type="OptionButton" parent="VBox/Slots/SlotRow2"]
-layout_mode = 2
-custom_minimum_size = Vector2(220, 44)
-theme_override_font_sizes/font_size = 20
-
-[node name="SlotRow3" type="HBoxContainer" parent="VBox/Slots"]
-layout_mode = 2
-theme_override_constants/separation = 18
-
-[node name="Label" type="Label" parent="VBox/Slots/SlotRow3"]
-layout_mode = 2
-custom_minimum_size = Vector2(150, 0)
-theme_override_font_sizes/font_size = 24
-text = "Player 4"
-
-[node name="Status" type="Label" parent="VBox/Slots/SlotRow3"]
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 22
-text = "-"
-
-[node name="KindOption" type="OptionButton" parent="VBox/Slots/SlotRow3"]
-layout_mode = 2
-custom_minimum_size = Vector2(220, 44)
-theme_override_font_sizes/font_size = 20
 
 [node name="OptionsRow" type="HBoxContainer" parent="VBox"]
 layout_mode = 2
@@ -197,3 +120,8 @@ layout_mode = 2
 custom_minimum_size = Vector2(260, 68)
 theme_override_font_sizes/font_size = 28
 text = "Start Game"
+
+[node name="BlitzStartLimitDialog" type="AcceptDialog" parent="."]
+title = "BlitzStart Limit"
+size = Vector2i(440, 150)
+dialog_text = "Max 4 players for BlitzStart."

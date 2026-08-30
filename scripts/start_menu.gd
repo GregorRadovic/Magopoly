@@ -31,8 +31,9 @@ func _ready() -> void:
 func _start_tutorial() -> void:
 	var types: Array[GameState.PlayerType] = [
 		GameState.PlayerType.HUMAN, GameState.PlayerType.COMPUTER,
-		GameState.PlayerType.DISABLED, GameState.PlayerType.DISABLED,
 	]
+	while types.size() < GameState.MAX_PLAYERS:
+		types.append(GameState.PlayerType.DISABLED)
 	GameState.player_types = types
 	GameState.admin_mode = false
 	GameState.quickstart_mode = false

@@ -1,0 +1,36 @@
+[gd_scene format=3]
+
+; One player's line in the in-game Players panel. main.gd's _build_player_rows()
+; instantiates one of these per slot into PlayersPanel/VBox/PlayersScroll/PlayerList.
+
+[node name="PlayerRow" type="VBoxContainer"]
+theme_override_constants/separation = 6
+
+[node name="TopSeparator" type="HSeparator" parent="."]
+layout_mode = 2
+
+[node name="HeaderLabel" type="Label" parent="."]
+layout_mode = 2
+autowrap_mode = 2
+text = "Player"
+
+[node name="AssetsRow" type="HBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PropertiesFlow" type="HFlowContainer" parent="AssetsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="AssetsVSeparator" type="VSeparator" parent="AssetsRow"]
+layout_mode = 2
+
+[node name="SpellsFlow" type="HFlowContainer" parent="AssetsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="AttunementVSeparator" type="VSeparator" parent="AssetsRow"]
+layout_mode = 2
+
+[node name="AttunementFlow" type="HFlowContainer" parent="AssetsRow"]
+layout_mode = 2

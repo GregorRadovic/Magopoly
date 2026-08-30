@@ -20,9 +20,10 @@ signal kicked(reason: String)
 signal player_reconnected(slot: int, peer_id: int)
 
 const DEFAULT_PORT: int = 27015
-# Host + 3 clients = the game's 4 player slots.
-const MAX_CLIENTS: int = 3
-const SLOT_COUNT: int = 4
+# Host + up to 7 clients = the game's 8 player slots (keep in step with
+# GameState.MAX_PLAYERS).
+const MAX_CLIENTS: int = 7
+const SLOT_COUNT: int = 8
 
 # What a lobby slot is currently set to. HOST is always slot 0. TAKEN means a
 # remote peer has claimed a slot that was OPEN. The host can freely retype
@@ -30,11 +31,14 @@ const SLOT_COUNT: int = 4
 enum Slot { HOST, OPEN, TAKEN, COMPUTER, DISABLED }
 
 # Authoritative on the host; mirrored on clients purely for lobby display.
-# Index == player_id (0..3).
-var slots: Array[int] = [Slot.HOST, Slot.OPEN, Slot.COMPUTER, Slot.DISABLED]
+# Index == player_id (0..SLOT_COUNT-1).
+var slots: Array[int] = [
+	Slot.HOST, Slot.OPEN, Slot.COMPUTER, Slot.DISABLED,
+	Slot.DISABLED, Slot.DISABLED, Slot.DISABLED, Slot.DISABLED,
+]
 # player_id -> the multiplayer peer id controlling that slot. 1 = host,
 # >1 = a client peer, 0 = nobody (an OPEN / COMPUTER / DISABLED slot).
-var slot_peer: Array[int] = [1, 0, 0, 0]
+var slot_peer: Array[int] = [1, 0, 0, 0, 0, 0, 0, 0]
 # peer id -> display name, for the lobby's per-slot status text.
 var peer_names: Dictionary = {1: "Host"}
 
@@ -126,8 +130,11 @@ func leave() -> void:
 
 
 func _reset_slots() -> void:
-	slots = [Slot.HOST, Slot.OPEN, Slot.COMPUTER, Slot.DISABLED]
-	slot_peer = [1, 0, 0, 0]
+	slots = [
+		Slot.HOST, Slot.OPEN, Slot.COMPUTER, Slot.DISABLED,
+		Slot.DISABLED, Slot.DISABLED, Slot.DISABLED, Slot.DISABLED,
+	]
+	slot_peer = [1, 0, 0, 0, 0, 0, 0, 0]
 
 
 # --- Host: slot management ----------------------------------------------

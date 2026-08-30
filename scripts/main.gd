@@ -1,6 +1,7 @@
 extends Node2D
 
 const PLAYER_SCENE: PackedScene = preload("res://scenes/player.tscn")
+const PLAYER_ROW_SCENE: PackedScene = preload("res://scenes/player_row.tscn")
 const MINI_CARD_SCENE: PackedScene = preload("res://scenes/mini_property_card.tscn")
 const MINI_SPELL_CARD_SCENE: PackedScene = preload("res://scenes/mini_spell_card.tscn")
 const CARDBACK_TEXTURE: Texture2D = preload("res://Magopoly Assets/Cardback.jpg")
@@ -62,18 +63,27 @@ const REVEAL_INDEX: int = -50
 # another spell in response).
 const RESPONSE_WINDOW_SECONDS: float = 2.0
 
+# Up to GameState.MAX_PLAYERS (8) of each. Colours are the four classic
+# player colours plus four more that still read clearly on the board.
 const PLAYER_COLORS: Array[Color] = [
-	Color(0.85, 0.2, 0.2),
-	Color(0.2, 0.4, 0.85),
-	Color(0.2, 0.75, 0.3),
-	Color(0.9, 0.8, 0.15),
+	Color(0.85, 0.2, 0.2),    # red
+	Color(0.2, 0.4, 0.85),    # blue
+	Color(0.2, 0.75, 0.3),    # green
+	Color(0.9, 0.8, 0.15),    # yellow
+	Color(0.6, 0.3, 0.8),     # purple
+	Color(0.95, 0.55, 0.1),   # orange
+	Color(0.15, 0.75, 0.8),   # cyan
+	Color(0.95, 0.45, 0.65),  # pink
 ]
-const PLAYER_NAMES: Array[String] = ["Player 1", "Player 2", "Player 3", "Player 4"]
+const PLAYER_NAMES: Array[String] = [
+	"Player 1", "Player 2", "Player 3", "Player 4",
+	"Player 5", "Player 6", "Player 7", "Player 8",
+]
+# Where each player's marker sits within its board space (screen-space offset
+# from the space centre). A 4x2 grid, tight enough for the narrow edge tiles.
 const MARKER_OFFSETS: Array[Vector2] = [
-	Vector2(-20, -20),
-	Vector2(20, -20),
-	Vector2(-20, 20),
-	Vector2(20, 20),
+	Vector2(-27, -13), Vector2(-9, -13), Vector2(9, -13), Vector2(27, -13),
+	Vector2(-27, 13), Vector2(-9, 13), Vector2(9, 13), Vector2(27, 13),
 ]
 const JAIL_SPACE_INDEX: int = 10
 const JAIL_SENTENCE_TURNS: int = 3
@@ -227,42 +237,14 @@ var dice_label: DiceSink = DiceSink.new()
 @onready var spell_card: PopupPanel = $UI/SpellCard
 @onready var card_picker: PopupPanel = $UI/CardPicker
 @onready var free_parking_label: Label = $UI/PlayersPanel/VBox/FreeParkingLabel
-@onready var player_header_labels: Array[Label] = [
-	$UI/PlayersPanel/VBox/Player0/HeaderLabel,
-	$UI/PlayersPanel/VBox/Player1/HeaderLabel,
-	$UI/PlayersPanel/VBox/Player2/HeaderLabel,
-	$UI/PlayersPanel/VBox/Player3/HeaderLabel,
-]
-@onready var player_properties_flows: Array[HFlowContainer] = [
-	$UI/PlayersPanel/VBox/Player0/AssetsRow/PropertiesFlow,
-	$UI/PlayersPanel/VBox/Player1/AssetsRow/PropertiesFlow,
-	$UI/PlayersPanel/VBox/Player2/AssetsRow/PropertiesFlow,
-	$UI/PlayersPanel/VBox/Player3/AssetsRow/PropertiesFlow,
-]
-@onready var player_spells_flows: Array[HFlowContainer] = [
-	$UI/PlayersPanel/VBox/Player0/AssetsRow/SpellsFlow,
-	$UI/PlayersPanel/VBox/Player1/AssetsRow/SpellsFlow,
-	$UI/PlayersPanel/VBox/Player2/AssetsRow/SpellsFlow,
-	$UI/PlayersPanel/VBox/Player3/AssetsRow/SpellsFlow,
-]
-@onready var player_attunement_flows: Array[HFlowContainer] = [
-	$UI/PlayersPanel/VBox/Player0/AssetsRow/AttunementFlow,
-	$UI/PlayersPanel/VBox/Player1/AssetsRow/AttunementFlow,
-	$UI/PlayersPanel/VBox/Player2/AssetsRow/AttunementFlow,
-	$UI/PlayersPanel/VBox/Player3/AssetsRow/AttunementFlow,
-]
-@onready var player_rows: Array[VBoxContainer] = [
-	$UI/PlayersPanel/VBox/Player0,
-	$UI/PlayersPanel/VBox/Player1,
-	$UI/PlayersPanel/VBox/Player2,
-	$UI/PlayersPanel/VBox/Player3,
-]
-@onready var player_row_separators: Array[HSeparator] = [
-	$UI/PlayersPanel/VBox/HSeparator0,
-	$UI/PlayersPanel/VBox/HSeparator1,
-	$UI/PlayersPanel/VBox/HSeparator2,
-	$UI/PlayersPanel/VBox/HSeparator3,
-]
+@onready var player_list: VBoxContainer = $UI/PlayersPanel/VBox/PlayersScroll/PlayerList
+# One entry per slot, filled by _build_player_rows() from player_row.tscn.
+var player_header_labels: Array[Label] = []
+var player_properties_flows: Array[HFlowContainer] = []
+var player_spells_flows: Array[HFlowContainer] = []
+var player_attunement_flows: Array[HFlowContainer] = []
+var player_rows: Array[VBoxContainer] = []
+var player_row_separators: Array[HSeparator] = []
 @onready var trade_hseparator: HSeparator = $UI/PlayersPanel/VBox/HSeparatorTrade
 @onready var trade_display: VBoxContainer = $UI/PlayersPanel/VBox/TradeDisplay
 @onready var trader1_label: Label = $UI/PlayersPanel/VBox/TradeDisplay/TradeHeader/Trader1Label
@@ -321,7 +303,7 @@ var _response_window_open: bool = false
 # _level_timing_allowed(). The window itself stays frozen as long as *any*
 # entry is true, but each player's own casting eligibility only looks at
 # their own entry.
-var _response_window_paused_by: Array[bool] = [false, false, false, false]
+var _response_window_paused_by: Array[bool] = [false, false, false, false, false, false, false, false]
 var _window_deadline_msec: int = 0
 # True for the whole time a roll is "in flight" -- from right after it's
 # shown until movement actually happens -- so Instant spells timed to a roll
@@ -472,8 +454,11 @@ func _ready() -> void:
 	admin_row.visible = GameState.admin_mode
 	# Keep the log panel clear of the board, whatever size the board is.
 	$UI/LogPanel.offset_top = board.BOARD_SIZE + 12.0
+	_build_player_rows()
 	_build_spell_deck()
 	_spawn_players()
+	_response_window_paused_by.resize(players.size())
+	_response_window_paused_by.fill(false)
 	current_player = _first_active_player()
 	roll_button.pressed.connect(_on_roll_pressed)
 	admin_button.pressed.connect(_on_admin_pressed)
@@ -543,8 +528,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_on_buy_house_unmortgage_pressed()
 		return
 
-	var pause_keys: Array = [KEY_SPACE, KEY_1, KEY_2, KEY_3, KEY_4]
-	if not pause_keys.has(event.keycode):
+	var pause_slot: int = _pause_key_slot(event.keycode)
+	if pause_slot == -1:
 		return
 
 	if _tutorial_active:
@@ -562,23 +547,25 @@ func _unhandled_input(event: InputEvent) -> void:
 			if not mine.is_empty():
 				_net_pause_intent.rpc_id(1, mine[0])
 			return
-		match event.keycode:
-			KEY_SPACE, KEY_1: _try_local_pause(0)
-			KEY_2: _try_local_pause(1)
-			KEY_3: _try_local_pause(2)
-			KEY_4: _try_local_pause(3)
+		_try_local_pause(pause_slot)
 		return
 
-	# Local hotseat: Space/1 = P1's perspective, 2/3/4 = that player's.
-	match event.keycode:
-		KEY_SPACE, KEY_1: _toggle_pause_for_player(0)
-		KEY_2: _toggle_pause_for_player(1)
-		KEY_3: _toggle_pause_for_player(2)
-		KEY_4: _toggle_pause_for_player(3)
+	# Local hotseat: Space/1 = P1's perspective, 2..8 = that player's.
+	_toggle_pause_for_player(pause_slot)
+
+
+# Space and "1" both mean player 0; "2".."8" mean players 1..7. -1 for any
+# other key. (KEY_1..KEY_8 are consecutive keycodes.)
+func _pause_key_slot(keycode: int) -> int:
+	if keycode == KEY_SPACE:
+		return 0
+	if keycode >= KEY_1 and keycode <= KEY_1 + GameState.MAX_PLAYERS - 1:
+		return keycode - KEY_1
+	return -1
 
 
 func _try_local_pause(slot: int) -> void:
-	if GameState.is_slot_local(slot):
+	if slot >= 0 and slot < players.size() and GameState.is_slot_local(slot):
 		_toggle_pause_for_player(slot)
 
 
@@ -947,6 +934,22 @@ func _tutorial_blocks(action: String) -> bool:
 		return false
 	_toast("Follow the instructions!")
 	return true
+
+
+# Builds the Players-panel rows from player_row.tscn -- one per slot -- and
+# fills the parallel lookup arrays. Runs before _spawn_players(), which needs
+# them. The rows live inside a ScrollContainer, so 5+ active players just make
+# the panel scroll.
+func _build_player_rows() -> void:
+	for i in GameState.MAX_PLAYERS:
+		var row: VBoxContainer = PLAYER_ROW_SCENE.instantiate()
+		player_list.add_child(row)
+		player_rows.append(row)
+		player_row_separators.append(row.get_node("TopSeparator"))
+		player_header_labels.append(row.get_node("HeaderLabel"))
+		player_properties_flows.append(row.get_node("AssetsRow/PropertiesFlow"))
+		player_spells_flows.append(row.get_node("AssetsRow/SpellsFlow"))
+		player_attunement_flows.append(row.get_node("AssetsRow/AttunementFlow"))
 
 
 func _spawn_players() -> void:
@@ -1970,9 +1973,10 @@ func _ensure_response_window() -> void:
 	if _response_window_open:
 		return
 	_response_window_open = true
-	_response_window_paused_by = [false, false, false, false]
+	_response_window_paused_by.resize(players.size())
+	_response_window_paused_by.fill(false)
 	_refresh_action_buttons()
-	dice_label.text += "\n(Press Space/1/2/3/4 within %ds to pause from that player's perspective and react with an Instant spell.)" % int(seconds)
+	dice_label.text += "\n(Press Space or your player number within %ds to pause from that player's perspective and react with an Instant spell.)" % int(seconds)
 
 	# _casting_spell also holds the window open: Reveal and Burn-for-Attunement
 	# are pickable straight off a spell card without pausing first, so without
@@ -5956,8 +5960,10 @@ func _net_revealed(a) -> Array:
 
 
 func _net_bool_array(a) -> Array[bool]:
-	var out: Array[bool] = [false, false, false, false]
-	for i in mini(a.size(), 4):
+	var out: Array[bool] = []
+	out.resize(GameState.MAX_PLAYERS)
+	out.fill(false)
+	for i in mini(a.size(), out.size()):
 		out[i] = bool(a[i])
 	return out
 
