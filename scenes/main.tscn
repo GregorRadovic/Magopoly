@@ -1,7 +1,9 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/dice_roller.gd" id="12"]
+[ext_resource type="PackedScene" path="res://scenes/pause_menu.tscn" id="13"]
+[ext_resource type="PackedScene" path="res://scenes/settings_menu.tscn" id="14"]
 [ext_resource type="PackedScene" path="res://scenes/board.tscn" id="2"]
 [ext_resource type="PackedScene" path="res://scenes/number_prompt.tscn" id="3"]
 [ext_resource type="PackedScene" path="res://scenes/confirm_prompt.tscn" id="4"]
@@ -242,8 +244,6 @@ text = "(click anywhere to continue)"
 
 [node name="ConfirmPrompt" parent="UI" instance=ExtResource("4")]
 
-[node name="QuitConfirmPrompt" parent="UI" instance=ExtResource("4")]
-
 [node name="InfoPrompt" parent="UI" instance=ExtResource("5")]
 
 [node name="PropertyCard" parent="UI" instance=ExtResource("6")]
@@ -459,3 +459,7 @@ text = "Spells being cast -- rightmost resolves first"
 [node name="SpellCastStack" type="Control" parent="UI/PlayersPanel/VBox/SpellCastDisplay"]
 custom_minimum_size = Vector2(0, 260)
 size_flags_horizontal = 3
+
+[node name="SettingsMenu" parent="UI" instance=ExtResource("14")]
+
+[node name="PauseMenu" parent="UI" instance=ExtResource("13")]

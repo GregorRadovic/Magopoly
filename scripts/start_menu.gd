@@ -7,16 +7,22 @@ extends Control
 @onready var host_game_button: Button = $VBox/Buttons/HostGameButton
 @onready var join_game_button: Button = $VBox/Buttons/JoinGameButton
 @onready var tutorial_button: Button = $VBox/Buttons/TutorialButton
+@onready var settings_button: Button = $VBox/Buttons/SettingsButton
 @onready var quit_button: Button = $VBox/Buttons/QuitButton
+@onready var settings_menu: PopupPanel = $SettingsMenu
+
+const SettingsMenuScript = preload("res://scripts/settings_menu.gd")
 
 
 func _ready() -> void:
 	# Coming back here means any previous online session is over.
 	Net.leave()
+	SettingsMenuScript.apply_saved()
 	local_game_button.pressed.connect(func(): _go("res://scenes/local_setup.tscn"))
 	host_game_button.pressed.connect(func(): _go("res://scenes/host_lobby.tscn"))
 	join_game_button.pressed.connect(func(): _go("res://scenes/join_menu.tscn"))
 	tutorial_button.pressed.connect(_start_tutorial)
+	settings_button.pressed.connect(settings_menu.open)
 	quit_button.pressed.connect(get_tree().quit)
 
 

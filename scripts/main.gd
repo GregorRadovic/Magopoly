@@ -218,8 +218,9 @@ signal board_space_picked(index: int)
 var dice_label: DiceSink = DiceSink.new()
 @onready var number_prompt: PopupPanel = $UI/NumberPrompt
 @onready var confirm_prompt: PopupPanel = $UI/ConfirmPrompt
-@onready var quit_confirm_prompt: PopupPanel = $UI/QuitConfirmPrompt
 @onready var info_prompt: PopupPanel = $UI/InfoPrompt
+@onready var pause_menu: Control = $UI/PauseMenu
+@onready var pause_settings_menu: PopupPanel = $UI/SettingsMenu
 @onready var property_card: PopupPanel = $UI/PropertyCard
 @onready var asset_card: PopupPanel = $UI/AssetCard
 @onready var player_picker: PopupPanel = $UI/PlayerPicker
@@ -289,7 +290,6 @@ var current_player: int = 0
 var _awaiting_end_turn: bool = false
 var _admin_die1: int = 0
 var free_parking_amount: int = 0
-var _quit_prompt_open: bool = false
 var _admin_picking_property: bool = false
 var _buying_house_or_unmortgaging: bool = false
 var _selling_house_or_mortgaging: bool = false
@@ -488,6 +488,9 @@ func _ready() -> void:
 	trader1_money_edit.text_changed.connect(_on_trade_money_changed)
 	trader2_money_edit.text_changed.connect(_on_trade_money_changed)
 	card_picker.zoom_requested.connect(spell_card.show_card)
+	pause_menu.set_settings_menu(pause_settings_menu)
+	pause_menu.quit_to_menu_requested.connect(_quit_to_main_menu)
+	pause_menu.quit_to_desktop_requested.connect(get_tree().quit)
 	board.space_clicked.connect(_on_space_clicked)
 	_build_log_markup()
 	game_log.meta_clicked.connect(_on_log_meta_clicked)
@@ -511,8 +514,15 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_cancel") and not _quit_prompt_open:
-		_confirm_quit()
+	if event.is_action_pressed("ui_cancel"):
+		if pause_menu.visible:
+			pause_menu.close()
+		else:
+			pause_menu.open()
+		return
+	# While the pause menu is up the game is frozen -- swallow every other key
+	# (S/B mode toggles, Space/1-4 pause keys) so nothing happens behind it.
+	if pause_menu.visible:
 		return
 	if not (event is InputEventKey and event.pressed and not event.echo):
 		return
@@ -567,13 +577,13 @@ func _try_local_pause(slot: int) -> void:
 		_toggle_pause_for_player(slot)
 
 
-func _confirm_quit() -> void:
-	_quit_prompt_open = true
-	quit_confirm_prompt.open("Are you sure you want to quit?")
-	var yes: bool = await quit_confirm_prompt.answered
-	_quit_prompt_open = false
-	if yes:
-		get_tree().quit()
+func _quit_to_main_menu() -> void:
+	if _returning_to_menu:
+		return
+	_returning_to_menu = true
+	if GameState.online:
+		Net.leave()
+	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
 
 
 # ============================================================================
@@ -646,6 +656,10 @@ func _end_tutorial() -> void:
 # Action steps otherwise let input through untouched.
 func _input(event: InputEvent) -> void:
 	if not _tutorial_active:
+		return
+	# The pause menu is a modal overlay -- let its buttons handle their own
+	# clicks instead of treating them as "advance the tutorial".
+	if pause_menu.visible:
 		return
 	if not (event is InputEventMouseButton and event.pressed):
 		return
