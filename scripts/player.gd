@@ -1,6 +1,8 @@
 extends Node2D
 
-const RADIUS: float = 15.0
+# Small enough that a full 8-marker cluster fits on one board space (see
+# main.gd's MARKER_OFFSETS).
+const RADIUS: float = 10.0
 const STARTING_MONEY: int = 1500
 
 var player_id: int = 0
@@ -13,6 +15,12 @@ var consecutive_doubles: int = 0
 var owned_property_indices: Array[int] = []
 var is_bankrupt: bool = false
 var is_ai: bool = false
+# A disconnected human whose seat a stripped-down "Placeholder AI" is holding
+# until they reconnect (see main.gd's _on_peer_gone / Net reconnect flow).
+# Always implies is_ai; the Placeholder AI only rolls, buys what it lands on,
+# and pays what it owes -- it skips the regular AI's house / trade / mortgage
+# upkeep. Cleared when the player reconnects.
+var is_placeholder_ai: bool = false
 # Spell names held in hand, one entry per copy (duplicates allowed, no limit).
 var spell_hand: Array[String] = []
 # Parallel to spell_hand: spell_revealed_to[i] is an Array[int] of the player

@@ -1,27 +1,32 @@
 extends Control
 
-# Host lobby: opens a server on entry, lets the host configure the three
-# non-host seats (Open for a remote player / Computer / Disabled), and starts
-# the game for everyone. Mirrors local_setup.gd's layout. See net.gd.
+# Host lobby: opens a server on entry, lets the host configure the non-host
+# seats (Open for a remote player / Computer / Disabled), and starts the game
+# for everyone. Mirrors local_setup.gd's layout. See net.gd.
 
 const KIND_LABELS: Array[String] = ["Open", "Computer", "Disabled"]
 const KIND_VALUES: Array[int] = [Net.Slot.OPEN, Net.Slot.COMPUTER, Net.Slot.DISABLED]
 const SLOT_COLORS: Array[Color] = [
-	Color(0.929, 0.106, 0.141), Color(0.2, 0.4, 0.85),
-	Color(0.2, 0.75, 0.3), Color(0.9, 0.8, 0.15),
+	Color(0.929, 0.106, 0.141), Color(0.2, 0.4, 0.85), Color(0.2, 0.75, 0.3), Color(0.9, 0.8, 0.15),
+	Color(0.6, 0.3, 0.8), Color(0.95, 0.55, 0.1), Color(0.15, 0.75, 0.8), Color(0.95, 0.45, 0.65),
 ]
+# Players past this can't use BlitzStart (not enough properties / spell cards
+# to deal everyone a full opening hand).
+const BLITZSTART_MAX_PLAYERS: int = 4
 
 @onready var status_label: Label = $VBox/StatusLabel
 @onready var address_value: LineEdit = $VBox/AddressRow/AddressValue
 @onready var copy_button: Button = $VBox/AddressRow/CopyButton
+@onready var slots_box: VBoxContainer = $VBox/SlotsScroll/Slots
 @onready var start_button: Button = $VBox/ButtonRow/StartButton
 @onready var back_button: Button = $VBox/ButtonRow/BackButton
 @onready var admin_checkbox: CheckBox = $VBox/OptionsRow/AdminModeCheckBox
 @onready var quickstart_checkbox: CheckBox = $VBox/OptionsRow/QuickstartModeCheckBox
 @onready var blitzstart_checkbox: CheckBox = $VBox/OptionsRow/BlitzstartModeCheckBox
-@onready var slot_rows: Array[HBoxContainer] = [
-	$VBox/Slots/SlotRow0, $VBox/Slots/SlotRow1, $VBox/Slots/SlotRow2, $VBox/Slots/SlotRow3,
-]
+@onready var blitzstart_limit_dialog: AcceptDialog = $BlitzStartLimitDialog
+
+# Per slot: {status: Label, option: OptionButton}
+var slot_widgets: Array[Dictionary] = []
 
 var _host_ok: bool = false
 
@@ -31,20 +36,10 @@ func _ready() -> void:
 
 	back_button.pressed.connect(_on_back)
 	copy_button.pressed.connect(_on_copy_pressed)
-	start_button.pressed.connect(func():
-		Net.start_game(admin_checkbox.button_pressed, quickstart_checkbox.button_pressed,
-			blitzstart_checkbox.button_pressed))
+	start_button.pressed.connect(_on_start_pressed)
 
-	for i in slot_rows.size():
-		var row: HBoxContainer = slot_rows[i]
-		(row.get_node("Label") as Label).add_theme_color_override("font_color", SLOT_COLORS[i])
-		var opt: OptionButton = row.get_node("KindOption")
-		if i == 0:
-			opt.visible = false
-			continue
-		for label in KIND_LABELS:
-			opt.add_item(label)
-		opt.item_selected.connect(_on_slot_kind_selected.bind(i))
+	for i in Net.SLOT_COUNT:
+		slot_widgets.append(_build_slot_row(i))
 
 	Net.my_name = "Host"
 	_host_ok = Net.host_game(Net.DEFAULT_PORT)
@@ -53,23 +48,54 @@ func _ready() -> void:
 		start_button.disabled = true
 		address_value.text = ""
 		copy_button.disabled = true
-		for row in slot_rows:
-			(row.get_node("KindOption") as OptionButton).disabled = true
+		for w in slot_widgets:
+			(w["option"] as OptionButton).disabled = true
 		return
 	address_value.text = _local_ip()
 	_refresh()
 
 
+func _build_slot_row(index: int) -> Dictionary:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 18)
+	slots_box.add_child(row)
+
+	var label := Label.new()
+	label.custom_minimum_size = Vector2(150, 0)
+	label.add_theme_font_size_override("font_size", 24)
+	label.add_theme_color_override("font_color", SLOT_COLORS[index])
+	label.text = "Player %d" % (index + 1)
+	row.add_child(label)
+
+	var status := Label.new()
+	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status.add_theme_font_size_override("font_size", 22)
+	status.text = "-"
+	row.add_child(status)
+
+	var opt := OptionButton.new()
+	opt.custom_minimum_size = Vector2(220, 44)
+	opt.add_theme_font_size_override("font_size", 20)
+	if index == 0:
+		opt.visible = false  # slot 0 is always the host
+	else:
+		for kind_label in KIND_LABELS:
+			opt.add_item(kind_label)
+		opt.item_selected.connect(_on_slot_kind_selected.bind(index))
+	row.add_child(opt)
+
+	return {"status": status, "option": opt}
+
+
 func _refresh() -> void:
 	if not _host_ok:
 		return
-	for i in slot_rows.size():
-		var row: HBoxContainer = slot_rows[i]
+	for i in slot_widgets.size():
 		var kind: int = Net.slots[i]
-		(row.get_node("Status") as Label).text = _slot_status_text(kind)
+		(slot_widgets[i]["status"] as Label).text = _slot_status_text(kind)
 		if i == 0:
 			continue
-		var opt: OptionButton = row.get_node("KindOption")
+		var opt: OptionButton = slot_widgets[i]["option"]
 		var editable: bool = kind != Net.Slot.TAKEN
 		opt.disabled = not editable
 		if editable:
@@ -78,6 +104,14 @@ func _refresh() -> void:
 
 	start_button.disabled = Net.active_slot_count() < 2
 	status_label.text = "Port %d. Start when your players have joined." % Net.DEFAULT_PORT
+
+
+func _on_start_pressed() -> void:
+	if blitzstart_checkbox.button_pressed and Net.active_slot_count() > BLITZSTART_MAX_PLAYERS:
+		blitzstart_limit_dialog.popup_centered()
+		return
+	Net.start_game(admin_checkbox.button_pressed, quickstart_checkbox.button_pressed,
+		blitzstart_checkbox.button_pressed)
 
 
 func _on_copy_pressed() -> void:

@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/start_menu.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/settings_menu.tscn" id="2"]
 
 [node name="StartMenu" type="Control"]
 layout_mode = 3
@@ -123,9 +124,18 @@ custom_minimum_size = Vector2(360, 76)
 theme_override_font_sizes/font_size = 32
 text = "Tutorial"
 
+[node name="SettingsButton" type="Button" parent="VBox/Buttons"]
+layout_mode = 2
+size_flags_horizontal = 4
+custom_minimum_size = Vector2(360, 76)
+theme_override_font_sizes/font_size = 32
+text = "Settings"
+
 [node name="QuitButton" type="Button" parent="VBox/Buttons"]
 layout_mode = 2
 size_flags_horizontal = 4
 custom_minimum_size = Vector2(360, 76)
 theme_override_font_sizes/font_size = 32
 text = "Quit"
+
+[node name="SettingsMenu" parent="." instance=ExtResource("2")]

@@ -1,7 +1,9 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/dice_roller.gd" id="12"]
+[ext_resource type="PackedScene" path="res://scenes/pause_menu.tscn" id="13"]
+[ext_resource type="PackedScene" path="res://scenes/settings_menu.tscn" id="14"]
 [ext_resource type="PackedScene" path="res://scenes/board.tscn" id="2"]
 [ext_resource type="PackedScene" path="res://scenes/number_prompt.tscn" id="3"]
 [ext_resource type="PackedScene" path="res://scenes/confirm_prompt.tscn" id="4"]
@@ -242,8 +244,6 @@ text = "(click anywhere to continue)"
 
 [node name="ConfirmPrompt" parent="UI" instance=ExtResource("4")]
 
-[node name="QuitConfirmPrompt" parent="UI" instance=ExtResource("4")]
-
 [node name="InfoPrompt" parent="UI" instance=ExtResource("5")]
 
 [node name="PropertyCard" parent="UI" instance=ExtResource("6")]
@@ -276,97 +276,12 @@ text = "Players"
 [node name="FreeParkingLabel" type="Label" parent="UI/PlayersPanel/VBox"]
 text = "Free Parking: $0"
 
-[node name="HSeparator0" type="HSeparator" parent="UI/PlayersPanel/VBox"]
+[node name="PlayersScroll" type="ScrollContainer" parent="UI/PlayersPanel/VBox"]
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
 
-[node name="Player0" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
-
-[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player0"]
-autowrap_mode = 2
-text = "Player 1 -- $1500"
-
-[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player0"]
-theme_override_constants/separation = 10
-
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
+[node name="PlayerList" type="VBoxContainer" parent="UI/PlayersPanel/VBox/PlayersScroll"]
 size_flags_horizontal = 3
-
-[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
-
-[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
-
-[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player0/AssetsRow"]
-
-[node name="HSeparator1" type="HSeparator" parent="UI/PlayersPanel/VBox"]
-
-[node name="Player1" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
-
-[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player1"]
-autowrap_mode = 2
-text = "Player 2 -- $1500"
-
-[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player1"]
-theme_override_constants/separation = 10
-
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
-
-[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
-
-[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player1/AssetsRow"]
-
-[node name="HSeparator2" type="HSeparator" parent="UI/PlayersPanel/VBox"]
-
-[node name="Player2" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
-
-[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player2"]
-autowrap_mode = 2
-text = "Player 3 -- $1500"
-
-[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player2"]
-theme_override_constants/separation = 10
-
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
-
-[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
-
-[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player2/AssetsRow"]
-
-[node name="HSeparator3" type="HSeparator" parent="UI/PlayersPanel/VBox"]
-
-[node name="Player3" type="VBoxContainer" parent="UI/PlayersPanel/VBox"]
-
-[node name="HeaderLabel" type="Label" parent="UI/PlayersPanel/VBox/Player3"]
-autowrap_mode = 2
-text = "Player 4 -- $1500"
-
-[node name="AssetsRow" type="HBoxContainer" parent="UI/PlayersPanel/VBox/Player3"]
-theme_override_constants/separation = 10
-
-[node name="PropertiesFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AssetsVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
-
-[node name="SpellsFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
-size_flags_horizontal = 3
-
-[node name="AttunementVSeparator" type="VSeparator" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
-
-[node name="AttunementFlow" type="HFlowContainer" parent="UI/PlayersPanel/VBox/Player3/AssetsRow"]
 
 [node name="HSeparatorTrade" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 visible = false
@@ -459,3 +374,7 @@ text = "Spells being cast -- rightmost resolves first"
 [node name="SpellCastStack" type="Control" parent="UI/PlayersPanel/VBox/SpellCastDisplay"]
 custom_minimum_size = Vector2(0, 260)
 size_flags_horizontal = 3
+
+[node name="SettingsMenu" parent="UI" instance=ExtResource("14")]
+
+[node name="PauseMenu" parent="UI" instance=ExtResource("13")]

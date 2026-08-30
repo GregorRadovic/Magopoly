@@ -7,14 +7,20 @@ var admin_mode: bool = false
 
 enum PlayerType { HUMAN, DISABLED, COMPUTER }
 
-# One entry per player slot (always 4, regardless of how many are actually
-# in play) -- Disabled slots are spawned but immediately treated as if
-# they'd already gone bankrupt, and Computer slots play themselves. The Start
-# Menu overwrites this before loading main.tscn; this default only matters
-# if main.tscn is ever run directly. Mirrors start_menu.gd's own default
-# (P1 Human, P2 Computer, P3/P4 Disabled).
+# The most player slots the game supports. All the per-player containers
+# (player_types, slot_peer, main.gd's colour/name/marker tables) are sized to
+# this; a game with fewer real players just fills the rest with Disabled.
+const MAX_PLAYERS: int = 8
+
+# One entry per player slot (always MAX_PLAYERS, regardless of how many are
+# actually in play) -- Disabled slots are spawned but immediately treated as
+# if they'd already gone bankrupt, and Computer slots play themselves. The
+# Start Menu overwrites this before loading main.tscn; this default only
+# matters if main.tscn is ever run directly (P1 Human, P2 Computer, rest
+# Disabled).
 var player_types: Array[PlayerType] = [
 	PlayerType.HUMAN, PlayerType.COMPUTER, PlayerType.DISABLED, PlayerType.DISABLED,
+	PlayerType.DISABLED, PlayerType.DISABLED, PlayerType.DISABLED, PlayerType.DISABLED,
 ]
 
 # If true, every active player starts with 3 random properties and 2 random
@@ -41,7 +47,7 @@ var online: bool = false
 # player_id -> the multiplayer peer id controlling that slot (1 = host,
 # >1 = a client, 0 = an AI / disabled slot). Mirrors Net.slot_peer at the
 # moment the game started.
-var slot_peer: Array[int] = [1, 0, 0, 0]
+var slot_peer: Array[int] = [1, 0, 0, 0, 0, 0, 0, 0]
 # This machine's own multiplayer peer id (1 on the host).
 var local_peer_id: int = 1
 
