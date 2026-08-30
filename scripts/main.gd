@@ -60,8 +60,9 @@ const REVEAL_INDEX: int = -50
 
 # How long a response window (see _ensure_response_window()) lasts before
 # automatically continuing, if nobody pauses it (or extends it by casting
-# another spell in response).
-const RESPONSE_WINDOW_SECONDS: float = 2.0
+# another spell in response). Doubled online (see _response_window_seconds())
+# to cover the round trip of a remote player's pause.
+const RESPONSE_WINDOW_SECONDS: float = 1.5
 
 # Up to GameState.MAX_PLAYERS (8) of each. Colours are the four classic
 # player colours plus four more that still read clearly on the board.
@@ -130,9 +131,12 @@ const TERMINUS_FIVE_RAILROAD_RENT: int = 300
 #   pick_level / pick_target -- Migraine's two pickers
 #   roll             -- click the Roll button
 #   press_space      -- press Space to pause the roll's response window
-#   resolve_manastone / resolve_adrenaline -- press Space to resolve the top of
-#                       the spell stack; unpause_roll -- press Space to unpause
-#                       once the stack is empty (see _tutorial_handle_space)
+#   await_manastone / await_adrenaline -- no input: the game un-pauses and the
+#                       open reaction window runs down so that spell resolves
+#                       on its own (advanced by _tutorial_on_spell_resolved)
+#   pause_after_manastone -- press Space to pause the fresh window that opens
+#                       once Manastone has resolved; missing it re-opens the
+#                       window and re-prompts (see _ensure_response_window)
 #   buy_oriental     -- click Yes on the Oriental Avenue buy prompt
 #   end_turn         -- click End Turn
 const TUTORIAL_STEPS: Array[Dictionary] = [
@@ -159,12 +163,12 @@ const TUTORIAL_STEPS: Array[Dictionary] = [
 	{"text": "Manastones are a special type of card that help smooth out your mana. They get stronger if you own utilities, but even without them, you can still cast them at level 0."},
 	{"text": "Cast Manastone at level 0 now, adding 1 Green Attunement.", "action": "cast_manastone"},
 	{"text": "Spells go on the stack when cast, where they wait to resolve. Players can cast other spells in response."},
-	{"text": "Currently that's not what we want; we want Manastone to resolve first so we can play Adrenaline at a higher level."},
-	{"text": "Press spacebar once to resolve the spell.", "action": "resolve_manastone"},
-	{"text": "Good job. Note that pressing spacebar when there's no spells on the stack will unpause, and you'll miss your chance to cast additional spells in this window."},
-	{"text": "Now cast Adrenaline at level 2 to add 2 to your roll.", "action": "cast_adrenaline"},
-	{"text": "Remember to press Spacebar again to let Adrenaline resolve.", "action": "resolve_adrenaline"},
-	{"text": "Now that the stack is empty, press Spacebar one last time to unpause so that the game can proceed.", "action": "unpause_roll"},
+	{"text": "You could pause now to cast a spell in response to Manastone, but we want to let it resolve first to give you your attunement."},
+	{"text": "Wait for the Manastone to resolve...", "action": "await_manastone"},
+	{"text": "Press Spacebar to pause again.", "action": "pause_after_manastone"},
+	{"text": "Great! Now you have all the attunement you need."},
+	{"text": "Cast Adrenaline at level 2.", "action": "cast_adrenaline"},
+	{"text": "Wait for Adrenaline to resolve...", "action": "await_adrenaline"},
 	{"text": "Perfect! Now, instead of landing on a tax space, you can buy Oriental Avenue to secure your monopoly.", "action": "buy_oriental"},
 	{"text": "One last thing: You'll notice you still have your temporary attunement. That lasts until the start of your next turn."},
 	{"text": "Let's make use of it before it goes away. Cast Sinkhole on your opponent.", "action": "cast_sinkhole"},
@@ -179,6 +183,9 @@ const TUTORIAL_STEPS: Array[Dictionary] = [
 # window; the next click jumps back to the "roll" step. Not a TUTORIAL_STEPS
 # entry so it never lands in the linear flow.
 const TUTORIAL_MISSED_TEXT: String = "Darn, you missed it! Let's rewind and try that again."
+# Shown when the player misses the "pause_after_manastone" window; the window
+# just re-opens and this replaces the prompt (see _ensure_response_window).
+const TUTORIAL_MISSED_PAUSE_TEXT: String = "You missed it! We'll give you another chance. Press Spacebar to pause again."
 
 # The fixed opening hands for Tutorial mode -- the script relies on exactly
 # these cards. P1 (the human) gets two sky-blue properties and five spells;
@@ -305,6 +312,10 @@ var _response_window_open: bool = false
 # their own entry.
 var _response_window_paused_by: Array[bool] = [false, false, false, false, false, false, false, false]
 var _window_deadline_msec: int = 0
+# True only while _ensure_response_window() is actually resolving a spell off
+# the stack (between reaction windows). Pausing is blocked during this -- the
+# resolution itself isn't interruptible.
+var _resolving_stack: bool = false
 # True for the whole time a roll is "in flight" -- from right after it's
 # shown until movement actually happens -- so Instant spells timed to a roll
 # (e.g. T3 Escape Spell) know a roll is actually what's being responded to,
@@ -351,10 +362,10 @@ func _update_wizard_vision() -> void:
 # "spell_name": String, "level": int, "display_name": String, "resolve":
 # Callable}. A spell is pushed here the moment it's cast (having already
 # left the caster's hand and picked whatever targets it needs) and popped
-# LIFO -- last cast, first resolved -- once the response window that
-# followed it finally closes. Countering a spell (T2 Response Spell Level 1,
-# or Counterbalance matching its own level) just removes its entry before
-# it's ever popped, so it never reaches _resolve_spell_stack()'s own
+# LIFO -- last cast, first resolved -- one entry per elapsed reaction window
+# (see _ensure_response_window). Countering a spell (T2 Response Spell Level
+# 1, or Counterbalance matching its own level) just removes its entry before
+# it's ever popped, so it never reaches _resolve_top_of_stack()'s own
 # shuffle-back -- _resolve_counter_spell() shuffles it back into
 # _spell_deck itself instead. See _finish_cast().
 var _spell_stack: Array[Dictionary] = []
@@ -686,6 +697,17 @@ func _tutorial_apply_current_step() -> void:
 	tutorial_bubble.visible = true
 	tutorial_bubble_hint.visible = _tutorial_expected_action == ""
 
+	# The "await a spell to resolve" steps just un-pause the player and re-arm
+	# the open reaction window's countdown, so _ensure_response_window()'s loop
+	# runs it down and resolves the spell on its own (which then advances the
+	# step via _tutorial_on_spell_resolved).
+	if _tutorial_expected_action in ["await_manastone", "await_adrenaline"]:
+		if _response_window_paused_by.size() > 0:
+			_response_window_paused_by[0] = false
+		_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
+		_refresh_action_buttons()
+		_update_player_panels()
+
 
 func _tutorial_find_step(tag: String) -> int:
 	for i in TUTORIAL_STEPS.size():
@@ -834,9 +856,8 @@ func _tutorial_right_click_spell() -> String:
 	return ""
 
 
-# Called from _finish_cast once a tutorial-driven spell is on the stack (the
-# roll-window casts -- Manastone, Adrenaline -- which the player then resolves
-# by pressing Space) or has already resolved (an ordinary turn cast).
+# Called from _finish_cast once a tutorial-driven spell has been put on the
+# stack (or, for an ordinary turn cast, already resolved by then).
 func _tutorial_on_spell_finished(spell_name: String) -> void:
 	match _tutorial_expected_action:
 		"cast_manastone":
@@ -844,43 +865,42 @@ func _tutorial_on_spell_finished(spell_name: String) -> void:
 				_tutorial_advance()  # -> "Spells go on the stack when cast..."
 		"cast_adrenaline":
 			if spell_name == "Adrenaline":
-				_tutorial_advance()  # -> "Remember to press Spacebar again..."
+				_tutorial_advance()  # -> "Wait for Adrenaline to resolve..."
 		"cast_sinkhole":
 			if spell_name == "Sinkhole":
 				_tutorial_advance()  # -> "Great job!"
 
 
-# Space during the tutorial: pause the roll window, or resolve the top of the
-# spell stack. Returns true if it handled the press (else the caller toasts).
+# Called from _ensure_response_window() right after a spell has come off the
+# stack -- drives the "await_*" steps, which just wait for their spell to
+# resolve on its own.
+func _tutorial_on_spell_resolved(spell_name: String) -> void:
+	match _tutorial_expected_action:
+		"await_manastone":
+			if spell_name == "Manastone":
+				_tutorial_advance()  # -> "Press Spacebar to pause again."
+		"await_adrenaline":
+			if spell_name == "Adrenaline":
+				_tutorial_advance()  # -> "Perfect! ...buy Oriental Avenue"
+
+
+# Space during the tutorial: pause a reaction window. Returns true if it
+# handled the press (else the caller toasts "Follow the instructions!").
 func _tutorial_handle_space() -> bool:
-	if not _response_window_open:
+	if not _response_window_open or _response_window_paused_by[0]:
 		return false
 	match _tutorial_expected_action:
 		"press_space":
-			if not _response_window_paused_by[0]:
-				_toggle_pause_for_player(0)
-				if _response_window_paused_by[0]:
-					_tutorial_advance()  # -> "Space Bar is how you pause the game..."
-				return true
-		"resolve_manastone", "resolve_adrenaline":
-			if _response_window_paused_by[0] and not _spell_stack.is_empty():
-				_tutorial_resolve_stack_via_space()
-				return true
-		"unpause_roll":
-			if _response_window_paused_by[0] and _spell_stack.is_empty():
-				_toggle_pause_for_player(0)  # unpause for real
-				_window_deadline_msec = 0    # ...and close the window now
-				_tutorial_advance()  # -> "...buy Oriental Avenue..."
-				return true
+			_toggle_pause_for_player(0)
+			if _response_window_paused_by[0]:
+				_tutorial_advance()  # -> "Space Bar is how you pause the game..."
+			return true
+		"pause_after_manastone":
+			_toggle_pause_for_player(0)
+			if _response_window_paused_by[0]:
+				_tutorial_advance()  # -> "Great! Now you have all the attunement you need."
+			return true
 	return false
-
-
-func _tutorial_resolve_stack_via_space() -> void:
-	# _toggle_pause_for_player, while paused with a non-empty stack, resolves
-	# just the top entry and re-pauses -- exactly what we want here.
-	await _toggle_pause_for_player(0)
-	_update_player_panels()
-	_tutorial_advance()
 
 
 func _tutorial_rewind_roll() -> void:
@@ -1953,15 +1973,23 @@ func _ai_house_check(player: Node2D) -> void:
 # else at the table who might still want their own turn to react).
 #
 # Only the call that actually *opens* the window (finds it not already
-# open) waits here and resolves the stack once it closes -- a call that
-# arrives while it's already open (e.g. a second spell cast in response to
-# the first) just pushes _window_deadline_msec back out, extending the
-# window the first call is waiting on, and returns immediately.
+# open) waits here and drives resolution -- a call that arrives while it's
+# already open (e.g. a spell cast in response to the first) just pushes
+# _window_deadline_msec back out, extending the window the first call is
+# waiting on, and returns immediately.
+#
+# Resolution is deliberately hands-off: a spell comes off the stack only when
+# the window fully elapses with nobody paused (no player can force it by
+# pausing/unpausing). Each spell going onto the stack opens a fresh window
+# (see _finish_cast, which also un-pauses the caster -- their reaction is
+# spent), and while a roll is still in flight each spell coming *off* the
+# stack opens another one, so everyone gets a chance to answer every spell
+# and to react to what each one did before the roll finally resolves.
 func _response_window_seconds() -> float:
 	if _tutorial_active:
-		# A generous window for the "Quick! Press Space Bar!" moment; snappier
-		# for the tutorial's own spell resolutions (Migraine, Sinkhole).
-		return 5.0 if _tutorial_expected_action == "press_space" else 1.5
+		# A generous window for the moments the player has to react to; snappier
+		# for the tutorial's own auto-resolutions (Migraine, Manastone, etc.).
+		return 5.0 if _tutorial_expected_action in ["press_space", "pause_after_manastone"] else 1.5
 	# Online, widen the window so a remote player's pause has time to reach
 	# the host before the countdown expires.
 	return RESPONSE_WINDOW_SECONDS * 2.0 if GameState.online else RESPONSE_WINDOW_SECONDS
@@ -1970,7 +1998,7 @@ func _response_window_seconds() -> float:
 func _ensure_response_window() -> void:
 	var seconds: float = _response_window_seconds()
 	_window_deadline_msec = Time.get_ticks_msec() + int(seconds * 1000.0)
-	if _response_window_open:
+	if _response_window_open or _resolving_stack:
 		return
 	_response_window_open = true
 	_response_window_paused_by.resize(players.size())
@@ -1978,33 +2006,73 @@ func _ensure_response_window() -> void:
 	_refresh_action_buttons()
 	dice_label.text += "\n(Press Space or your player number within %ds to pause from that player's perspective and react with an Instant spell.)" % int(seconds)
 
-	# _casting_spell also holds the window open: Reveal and Burn-for-Attunement
-	# are pickable straight off a spell card without pausing first, so without
-	# this the countdown could expire and the roll resolve while
-	# _begin_spell_cast is still suspended in its own pickers -- at which point
-	# _prompt_slot still points at the caster, and the rolling player's buy
-	# prompt gets misrouted to them (see _prompt_target / _ask_buy_property).
-	while _response_window_paused_by.has(true) or _casting_spell or Time.get_ticks_msec() < _window_deadline_msec:
-		await get_tree().process_frame
+	# window -> resolve one spell -> (maybe) another window -> ... until the
+	# stack is empty and there's nothing left to react to.
+	while true:
+		# _casting_spell also holds the window open: Reveal and
+		# Burn-for-Attunement are pickable straight off a spell card without
+		# pausing first, so without this the countdown could expire and the
+		# roll resolve while _begin_spell_cast is still suspended in its own
+		# pickers -- at which point _prompt_slot still points at the caster and
+		# the rolling player's buy prompt gets misrouted to them (see
+		# _prompt_target / _ask_buy_property).
+		while _response_window_paused_by.has(true) or _casting_spell or Time.get_ticks_msec() < _window_deadline_msec:
+			await get_tree().process_frame
 
-	_response_window_open = false
-	_refresh_action_buttons()
-	await _resolve_spell_stack()
+		_response_window_open = false
+		_refresh_action_buttons()
+		if _spell_stack.is_empty():
+			# Tutorial: the player was meant to pause this window and didn't --
+			# don't let the roll proceed, re-open the window and re-prompt.
+			if _tutorial_active and _tutorial_expected_action == "pause_after_manastone":
+				tutorial_bubble_label.text = TUTORIAL_MISSED_PAUSE_TEXT
+				_response_window_open = true
+				_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
+				_response_window_paused_by.fill(false)
+				_refresh_action_buttons()
+				continue
+			break
+
+		_resolving_stack = true
+		var resolved_name: String = await _resolve_top_of_stack()
+		_resolving_stack = false
+		_update_player_panels()
+		# A spell cast to earn money out of a raise-money window may have done it.
+		_maybe_resolve_debt()
+		if _tutorial_active:
+			_tutorial_on_spell_resolved(resolved_name)
+
+		# Nothing more to answer -- the stack is empty and no roll is waiting on
+		# a final reaction to what just resolved.
+		if _spell_stack.is_empty() and not _roll_in_flight:
+			break
+
+		# Fresh reaction window: more spells still on the stack to answer, or a
+		# roll still in flight that the effect that just resolved could be
+		# reacted to -- in the tutorial this includes the window after Adrenaline
+		# resolves, kept so the player sees the response window a real game
+		# would give them here even though there's nothing left to do.
+		_response_window_open = true
+		_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
+		_response_window_paused_by.fill(false)
+		_refresh_action_buttons()
+		if not _tutorial_active:
+			dice_label.text += "\n(Reaction window -- press Space or your player number to respond.)"
+
+	_update_player_panels()
+	_maybe_resolve_debt()
 
 
-# Pops and resolves just the top of _spell_stack (LIFO) -- shared by
-# _resolve_spell_stack() (draining the whole thing once the window closes)
-# and _toggle_pause_for_player() (resolving one at a time when a player
-# unpauses mid-stack, so they can react to what it just did before the
-# window can actually close -- see there for why). Countering a spell (T2
-# Response Spell, Level 1) removes its entry before it's ever popped here,
-# so it's simply skipped -- per "countering negates the effect and discards
-# it", its own resolve never runs, but _resolve_t2_counter() shuffles it
-# back into the deck itself, same as any spell that resolves normally here
-# does.
-func _resolve_top_of_stack() -> void:
+# Pops and resolves just the top of _spell_stack (LIFO), returning its spell
+# name (or "" if the stack was empty) -- driven by _ensure_response_window()
+# once a reaction window has fully elapsed. Countering a spell (T2 Response
+# Spell, Level 1) removes its entry before it's ever popped here, so it's
+# simply skipped -- per "countering negates the effect and discards it", its
+# own resolve never runs, but _resolve_t2_counter() shuffles it back into the
+# deck itself, same as any spell that resolves normally here does.
+func _resolve_top_of_stack() -> String:
 	if _spell_stack.is_empty():
-		return
+		return ""
 	var entry: Dictionary = _spell_stack.pop_back()
 	# The card leaves the visual stack the moment it starts resolving.
 	_update_spell_stack_display()
@@ -2012,14 +2080,7 @@ func _resolve_top_of_stack() -> void:
 	if resolve.is_valid():
 		await resolve.call()
 		_return_spell_to_deck(entry["spell_name"])
-
-
-func _resolve_spell_stack() -> void:
-	while not _spell_stack.is_empty():
-		await _resolve_top_of_stack()
-	_update_player_panels()
-	# A spell cast to earn money out of a raise-money window may have done it.
-	_maybe_resolve_debt()
+	return entry.get("spell_name", "")
 
 
 # Spell names on the stack, bottom (oldest) -> top (newest / resolves first).
@@ -2092,7 +2153,7 @@ func _queue_spell_return_to_hand(caster: Node2D, spell_name: String) -> void:
 
 # For each spell name `player` queued via _queue_spell_return_to_hand() this
 # turn, pulls one copy back out of the shared deck (it's already in there --
-# _resolve_spell_stack() shuffled it back in right after resolving, same as
+# _resolve_top_of_stack() shuffled it back in right after resolving, same as
 # any other spell) and into their hand, bypassing a normal random draw.
 func _process_pending_spell_returns(player: Node2D) -> void:
 	for spell_name in player.pending_return_spells:
@@ -2104,31 +2165,16 @@ func _process_pending_spell_returns(player: Node2D) -> void:
 
 
 # Handler for the response window above, per player_index (0 = P1, paused by
-# either Space or "1"; 1-3 = P2-P4, paused by "2"-"4" -- see
-# _unhandled_input()). Ignored while a spell's own cast prompts are up
-# (_casting_spell) so resuming mid-cast can't yank the popup out from under
-# whoever's answering it.
+# either Space or "1"; "2".."8" pause 1..7 -- see _unhandled_input()). Ignored
+# while a spell's own cast prompts are up (_casting_spell) or while a spell is
+# actually resolving (_resolving_stack) so nothing can yank a popup out or
+# interrupt a resolution.
 #
-# Unpausing while one or more spells are still on the stack doesn't actually
-# let the window close -- it resolves just the top of the stack (LIFO, same
-# as normal resolution order) and immediately re-pauses from this same
-# player's perspective instead. Without this, there'd be no way to cast a
-# spell, wait for it to resolve, and react to the result (e.g. burn a
-# Manastone for Attunement, then use it to cast a roll-modifying spell) --
-# unpausing to let the first one resolve would let the *whole* window close
-# before the second could ever be cast. Repeated presses drain the stack one
-# spell at a time; once it's empty, a press finally unpauses for real.
+# Just a plain toggle: a spell comes off the stack only when the window
+# elapses on its own (see _ensure_response_window), so unpausing here can't
+# force resolution -- it only stops holding the window open.
 func _toggle_pause_for_player(player_index: int) -> void:
-	if not _response_window_open or _casting_spell:
-		return
-	if _response_window_paused_by[player_index] and not _spell_stack.is_empty():
-		await _resolve_top_of_stack()
-		if not _response_window_open:
-			return
-		_response_window_paused_by[player_index] = true
-		dice_label.text += "\nPaused from %s's perspective -- press %d to resume." % [PLAYER_NAMES[player_index], player_index + 1]
-		_refresh_action_buttons()
-		_update_player_panels()
+	if not _response_window_open or _casting_spell or _resolving_stack:
 		return
 	_response_window_paused_by[player_index] = not _response_window_paused_by[player_index]
 	if _response_window_paused_by[player_index]:
@@ -2253,15 +2299,21 @@ func _perform_roll(die1: int, die2: int) -> void:
 # they're still in the game, so a rolled double still earns another go.
 func _move_player(player: Node2D, roll: int) -> bool:
 	var new_space_raw: int = player.current_space + roll
-	var passed_go: bool = new_space_raw >= board.TOTAL_SPACES
-	if passed_go:
-		player.money += 200
-		var drawn_spell: String = _draw_spell(player)
-		if drawn_spell != "":
-			dice_label.text += "\nYou passed Go! (+200 Money, drew %s)" % drawn_spell
-		else:
-			dice_label.text += "\nYou passed Go! (+200 Money)"
-		_log("%s passed Go (+$200)." % PLAYER_NAMES[player.player_id])
+	# A big enough roll (roll-multiplier spells like Unstable Portal) can carry
+	# a player past Go more than once in one move -- $200 and a spell draw for
+	# each pass.
+	var go_passes: int = new_space_raw / board.TOTAL_SPACES if new_space_raw > 0 else 0
+	if go_passes > 0:
+		player.money += 200 * go_passes
+		var drawn: Array[String] = []
+		for _i in go_passes:
+			var s: String = _draw_spell(player)
+			if s != "":
+				drawn.append(s)
+		var times: String = "" if go_passes == 1 else " %d times" % go_passes
+		var draw_note: String = "" if drawn.is_empty() else (", drew %s" % ", ".join(drawn))
+		dice_label.text += "\nYou passed Go%s! (+$%d Money%s)" % [times, 200 * go_passes, draw_note]
+		_log("%s passed Go%s (+$%d)." % [PLAYER_NAMES[player.player_id], times, 200 * go_passes])
 		_update_player_panels()
 
 	player.current_space = new_space_raw % board.TOTAL_SPACES
@@ -4129,8 +4181,8 @@ func _prepare_spell_cast(caster: Node2D, hand_index: int, spell_name: String, le
 # position -- a prepare step for a spell like Art of the Deal may have
 # already shifted the hand around by giving a *different* card away before
 # this runs, which would leave a captured index stale), pushes `resolve`
-# onto the stack, and opens (or, if one's already running, just extends)
-# the response window for it -- see _ensure_response_window().
+# onto the stack, and opens (or, if one's already running, just extends and
+# re-arms) the response window for it -- see _ensure_response_window().
 func _finish_cast(caster: Node2D, spell_name: String, level: int, resolve: Callable) -> void:
 	_spell_remove_first(caster, spell_name)
 	var stack_id: int = _next_stack_id
@@ -4141,6 +4193,11 @@ func _finish_cast(caster: Node2D, spell_name: String, level: int, resolve: Calla
 	var target_suffix: String = "" if _pending_spell_target == "" else (" targeting %s" % _pending_spell_target)
 	_pending_spell_target = ""
 	_log("%s cast %s at Level %d%s." % [PLAYER_NAMES[caster.player_id], spell_name, level, target_suffix])
+	# The caster's reaction is spent -- un-pause them so the fresh window that
+	# opens now is a clean chance for anyone (them included) to answer this
+	# cast. The tutorial keeps its player paused and steps the stack by hand.
+	if not _tutorial_active and caster.player_id >= 0 and caster.player_id < _response_window_paused_by.size():
+		_response_window_paused_by[caster.player_id] = false
 	_update_player_panels()
 	await _ensure_response_window()
 	if _tutorial_active:
