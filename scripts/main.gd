@@ -3165,6 +3165,13 @@ func _bankrupt_player(player: Node2D, creditor: Node2D) -> void:
 			space.owner_id = -1
 			space.is_mortgaged = false
 
+	# Every spell still in the eliminated player's hand goes back to the deck
+	# (not to the creditor) -- revealed status is dropped with it.
+	for spell_name in player.spell_hand:
+		_return_spell_to_deck(spell_name)
+	player.spell_hand.clear()
+	player.spell_revealed_to.clear()
+
 	player.money = 0
 	player.owned_property_indices.clear()
 	player.is_bankrupt = true
@@ -3187,18 +3194,39 @@ func _forfeit_to_bankruptcy(player: Node2D, creditor: Node2D) -> void:
 
 
 # Called after a bankruptcy resolves. If it left exactly one player still in
-# the game, announce them as the winner. Nothing further is done about it --
-# the game just keeps working normally from here (only one active player
-# means turns will simply keep cycling back to them); players are expected
-# to close and start a new game if they want to play again.
+# the game, that player wins and the game ends -- everyone is shown the
+# result and returned to the Main Menu.
 func _check_for_winner() -> void:
 	var remaining: Array[Node2D] = []
 	for player in players:
 		if not player.is_bankrupt:
 			remaining.append(player)
-	if remaining.size() == 1:
-		dice_label.text += "\n%s wins!" % PLAYER_NAMES[remaining[0].player_id]
-		_log("%s wins!" % PLAYER_NAMES[remaining[0].player_id], PLAYER_COLORS[remaining[0].player_id])
+	if remaining.size() != 1:
+		return
+	var winner_id: int = remaining[0].player_id
+	dice_label.text += "\n%s wins!" % PLAYER_NAMES[winner_id]
+	_log("%s wins!" % PLAYER_NAMES[winner_id], PLAYER_COLORS[winner_id])
+	# Runs on the authority; tell every client too (call_local covers the host).
+	if GameState.online:
+		_net_game_over.rpc(winner_id)
+	else:
+		_end_game(winner_id)
+
+
+@rpc("authority", "call_local", "reliable")
+func _net_game_over(winner_id: int) -> void:
+	_end_game(winner_id)
+
+
+func _end_game(winner_id: int) -> void:
+	if _returning_to_menu:
+		return
+	_returning_to_menu = true
+	if GameState.online:
+		Net.leave()
+	info_prompt.open("%s wins! Returning to the menu." % PLAYER_NAMES[winner_id])
+	await info_prompt.closed
+	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
 
 
 func _on_declare_bankruptcy_pressed() -> void:
@@ -4856,9 +4884,9 @@ func _resolve_threaten(caster: Node2D, level: int, space_index: int, amount: int
 
 
 # Royal Aid: picks up to `count` mortgaged properties (interactively,
-# stopping early if there's nothing left eligible/affordable, or the caster
-# backs out of a pick) -- the actual unmortgaging (and paying for it) is
-# deferred to resolution like any other spell effect.
+# stopping early if there's nothing left eligible, or the caster backs out of
+# a pick). Unmortgaging is FREE -- no payment, at pick time or resolution --
+# and is deferred to resolution like any other spell effect.
 func _prepare_royal_aid(caster: Node2D, level: int) -> Callable:
 	var count: int = SpellData.SPELLS["Royal Aid"]["levels"][level].get("count", 1)
 	var chosen: Array[int] = []
@@ -4867,17 +4895,13 @@ func _prepare_royal_aid(caster: Node2D, level: int) -> Callable:
 		for space_index in caster.owned_property_indices:
 			if space_index in chosen:
 				continue
-			var space: Node2D = board.spaces[space_index]
-			if not space.is_mortgaged:
-				continue
-			var cost: int = _unmortgage_value(_terminus_aware_price(space_index))
-			if cost > caster.money:
+			if not board.spaces[space_index].is_mortgaged:
 				continue
 			var display_name: String = "Terminus Station" if space_index == 0 else board.get_space_info(space_index).get("name", "")
-			entries.append({"index": space_index, "name": "%s ($%d)" % [display_name, cost], "color": Color.WHITE})
+			entries.append({"index": space_index, "name": display_name, "color": Color.WHITE})
 		if entries.is_empty():
 			break
-		_pp_open("Royal Aid: choose a mortgaged property to unmortgage (%d/%d)." % [chosen.size() + 1, count], entries)
+		_pp_open("Royal Aid: choose a mortgaged property to unmortgage for free (%d/%d)." % [chosen.size() + 1, count], entries)
 		var picked: int = await _pp_result()
 		if picked == -1:
 			break
@@ -4895,11 +4919,7 @@ func _resolve_royal_aid(caster: Node2D, level: int, chosen: Array[int]) -> void:
 		var space: Node2D = board.spaces[space_index]
 		if not space.is_mortgaged:
 			continue
-		var cost: int = _unmortgage_value(board.get_space_info(space_index).get("price", 0))
-		if cost > caster.money:
-			continue
-		caster.money -= cost
-		space.is_mortgaged = false
+		space.is_mortgaged = false  # free -- Royal Aid pays nothing
 		names.append("Terminus Station" if space_index == 0 else board.get_space_info(space_index).get("name", ""))
 	if names.is_empty():
 		dice_label.text = "%s's Royal Aid (Level %d) resolves, but nothing was unmortgaged." % [_player_display_name(caster.player_id), level]

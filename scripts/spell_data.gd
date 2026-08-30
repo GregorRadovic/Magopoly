@@ -230,9 +230,9 @@ const SPELLS: Dictionary = {
 		"color": "yellow",
 		"icon": "res://Magopoly Assets/Cards/6 1 Royal Aid.png",
 		"levels": {
-			1: {"description": "Unmortgage a property.", "count": 1, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "Unmortgage 2 properties.", "count": 2, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "Unmortgage 3 properties.", "count": 3, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "Unmortgage a property for free.", "count": 1, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "Unmortgage 2 properties for free.", "count": 2, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "Unmortgage 3 properties for free.", "count": 3, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
 	# The card art gives 1/5, 1/3, 1/2 -- used here since it's the more
