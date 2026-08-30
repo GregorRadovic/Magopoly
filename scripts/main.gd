@@ -108,15 +108,77 @@ const TERMINUS_FIVE_RAILROAD_RENT: int = 300
 # Tutorial mode script (Main Menu > Tutorial). Each step shows its "text" in
 # the bubble at the bottom of the screen. A step with an "action" forces the
 # player to make exactly that play -- anything else toasts "Follow the
-# instructions!"; a "forced_roll" makes the dice land on those faces when
-# that action is "roll". A step with no "action" advances on any click.
-# Append steps here to extend the walkthrough.
+# instructions!". A step with no "action" advances on any click (see
+# _input()). "tag" names a jump target (used by _tutorial_goto, e.g. the
+# rewind after missing the pause window). "forced_roll" pins the dice.
+#
+# Action slugs and where they're handled:
+#   inspect_<spell>  -- right-click that card                (_on_spell_right_clicked)
+#   cast_<spell>     -- left-click that card, then its pickers (_on_spell_clicked
+#                       + _tutorial_gate_check + _tutorial_on_spell_finished)
+#   burn_rbn         -- pick "Burn for Attunement" in RbN's picker
+#   pick_level / pick_target -- Migraine's two pickers
+#   roll             -- click the Roll button
+#   press_space      -- press Space to pause the roll's response window
+#   resolve_manastone / resolve_adrenaline -- press Space to resolve the top of
+#                       the spell stack; unpause_roll -- press Space to unpause
+#                       once the stack is empty (see _tutorial_handle_space)
+#   buy_oriental     -- click Yes on the Oriental Avenue buy prompt
+#   end_turn         -- click End Turn
 const TUTORIAL_STEPS: Array[Dictionary] = [
 	{"text": "Welcome to the Magopoly tutorial!"},
 	{"text": "We assume you know the rules of regular Monopoly; this tutorial will tell you how spells work."},
 	{"text": "We've started you with a few properties and a few spells to make this easier."},
-	{"text": "Start your turn by clicking the roll button...", "action": "roll", "forced_roll": Vector2i(1, 3)},
-	{"text": "So far so good!"},
+	{"text": "Right click on a spell to see what it does. Right click on the sky blue spell, Migraine.", "action": "inspect_migraine"},
+	{"text": "To cast a spell, left click it. Let's cast Migraine now.", "action": "cast_migraine"},
+	{"text": "As you can see, the spell has different levels. These levels are determined by the amount of properties you own of that color."},
+	{"text": "Note that this only counts UNMORTGAGED properties. So think twice before mortgaging!"},
+	{"text": "Since you have two sky blue properties, you can cast it at level 2. Or level 1, if you wanted to."},
+	{"text": "For now let's cast it at level 2.", "action": "pick_level"},
+	{"text": "Now target your opponent.", "action": "pick_target"},
+	{"text": "Great job! You just cast your first spell!"},
+	{"text": "Now let's roll the dice to move for our turn. Click the Roll button.", "action": "roll", "forced_roll": Vector2i(1, 3), "tag": "roll"},
+	{"text": "Quick! Press Space Bar!", "action": "press_space"},
+	{"text": "Space Bar is how you pause the game to indicate that you want to cast a spell."},
+	{"text": "This is important because many spells have effects that can only be used at certain times. For example, right-click on Adrenaline.", "action": "inspect_adrenaline"},
+	{"text": "Adrenaline lets you increase your roll so that instead of landing on Income Tax, you can land on a property you want."},
+	{"text": "The problem is, you don't own any green properties! But fortunately, there's another way to gain Attunement to a color."},
+	{"text": "Left-click on your other green spell, Reclaimed by Nature.", "action": "cast_rbn"},
+	{"text": "As you can see, all spells have the 'burn for attunement' option. This means you can discard that spell to gain 1 Temporary Attunement to that color. Burn Reclaimed by Nature now.", "action": "burn_rbn"},
+	{"text": "Now we'd be able to cast Adrenaline at Level 1, but we can do better than that. Right click on your Manastone.", "action": "inspect_manastone"},
+	{"text": "Manastones are a special type of card that help smooth out your mana. They get stronger if you own utilities, but even without them, you can still cast them at level 0."},
+	{"text": "Cast Manastone at level 0 now, adding 1 Green Attunement.", "action": "cast_manastone"},
+	{"text": "Spells go on the stack when cast, where they wait to resolve. Players can cast other spells in response."},
+	{"text": "Currently that's not what we want; we want Manastone to resolve first so we can play Adrenaline at a higher level."},
+	{"text": "Press spacebar once to resolve the spell.", "action": "resolve_manastone"},
+	{"text": "Good job. Note that pressing spacebar when there's no spells on the stack will unpause, and you'll miss your chance to cast additional spells in this window."},
+	{"text": "Now cast Adrenaline at level 2 to add 2 to your roll.", "action": "cast_adrenaline"},
+	{"text": "Remember to press Spacebar again to let Adrenaline resolve.", "action": "resolve_adrenaline"},
+	{"text": "Now that the stack is empty, press Spacebar one last time to unpause so that the game can proceed.", "action": "unpause_roll"},
+	{"text": "Perfect! Now, instead of landing on a tax space, you can buy Oriental Avenue to secure your monopoly.", "action": "buy_oriental"},
+	{"text": "One last thing: You'll notice you still have your temporary attunement. That lasts until the start of your next turn."},
+	{"text": "Let's make use of it before it goes away. Cast Sinkhole on your opponent.", "action": "cast_sinkhole"},
+	{"text": "Great job!"},
+	{"text": "There are three times when you can pause to cast spells: After your roll; after an opponent's roll; and whenever a player casts a spell."},
+	{"text": "Some spells are marked as \"Slow\", meaning you can only play them on your turn before or after your roll."},
+	{"text": "You can still do things on your turn after rolling, such as trading or building houses. For now, simply click End Turn to end the tutorial.", "action": "end_turn"},
+	{"text": "Congratulations! That's the basics of casting spells in Magopoly!"},
+	{"text": "Now you're ready to start playing for real. Good luck!"},
+]
+# Shown by _tutorial_rewind_roll() when the player misses the "press Space"
+# window; the next click jumps back to the "roll" step. Not a TUTORIAL_STEPS
+# entry so it never lands in the linear flow.
+const TUTORIAL_MISSED_TEXT: String = "Darn, you missed it! Let's rewind and try that again."
+
+# The fixed opening hands for Tutorial mode -- the script relies on exactly
+# these cards. P1 (the human) gets two sky-blue properties and five spells;
+# the Computer gets five Step Forwards.
+const TUTORIAL_P1_PROPERTIES: Array[int] = [8, 9]  # Vermont Ave, Connecticut Ave
+const TUTORIAL_P1_SPELLS: Array[String] = [
+	"Migraine", "Reclaimed by Nature", "Adrenaline", "Sinkhole", "Manastone",
+]
+const TUTORIAL_OPPONENT_SPELLS: Array[String] = [
+	"Step Forward", "Step Forward", "Step Forward", "Step Forward", "Step Forward",
 ]
 
 signal debt_resolved
@@ -216,7 +278,6 @@ var dice_label: DiceSink = DiceSink.new()
 @onready var tutorial_bubble: Panel = $UI/TutorialBubble
 @onready var tutorial_bubble_label: Label = $UI/TutorialBubble/Label
 @onready var tutorial_bubble_hint: Label = $UI/TutorialBubble/Hint
-@onready var tutorial_click_catcher: Control = $UI/TutorialClickCatcher
 
 var players: Array[Node2D] = []
 var current_player: int = 0
@@ -399,6 +460,12 @@ var _tutorial_step: int = -1
 # dice it forces when that play is "roll" (ZERO = a normal random roll).
 var _tutorial_expected_action: String = ""
 var _tutorial_forced_roll: Vector2i = Vector2i.ZERO
+# How many picks the player has made in the current step's multi-pick cast
+# (0 = still needs to click the card; 1 = card clicked, level picker next; ...).
+var _tutorial_pick_phase: int = 0
+# True while the "Darn, you missed it!" message is showing -- the next click
+# jumps back to the roll step rather than advancing.
+var _tutorial_rewind_pending: bool = false
 
 
 func _ready() -> void:
@@ -422,7 +489,6 @@ func _ready() -> void:
 	trader2_money_edit.text_changed.connect(_on_trade_money_changed)
 	card_picker.zoom_requested.connect(spell_card.show_card)
 	board.space_clicked.connect(_on_space_clicked)
-	tutorial_click_catcher.gui_input.connect(_on_tutorial_catcher_input)
 	_build_log_markup()
 	game_log.meta_clicked.connect(_on_log_meta_clicked)
 	_update_turn_label()
@@ -467,7 +533,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if _tutorial_active:
-		_toast("Follow the instructions!")
+		if not (event.keycode in [KEY_SPACE, KEY_1] and _tutorial_handle_space()):
+			_toast("Follow the instructions!")
 		return
 
 	if GameState.online:
@@ -512,9 +579,9 @@ func _confirm_quit() -> void:
 # ============================================================================
 # Tutorial mode -- a fixed script of steps (TUTORIAL_STEPS), each shown in a
 # bubble at the bottom of the screen. Steps with an "action" make the player
-# perform exactly that play; steps without one advance on any click, caught
-# by a full-screen invisible Control. When the script runs out the tutorial
-# ends and the game becomes ordinary free play.
+# perform exactly that play; steps without one advance on any click (_input()
+# swallows the click so it can't disturb anything -- e.g. an open picker).
+# When the script runs out the tutorial ends and returns to the Main Menu.
 # ============================================================================
 
 func _start_tutorial() -> void:
@@ -528,15 +595,34 @@ func _tutorial_advance() -> void:
 	if _tutorial_step >= TUTORIAL_STEPS.size():
 		_end_tutorial()
 		return
+	_tutorial_apply_current_step()
+
+
+func _tutorial_apply_current_step() -> void:
+	_tutorial_pick_phase = 0
+	_tutorial_rewind_pending = false
 	var step: Dictionary = TUTORIAL_STEPS[_tutorial_step]
 	_tutorial_expected_action = step.get("action", "")
 	_tutorial_forced_roll = step.get("forced_roll", Vector2i.ZERO)
 	tutorial_bubble_label.text = step.get("text", "")
 	tutorial_bubble.visible = true
-	var free_click: bool = _tutorial_expected_action == ""
-	tutorial_bubble_hint.visible = free_click
-	tutorial_click_catcher.visible = free_click
-	tutorial_click_catcher.mouse_filter = Control.MOUSE_FILTER_STOP if free_click else Control.MOUSE_FILTER_IGNORE
+	tutorial_bubble_hint.visible = _tutorial_expected_action == ""
+
+
+func _tutorial_find_step(tag: String) -> int:
+	for i in TUTORIAL_STEPS.size():
+		if TUTORIAL_STEPS[i].get("tag", "") == tag:
+			return i
+	return -1
+
+
+func _tutorial_goto(tag: String) -> void:
+	var idx: int = _tutorial_find_step(tag)
+	if idx == -1:
+		_end_tutorial()
+		return
+	_tutorial_step = idx
+	_tutorial_apply_current_step()
 
 
 func _end_tutorial() -> void:
@@ -544,14 +630,216 @@ func _end_tutorial() -> void:
 	_tutorial_expected_action = ""
 	_tutorial_forced_roll = Vector2i.ZERO
 	tutorial_bubble.visible = false
-	tutorial_click_catcher.visible = false
-	tutorial_click_catcher.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	GameState.tutorial_mode = false
+	get_tree().call_deferred("change_scene_to_file", "res://scenes/start_menu.tscn")
 
 
-func _on_tutorial_catcher_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		tutorial_click_catcher.accept_event()
-		_tutorial_advance()
+# Runs before GUI/subwindow handling, so set_input_as_handled() actually stops
+# the click. Jobs while the tutorial is running:
+#  - a zoomed-in spell card is dismissed by the next click, which is then
+#    swallowed and does NOT advance (the card was covering the text; the
+#    player reads it after, then clicks again to move on);
+#  - on a "click to continue" step, every mouse press is swallowed (so it
+#    can't dismiss an open picker or hit a button underneath); a left click
+#    advances, unless a spell is mid-resolution (window open, nobody paused),
+#    in which case the click is still eaten but we wait.
+# Action steps otherwise let input through untouched.
+func _input(event: InputEvent) -> void:
+	if not _tutorial_active:
+		return
+	if not (event is InputEventMouseButton and event.pressed):
+		return
+	if spell_card.visible:
+		spell_card.hide()
+		get_viewport().set_input_as_handled()
+		return
+	if _tutorial_expected_action != "":
+		return
+	get_viewport().set_input_as_handled()
+	if event.button_index == MOUSE_BUTTON_LEFT:
+		_tutorial_try_click_advance()
+
+
+func _tutorial_try_click_advance() -> void:
+	# Hold on a "click to continue" step while a spell is actively resolving
+	# (a response window is open and nobody has it paused).
+	if _response_window_open and not _response_window_paused_by.has(true):
+		return
+	if _tutorial_rewind_pending:
+		_tutorial_rewind_pending = false
+		_tutorial_goto("roll")
+		return
+	_tutorial_advance()
+
+
+# The gate handed to player_picker while the tutorial runs: it decides whether
+# a pick is the one the current step wants. Rejected picks toast and leave the
+# picker open. `index` is a level (or BURN_FOR_ATTUNEMENT_INDEX), a color
+# index (Manastone), or a player index (targets); -1 is Cancel.
+func _tutorial_picker_gate() -> Callable:
+	return _tutorial_gate_check if _tutorial_active else Callable()
+
+
+func _tutorial_gate_check(index: int) -> bool:
+	match _tutorial_expected_action:
+		"pick_level":  # Migraine level
+			if index == 2:
+				_tutorial_advance()
+				return true
+		"pick_target":  # Migraine target
+			if index == 1:
+				_tutorial_advance()
+				return true
+		"burn_rbn":
+			if index == BURN_FOR_ATTUNEMENT_INDEX:
+				_tutorial_advance()  # -> "Right click on your Manastone."
+				return true
+		"cast_manastone":
+			if _tutorial_pick_phase == 1 and index == 0:  # Level 0
+				_tutorial_pick_phase = 2
+				return true
+			if _tutorial_pick_phase == 2 and index == ATTUNABLE_COLORS.find("green"):
+				_tutorial_pick_phase = 3
+				return true
+		"cast_adrenaline":
+			if _tutorial_pick_phase == 1 and index == 2:  # Level 2
+				_tutorial_pick_phase = 2
+				return true
+		"cast_sinkhole":
+			if _tutorial_pick_phase == 1 and (index == 1 or index == 2):  # level
+				_tutorial_pick_phase = 2
+				return true
+			if _tutorial_pick_phase == 2 and index == 1:  # the opponent
+				_tutorial_pick_phase = 3
+				return true
+	_toast("Follow the instructions!")
+	return false
+
+
+# The gate handed to confirm_prompt -- only the Oriental Avenue buy prompt is
+# gated, and only "Yes" is accepted there.
+func _tutorial_confirm_gate() -> Callable:
+	if _tutorial_active and _tutorial_expected_action == "buy_oriental":
+		return _tutorial_buy_gate
+	return Callable()
+
+
+func _tutorial_buy_gate(yes: bool) -> bool:
+	if yes:
+		_tutorial_advance()  # -> "You'll notice you still have your temporary attunement."
+		return true
+	_toast("Follow the instructions!")
+	return false
+
+
+# The spell the current step wants LEFT-clicked from the hand ("" = none).
+func _tutorial_left_click_spell() -> String:
+	match _tutorial_expected_action:
+		"cast_migraine": return "Migraine"
+		"cast_rbn": return "Reclaimed by Nature"
+		"cast_manastone": return "Manastone"
+		"cast_adrenaline": return "Adrenaline"
+		"cast_sinkhole": return "Sinkhole"
+	return ""
+
+
+# The spell the current step wants RIGHT-clicked ("" = none).
+func _tutorial_right_click_spell() -> String:
+	match _tutorial_expected_action:
+		"inspect_migraine": return "Migraine"
+		"inspect_adrenaline": return "Adrenaline"
+		"inspect_manastone": return "Manastone"
+	return ""
+
+
+# Called from _finish_cast once a tutorial-driven spell is on the stack (the
+# roll-window casts -- Manastone, Adrenaline -- which the player then resolves
+# by pressing Space) or has already resolved (an ordinary turn cast).
+func _tutorial_on_spell_finished(spell_name: String) -> void:
+	match _tutorial_expected_action:
+		"cast_manastone":
+			if spell_name == "Manastone":
+				_tutorial_advance()  # -> "Spells go on the stack when cast..."
+		"cast_adrenaline":
+			if spell_name == "Adrenaline":
+				_tutorial_advance()  # -> "Remember to press Spacebar again..."
+		"cast_sinkhole":
+			if spell_name == "Sinkhole":
+				_tutorial_advance()  # -> "Great job!"
+
+
+# Space during the tutorial: pause the roll window, or resolve the top of the
+# spell stack. Returns true if it handled the press (else the caller toasts).
+func _tutorial_handle_space() -> bool:
+	if not _response_window_open:
+		return false
+	match _tutorial_expected_action:
+		"press_space":
+			if not _response_window_paused_by[0]:
+				_toggle_pause_for_player(0)
+				if _response_window_paused_by[0]:
+					_tutorial_advance()  # -> "Space Bar is how you pause the game..."
+				return true
+		"resolve_manastone", "resolve_adrenaline":
+			if _response_window_paused_by[0] and not _spell_stack.is_empty():
+				_tutorial_resolve_stack_via_space()
+				return true
+		"unpause_roll":
+			if _response_window_paused_by[0] and _spell_stack.is_empty():
+				_toggle_pause_for_player(0)  # unpause for real
+				_window_deadline_msec = 0    # ...and close the window now
+				_tutorial_advance()  # -> "...buy Oriental Avenue..."
+				return true
+	return false
+
+
+func _tutorial_resolve_stack_via_space() -> void:
+	# _toggle_pause_for_player, while paused with a non-empty stack, resolves
+	# just the top entry and re-pauses -- exactly what we want here.
+	await _toggle_pause_for_player(0)
+	_update_player_panels()
+	_tutorial_advance()
+
+
+func _tutorial_rewind_roll() -> void:
+	var p: Node2D = players[current_player]
+	_roll_in_flight = false
+	_current_roll = 0
+	_awaiting_end_turn = false
+	p.consecutive_doubles = 0
+	dice_roller.clear_dice()
+	_prompt_slot = -1
+	_refresh_action_buttons()
+	_update_turn_label()
+	_update_player_panels()
+	# Show "Darn, you missed it!" -- the next click jumps back to the roll step.
+	_tutorial_rewind_pending = true
+	_tutorial_expected_action = ""
+	tutorial_bubble_label.text = TUTORIAL_MISSED_TEXT
+	tutorial_bubble_hint.visible = true
+	tutorial_bubble.visible = true
+
+
+# Whether hand slot `hand_index` of player `player_index` currently holds
+# `spell_name` -- used to check the player clicked the card the step named.
+func _tutorial_hand_spell_is(player_index: int, hand_index: int, spell_name: String) -> bool:
+	if player_index < 0 or player_index >= players.size():
+		return false
+	var hand: Array = players[player_index].spell_hand
+	return hand_index >= 0 and hand_index < hand.size() and hand[hand_index] == spell_name
+
+
+func _grant_tutorial_start(player: Node2D) -> void:
+	if player.player_id == 0:
+		for space_index in TUTORIAL_P1_PROPERTIES:
+			board.spaces[space_index].owner_id = player.player_id
+			player.owned_property_indices.append(space_index)
+		_sort_owned_properties(player)
+		for spell_name in TUTORIAL_P1_SPELLS:
+			_spell_add(player, spell_name)
+	elif player.player_id == 1:
+		for spell_name in TUTORIAL_OPPONENT_SPELLS:
+			_spell_add(player, spell_name)
 
 
 # True (and shows the "Follow the instructions!" toast) when the tutorial is
@@ -589,10 +877,7 @@ func _spawn_players() -> void:
 			if type == GameState.PlayerType.COMPUTER:
 				player.is_ai = true
 			if GameState.tutorial_mode:
-				# Only the human gets a head start; the tutorial script
-				# assumes P1 has a few properties and spells to work with.
-				if i == 0:
-					_grant_starting_hand(player, 3, 3)
+				_grant_tutorial_start(player)
 			elif GameState.blitzstart_mode:
 				_grant_starting_hand(player, 6, 4)
 			elif GameState.quickstart_mode:
@@ -663,15 +948,21 @@ func _on_roll_pressed() -> void:
 # (locally on the host, or via _net_roll_intent for a remote player).
 func _perform_roll_button_action() -> void:
 	if _awaiting_end_turn:
+		# Tutorial: End Turn only on the step that asks for it.
+		if _tutorial_active and _tutorial_expected_action != "end_turn":
+			_toast("Follow the instructions!")
+			return
+		var was_end_turn_step: bool = _tutorial_active and _tutorial_expected_action == "end_turn"
 		_end_turn()
+		if was_end_turn_step:
+			_tutorial_advance()  # -> "Congratulations!..."
 		return
-	# Tutorial: a step can pin the dice to fixed faces, then advance itself
-	# once that roll (and its landing) has fully resolved.
+	# Tutorial: a step pins the dice to fixed faces; _perform_roll then drives
+	# the tutorial itself (the pause window, the spell casts, the purchase).
 	if _tutorial_active and _tutorial_forced_roll != Vector2i.ZERO:
 		var forced: Vector2i = _tutorial_forced_roll
 		_tutorial_forced_roll = Vector2i.ZERO
 		await _perform_roll(forced.x, forced.y)
-		_tutorial_advance()
 		return
 	_perform_roll(randi_range(1, 6), randi_range(1, 6))
 
@@ -924,7 +1215,9 @@ func _advance_turn() -> void:
 	dice_roller.clear_dice()
 	_advance_to_next_active_player()
 	_update_turn_label()
-	if GameState.is_authority() and players[current_player].is_ai:
+	# In the tutorial the opponent never actually takes a turn -- the script
+	# ends (back to the Main Menu) right after the player's first End Turn.
+	if GameState.is_authority() and players[current_player].is_ai and not _tutorial_active:
 		_run_ai_turn()
 
 
@@ -1517,6 +1810,10 @@ func _ai_house_check(player: Node2D) -> void:
 # the first) just pushes _window_deadline_msec back out, extending the
 # window the first call is waiting on, and returns immediately.
 func _response_window_seconds() -> float:
+	if _tutorial_active:
+		# A generous window for the "Quick! Press Space Bar!" moment; snappier
+		# for the tutorial's own spell resolutions (Migraine, Sinkhole).
+		return 5.0 if _tutorial_expected_action == "press_space" else 1.5
 	# Online, widen the window so a remote player's pause has time to reach
 	# the host before the countdown expires.
 	return RESPONSE_WINDOW_SECONDS * 2.0 if GameState.online else RESPONSE_WINDOW_SECONDS
@@ -1733,10 +2030,20 @@ func _perform_roll(die1: int, die2: int) -> void:
 
 	_current_roll = roll
 	_roll_in_flight = true
+	# Tutorial: the "roll" step becomes "Quick! Press Space Bar!" as the window
+	# opens; the player must pause it within the window (see _unhandled_input).
+	if _tutorial_active and _tutorial_expected_action == "roll":
+		_tutorial_advance()
 	await _ensure_response_window()
 	_roll_in_flight = false
 	dice_roller.finish_now()
 	roll = _current_roll
+
+	# Tutorial: still on "press_space" once the window has closed = the player
+	# never paused. Rewind and let them roll again.
+	if _tutorial_active and _tutorial_expected_action == "press_space":
+		_tutorial_rewind_roll()
+		return
 
 	# Belt-and-suspenders: _prompt_slot is only ever meant to be set mid
 	# _begin_spell_cast (routing that caster's own level/target pickers).
@@ -3120,6 +3427,12 @@ func _color_attunement(player: Node2D, color_name: String) -> int:
 
 
 func _on_space_clicked(index: int) -> void:
+	# Tutorial: board / mini-card clicks are never part of the script. (On a
+	# "click anywhere" step _input() has already swallowed the click; this
+	# only bites on an action step.)
+	if _tutorial_active:
+		_toast("Follow the instructions!")
+		return
 	if GameState.online and not GameState.is_authority():
 		# During a trade, a property click toggles it in/out of the offer
 		# (routed if this machine is the proposer, otherwise ignored).
@@ -3182,6 +3495,10 @@ func _on_space_clicked(index: int) -> void:
 # fallback above, and for right-clicking a mini card to inspect it without
 # disturbing whatever picking mode (e.g. a trade) is currently active.
 func _show_property_details(index: int) -> void:
+	# Tutorial: inspecting properties isn't part of the script.
+	if _tutorial_active:
+		_toast("Follow the instructions!")
+		return
 	# Terminus Station -- the GO overlay, once summoned -- is a railroad card
 	# in everything but its name.
 	if index == 0 and board.spaces[0].owner_id != -1:
@@ -3268,15 +3585,20 @@ func _space_description(index: int, info: Dictionary) -> String:
 	return ""
 
 
-# Shows the full card art for a spell, regardless of whose turn it is --
-# same as right-clicking a property mini card, this is just for looking, so
-# it isn't gated by any turn/state checks.
+# Shows the full card art for a spell, regardless of whose turn it is -- same
+# as right-clicking a property mini card, this is just for looking, so it's
+# never gated (in the tutorial too: inspecting a card is always allowed). If
+# it happens to be the card an "inspect" step named, that step advances.
 func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
 	if hand_index < 0 or hand_index >= players[player_index].spell_hand.size():
 		return
 	var spell_name: String = players[player_index].spell_hand[hand_index]
 	var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 	spell_card.show_card(load(spell_info.get("icon", "")))
+	if _tutorial_active:
+		var want: String = _tutorial_right_click_spell()
+		if want != "" and _tutorial_hand_spell_is(player_index, hand_index, want):
+			_tutorial_advance()  # -> the matching "left click / cast it" step
 
 
 # Kicks off interacting with a spell from `player_index`'s hand: pick a
@@ -3290,9 +3612,22 @@ func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
 # levels are only usable responding to a roll or another spell) and then
 # Attunement (_color_attunement() must be >= the level).
 func _on_spell_clicked(hand_index: int, player_index: int) -> void:
-	# Tutorial: casting is only allowed when a step asks for it. (Right-click
-	# to inspect a card stays available -- see _on_spell_right_clicked.)
-	if _tutorial_blocks("cast_spell"):
+	# Tutorial: only the card the current step names, and only before any pick
+	# has been made for it. Migraine and Reclaimed by Nature advance the bubble
+	# now (their picker steps have their own text); Manastone / Adrenaline /
+	# Sinkhole keep the same bubble through their picks, tracked by pick_phase.
+	if _tutorial_active:
+		var want: String = _tutorial_left_click_spell()
+		if want == "" or _tutorial_pick_phase != 0 or not _tutorial_hand_spell_is(player_index, hand_index, want):
+			_toast("Follow the instructions!")
+			return
+		if spell_card.visible:
+			spell_card.hide()
+		if _tutorial_expected_action in ["cast_migraine", "cast_rbn"]:
+			_tutorial_advance()
+		else:
+			_tutorial_pick_phase = 1
+		_begin_spell_cast(hand_index, player_index)
 		return
 	# During a trade a spell-card click toggles that spell in/out of the
 	# offer -- _handle_trade_spell_click self-routes to the host if this
@@ -3631,6 +3966,8 @@ func _finish_cast(caster: Node2D, spell_name: String, level: int, resolve: Calla
 	_log("%s cast %s at Level %d%s." % [PLAYER_NAMES[caster.player_id], spell_name, level, target_suffix])
 	_update_player_panels()
 	await _ensure_response_window()
+	if _tutorial_active:
+		await _tutorial_on_spell_finished(spell_name)
 
 
 # T1 Burn Spell: the caster picks an opponent to target now; the payment
@@ -5501,7 +5838,7 @@ func _cf_open(text: String) -> void:
 		# resolved by the app losing focus (Godot auto-hides popups on
 		# alt-tab, which would otherwise fire popup_hide -> "No").
 		confirm_prompt.sticky = true
-		confirm_prompt.open(text)
+		confirm_prompt.open(text, _tutorial_confirm_gate())
 	else:
 		_net_open_remote("confirm", {"text": text})
 
@@ -5516,7 +5853,7 @@ func _cf_result() -> bool:
 
 func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
 	if _prompt_is_local():
-		player_picker.open(text, entries, mandatory)
+		player_picker.open(text, entries, mandatory, false, _tutorial_picker_gate())
 	else:
 		_net_open_remote("pick", {
 			"text": text, "entries": _net_pack_entries(entries), "mandatory": mandatory,
