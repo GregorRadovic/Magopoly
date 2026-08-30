@@ -19,6 +19,12 @@ func _ready() -> void:
 	back_button.pressed.connect(_on_back)
 	address_edit.text_submitted.connect(func(_t): _on_join_pressed())
 
+	# Pre-fill the last host we connected to, so reconnecting after a drop is
+	# just Join Game -> Join.
+	if Net.last_join_address != "":
+		address_edit.text = Net.last_join_address
+		status_label.text = "Reconnecting to a game in progress? Just press Join."
+
 
 func _on_join_pressed() -> void:
 	var addr: String = address_edit.text.strip_edges()

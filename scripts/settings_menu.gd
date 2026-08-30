@@ -1,18 +1,28 @@
 extends PopupPanel
 
-# Small settings window opened from the Start Menu. For now it holds a single
-# control: a Resolution dropdown. The picked resolution is applied immediately,
-# saved to user://settings.cfg, and re-applied on the next launch via
-# apply_saved() (called from start_menu.gd's _ready).
+# Small settings window opened from the Start Menu and the in-game pause menu.
+# Controls: a Resolution dropdown and a Music Volume slider. Both are applied
+# immediately, saved to user://settings.cfg, and restored on the next launch
+# (resolution via apply_saved() from start_menu.gd; music volume by the Music
+# autoload itself).
 #
 # "Resolution" here is the game's render resolution, not the window size: the
 # window stays fullscreen and we set Window.content_scale_size (the project's
 # stretch mode is "canvas_items", so the whole game is drawn at this reference
 # size and scaled to fill the screen). A smaller value zooms everything in; a
 # larger value shows more and looks sharper on a high-DPI display.
+#
+# The "Host tools" section is hidden by default and only revealed in-game, for
+# the host of a multiplayer match (main.gd calls enable_host_tools()). Each
+# button just fires a signal main.gd acts on -- see there.
+
+signal kick_player_requested
+signal unpause_player_requested
 
 const CONFIG_PATH: String = "user://settings.cfg"
-const POPUP_SIZE: Vector2i = Vector2i(520, 240)
+const POPUP_SIZE: Vector2i = Vector2i(560, 300)
+# Extra height when the Host tools section is showing.
+const HOST_TOOLS_EXTRA_HEIGHT: int = 200
 
 # Ordered list shown in the dropdown. The first entry is the project default
 # (see project.godot's window/size/viewport_*).
@@ -28,6 +38,11 @@ const RESOLUTIONS: Array[Vector2i] = [
 ]
 
 @onready var resolution_option: OptionButton = $VBox/ResolutionRow/ResolutionOption
+@onready var music_volume_slider: HSlider = $VBox/MusicVolumeRow/MusicVolumeSlider
+@onready var music_volume_value: Label = $VBox/MusicVolumeRow/MusicVolumeValue
+@onready var host_tools: VBoxContainer = $VBox/HostTools
+@onready var kick_player_button: Button = $VBox/HostTools/KickPlayerButton
+@onready var unpause_player_button: Button = $VBox/HostTools/UnpausePlayerButton
 @onready var close_button: Button = $VBox/CloseButton
 
 
@@ -36,11 +51,43 @@ func _ready() -> void:
 		resolution_option.add_item("%d x %d" % [res.x, res.y])
 	resolution_option.selected = _index_of(_load_resolution())
 	resolution_option.item_selected.connect(_on_resolution_selected)
+
+	var volume: int = Music.get_volume_percent()
+	music_volume_slider.value = volume
+	_update_volume_label(volume)
+	music_volume_slider.value_changed.connect(_on_music_volume_changed)
+
+	host_tools.visible = false
+	kick_player_button.pressed.connect(func() -> void:
+		hide()
+		kick_player_requested.emit())
+	unpause_player_button.pressed.connect(func() -> void:
+		hide()
+		unpause_player_requested.emit())
+
 	close_button.pressed.connect(hide)
 
 
+# Called by main.gd in a multiplayer game, on the host only.
+func enable_host_tools() -> void:
+	host_tools.visible = true
+
+
+func _on_music_volume_changed(value: float) -> void:
+	var percent: int = int(round(value))
+	Music.set_volume_percent(percent)
+	_update_volume_label(percent)
+
+
+func _update_volume_label(percent: int) -> void:
+	music_volume_value.text = "%d%%" % percent
+
+
 func open() -> void:
-	popup_centered(POPUP_SIZE)
+	var size: Vector2i = POPUP_SIZE
+	if host_tools.visible:
+		size.y += HOST_TOOLS_EXTRA_HEIGHT
+	popup_centered(size)
 
 
 func _on_resolution_selected(index: int) -> void:

@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://dyominrayjdqg"
+path="res://.godot/imported/The Britons.mp3-f2783675fec2262974b34b56dd127097.mp3str"
+
+[deps]
+
+source_file="res://Magopoly Assets/Music and Sounds/The Britons.mp3"
+dest_files=["res://.godot/imported/The Britons.mp3-f2783675fec2262974b34b56dd127097.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

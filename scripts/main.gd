@@ -500,6 +500,11 @@ func _ready() -> void:
 	if GameState.online:
 		if GameState.is_authority():
 			multiplayer.peer_disconnected.connect(_on_peer_gone)
+			Net.player_reconnected.connect(_on_player_reconnected)
+			# Host-only AFK tools in the pause menu's Settings window.
+			pause_settings_menu.enable_host_tools()
+			pause_settings_menu.kick_player_requested.connect(_host_kick_player)
+			pause_settings_menu.unpause_player_requested.connect(_host_unpause_player)
 		else:
 			multiplayer.server_disconnected.connect(_on_host_gone)
 	if GameState.online and not GameState.is_authority():
@@ -584,6 +589,82 @@ func _quit_to_main_menu() -> void:
 	if GameState.online:
 		Net.leave()
 	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
+
+
+# ============================================================================
+# Host AFK tools (multiplayer only) -- reachable from the pause menu's Settings
+# window, host side only. See settings_menu.gd's "Host tools" section.
+# ============================================================================
+
+# "Kick Player": pick a remote human and drop their connection. The host's own
+# multiplayer.peer_disconnected -> _on_peer_gone then hands their seat(s) to a
+# Computer, exactly like a genuine disconnect.
+func _host_kick_player() -> void:
+	if not (GameState.online and GameState.is_authority()):
+		return
+	pause_menu.hide()
+	var entries: Array = []
+	for i in players.size():
+		# slot_peer > 1 == a connected client peer (1 is the host itself).
+		if GameState.slot_peer[i] > 1 and not players[i].is_bankrupt:
+			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
+	if entries.is_empty():
+		_toast("No remote players to kick.")
+		return
+	player_picker.open("Kick which player?", entries)
+	var slot: int = await player_picker.player_chosen
+	if slot < 0:
+		return
+	var peer_id: int = GameState.slot_peer[slot]
+	if peer_id <= 1:
+		return
+	_log("%s was kicked by the host." % PLAYER_NAMES[slot])
+	# Bar the reconnect path first: a kick is meant to stick.
+	Net.note_kick(slot)
+	_net_you_were_kicked.rpc_id(peer_id)
+	# Give the reliable RPC a moment to land before we sever the link.
+	await get_tree().create_timer(0.2).timeout
+	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
+		multiplayer.multiplayer_peer.disconnect_peer(peer_id)
+
+
+# Client: the host removed you. Mirrors _on_host_gone (which also fires, a beat
+# later, when the host severs the link -- the guard keeps it a no-op then).
+@rpc("authority", "reliable")
+func _net_you_were_kicked() -> void:
+	if _returning_to_menu:
+		return
+	_returning_to_menu = true
+	Net.leave()
+	info_prompt.open("You were removed from the game by the host.")
+	await info_prompt.closed
+	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
+
+
+# "Unpause Player": pick a player who is currently holding a response window
+# frozen and act as if they pressed their pause key -- resolves the top of the
+# spell stack, or unpauses for real once it's empty (see
+# _toggle_pause_for_player).
+func _host_unpause_player() -> void:
+	if not (GameState.online and GameState.is_authority()):
+		return
+	pause_menu.hide()
+	var entries: Array = []
+	for i in players.size():
+		if _response_window_paused_by[i]:
+			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
+	if entries.is_empty():
+		_toast("No players are paused.")
+		return
+	player_picker.open("Unpause which player?", entries)
+	var slot: int = await player_picker.player_chosen
+	if slot < 0:
+		return
+	if not _response_window_paused_by[slot]:
+		_toast("%s is no longer paused." % PLAYER_NAMES[slot])
+		return
+	_log("The host unpaused %s." % PLAYER_NAMES[slot])
+	_toggle_pause_for_player(slot)
 
 
 # ============================================================================
@@ -1110,14 +1191,16 @@ func _net_trade_decline_intent() -> void:
 # Online multiplayer -- disconnects (Phase 7)
 # ============================================================================
 
-# Client: the host's connection dropped. Nothing more can happen -- back to
-# the menu.
+# Client: lost the connection to the host (host quit, or our own link dropped
+# -- both look the same from here). Back to the menu, but the session token and
+# last host address are kept so "Join Game" can drop us straight back in while
+# the host is still holding our seat (see net.gd's reconnect flow).
 func _on_host_gone() -> void:
 	if _returning_to_menu:
 		return
 	_returning_to_menu = true
 	Net.leave()
-	info_prompt.open("The host left the game. Returning to the menu.")
+	info_prompt.open("Lost connection to the host. Returning to the menu -- choose Join Game to reconnect.")
 	await info_prompt.closed
 	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
 
@@ -1139,11 +1222,20 @@ func _on_peer_gone(peer_id: int) -> void:
 		return
 
 	for slot in affected:
+		# Reconnectable (an ordinary drop) -> a stripped-down Placeholder AI
+		# holds the seat and the player can rejoin. Not reconnectable (the host
+		# kicked them) -> a normal Computer, permanently.
+		var reconnectable: bool = Net.slot_is_reconnectable(slot)
 		GameState.slot_peer[slot] = 0
 		players[slot].is_ai = true
+		players[slot].is_placeholder_ai = reconnectable
 		_response_window_paused_by[slot] = false
-		dice_label.text += "\n%s disconnected -- a Computer takes over." % PLAYER_NAMES[slot]
-		_log("%s disconnected; a Computer takes over." % PLAYER_NAMES[slot])
+		if reconnectable:
+			dice_label.text += "\n%s lost connection -- a Placeholder AI holds their seat until they reconnect." % PLAYER_NAMES[slot]
+			_log("%s lost connection; a Placeholder AI holds their seat until they reconnect." % PLAYER_NAMES[slot])
+		else:
+			dice_label.text += "\n%s was removed -- a Computer takes over." % PLAYER_NAMES[slot]
+			_log("%s was removed; a Computer takes over." % PLAYER_NAMES[slot])
 
 	# A trade with the departed player can't continue.
 	if _trading and (affected.has(_trader1) or affected.has(_trader2)):
@@ -1191,6 +1283,31 @@ func _ai_settle_debt_now(slot: int) -> void:
 		_debt_outcome = "bankrupt"
 		_clear_debt_state()
 		debt_resolved.emit()
+
+
+# Host: a dropped player reconnected (Net.player_reconnected). Splice their new
+# peer id back in and take the Placeholder AI off their seat. If the Placeholder
+# AI is mid-turn for them right now, defer the hand-off until _run_ai_turn()
+# finishes that turn (so a buy prompt can't get routed to a half-loaded client).
+var _reconnect_finalize_slot: int = -1
+
+func _on_player_reconnected(slot: int, peer_id: int) -> void:
+	if slot < 0 or slot >= players.size():
+		return
+	GameState.slot_peer[slot] = peer_id
+	_log("%s reconnected." % PLAYER_NAMES[slot])
+	if _ai_turn_running and current_player == slot:
+		_reconnect_finalize_slot = slot
+	else:
+		_finish_reconnect(slot)
+	_update_player_panels()
+
+
+func _finish_reconnect(slot: int) -> void:
+	players[slot].is_ai = false
+	players[slot].is_placeholder_ai = false
+	_update_player_panels()
+	_refresh_action_buttons()
 
 
 # A seat that went AI via a disconnect can get stuck on the End Turn step --
@@ -1250,11 +1367,19 @@ func _run_ai_turn() -> void:
 	_ai_turn_running = true
 	await _run_ai_turn_body()
 	_ai_turn_running = false
+	# A player who reconnected mid-turn (while the Placeholder AI was finishing
+	# their turn) gets handed control now that it's safely over.
+	if _reconnect_finalize_slot != -1:
+		var slot: int = _reconnect_finalize_slot
+		_reconnect_finalize_slot = -1
+		_finish_reconnect(slot)
 
 
 func _run_ai_turn_body() -> void:
 	var ai_index: int = current_player
-	await _ai_p2_opening_burn(players[ai_index])
+	# The Placeholder AI (a dropped human's stand-in) never casts spells.
+	if not players[ai_index].is_placeholder_ai:
+		await _ai_p2_opening_burn(players[ai_index])
 	while current_player == ai_index and not players[ai_index].is_bankrupt:
 		_refresh_action_buttons()
 		await get_tree().create_timer(0.6).timeout
@@ -1295,6 +1420,12 @@ func _ai_p2_opening_burn(player: Node2D) -> void:
 # frees up cash and properties that the later checks see; a completed set
 # from trading is what the house check will actually build on.
 func _ai_run_end_of_turn_checks(player: Node2D) -> void:
+	# The Placeholder AI holding a disconnected player's seat does none of this
+	# upkeep -- it just rolls, buys what it lands on, pays what it owes, and
+	# ends the turn. It shouldn't be spending the absent player's money on
+	# houses or making trades for them.
+	if player.is_placeholder_ai:
+		return
 	_ai_mortgage_check(player)
 	await _ai_trade_check(player)
 	_ai_house_check(player)
@@ -5480,6 +5611,8 @@ func _player_display_name(index: int) -> String:
 	var player: Node2D = players[index]
 	if player.is_bankrupt:
 		return "%s (bankrupt)" % PLAYER_NAMES[index]
+	if player.is_placeholder_ai:
+		return "%s (Disconnected)" % PLAYER_NAMES[index]
 	if not player.in_jail:
 		return PLAYER_NAMES[index]
 	var turn_word: String = "turn" if player.jail_turns_left == 1 else "turns"
@@ -5613,6 +5746,7 @@ func _build_snapshot() -> Dictionary:
 			"doubles": p.consecutive_doubles,
 			"bankrupt": p.is_bankrupt,
 			"is_ai": p.is_ai,
+			"is_placeholder": p.is_placeholder_ai,
 			"visible": p.visible,
 			"owned": p.owned_property_indices.duplicate(),
 			"hand": p.spell_hand.duplicate(),
@@ -5711,6 +5845,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		p.consecutive_doubles = ps.get("doubles", 0)
 		p.is_bankrupt = ps.get("bankrupt", false)
 		p.is_ai = ps.get("is_ai", p.is_ai)
+		p.is_placeholder_ai = ps.get("is_placeholder", false)
 		p.visible = ps.get("visible", true)
 		p.owned_property_indices = _net_int_array(ps.get("owned", []))
 		p.spell_hand = _net_string_array(ps.get("hand", []))
