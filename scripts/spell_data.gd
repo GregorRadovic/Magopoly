@@ -110,9 +110,9 @@ const SPELLS: Dictionary = {
 		"color": "sky_blue",
 		"icon": "res://Magopoly Assets/Cards/2 4 Impossible Architecture.png",
 		"levels": {
-			1: {"description": "Choose a property you own. Even if you don't own the entire color set, build 2 houses, paying full price.", "houses": 2, "half_price": false},
-			2: {"description": "Choose a property you own. Even if you don't own the entire color set, build 3 houses, paying half price.", "houses": 3, "half_price": true},
-			3: {"description": "Choose a property you own. Even if you don't own the entire color set, build 5 houses, paying half price.", "houses": 5, "half_price": true},
+			1: {"description": "Choose a property you own. Even if you don't own the entire color set, build 1 house at half price.", "houses": 1, "half_price": true},
+			2: {"description": "Choose a property you own. Even if you don't own the entire color set, build 2 houses at half price.", "houses": 2, "half_price": true},
+			3: {"description": "Choose a property you own. Even if you don't own the entire color set, build 3 houses at half price.", "houses": 3, "half_price": true},
 		},
 	},
 	"Promised Land": {
@@ -124,13 +124,13 @@ const SPELLS: Dictionary = {
 			3: {"description": "Choose an unowned property. You may buy it."},
 		},
 	},
-	"Share the Wealth": {
+	"Break Bread": {
 		"color": "pink",
-		"icon": "res://Magopoly Assets/Cards/3 2 Share the Wealth.png",
+		"icon": "res://Magopoly Assets/Cards/3 2 Break Bread.png",
 		"levels": {
-			1: {"description": "You and another random player gain $150.", "amount": 150, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "You and another random player gain $300.", "amount": 300, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "You and another random player gain $400.", "amount": 400, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "You and a random opponent each gain $150.", "amount": 150, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "You and a random opponent each gain $300.", "amount": 300, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "You and a random opponent each gain $400.", "amount": 400, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
 	"Smite": {
@@ -252,9 +252,9 @@ const SPELLS: Dictionary = {
 		"color": "yellow",
 		"icon": "res://Magopoly Assets/Cards/6 3 Far-Reaching Empire.png",
 		"levels": {
-			1: {"description": "For each different color among properties you own, an opponent pays you $20.", "amount": 20, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "For each different color among properties you own, an opponent pays you $40.", "amount": 40, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "For each different color among properties you own, an opponent pays you $60.", "amount": 60, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "For each different color among properties you own, an opponent pays you $30.", "amount": 30, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "For each different color among properties you own, an opponent pays you $60.", "amount": 60, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "For each different color among properties you own, an opponent pays you $80.", "amount": 80, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
 	# The card restricts the target to a property owned by another player, but
@@ -374,7 +374,7 @@ const SPELLS: Dictionary = {
 			1: {"description": "The next railroad you buy this turn costs $0.", "timings": ["turn", "roll_response", "spell_response"]},
 			2: {"description": "Increase your roll until you land on the nearest railroad.", "timings": ["roll_response"], "requires_current_player": true},
 			3: {"description": "Buy a railroad from a player or the bank.", "timings": ["turn", "roll_response", "spell_response"]},
-			4: {"description": "If you own all 4 railroads, gain Terminus Station.", "timings": ["turn", "roll_response", "spell_response"]},
+			4: {"description": "If you own all 4 railroads, gain Terminus.", "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
 }

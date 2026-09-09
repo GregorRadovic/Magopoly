@@ -19,7 +19,7 @@ const SPELL_DECK_STARTING_COUNTS: Dictionary = {
 	"Counterbalance": 1,
 	"Impossible Architecture": 1,
 	"Promised Land": 1,
-	"Share the Wealth": 1,
+	"Break Bread": 1,
 	"Smite": 1,
 	"Divine Protection": 1,
 	"Art of the Deal": 1,
@@ -121,7 +121,7 @@ const TERMINUS_FIVE_RAILROAD_RENT: int = 300
 # rewind after missing the pause window). "forced_roll" pins the dice.
 #
 # Action slugs and where they're handled:
-#   inspect_<spell>  -- right-click that card                (_on_spell_right_clicked)
+#   inspect_migraine -- right-click the Migraine card        (_on_spell_right_clicked)
 #   cast_<spell>     -- left-click that card, then its pickers (_on_spell_clicked
 #                       + _tutorial_gate_check + _tutorial_on_spell_finished)
 #   burn_rbn         -- pick "Burn for Attunement" in RbN's picker
@@ -130,10 +130,11 @@ const TERMINUS_FIVE_RAILROAD_RENT: int = 300
 #   press_space      -- press Space to pause the roll's response window
 #   await_manastone / await_adrenaline -- no input: the game un-pauses and the
 #                       open reaction window runs down so that spell resolves
-#                       on its own (advanced by _tutorial_on_spell_resolved)
-#   pause_after_manastone -- press Space to pause the fresh window that opens
-#                       once Manastone has resolved; missing it re-opens the
-#                       window and re-prompts (see _ensure_response_window)
+#                       on its own (advanced by _tutorial_on_spell_resolved).
+#                       The caster is auto-paused again once it resolves (the
+#                       cast-while-paused rule -- see _apply_auto_pause).
+#   unpause_after_adrenaline -- press Space to lift that auto-pause so the
+#                       (Adrenaline-boosted) roll finally resolves
 #   buy_oriental     -- click Yes on the Oriental Avenue buy prompt
 #   end_turn         -- click End Turn
 const TUTORIAL_STEPS: Array[Dictionary] = [
@@ -141,32 +142,32 @@ const TUTORIAL_STEPS: Array[Dictionary] = [
 	{"text": "We assume you know the rules of regular Monopoly; this tutorial will tell you how spells work."},
 	{"text": "We've started you with a few properties and a few spells to make this easier."},
 	{"text": "Right click on a spell to see what it does. Right click on the sky blue spell, Migraine.", "action": "inspect_migraine"},
-	{"text": "To cast a spell, left click it. Let's cast Migraine now.", "action": "cast_migraine"},
-	{"text": "As you can see, the spell has different levels. These levels are determined by the amount of properties you own of that color."},
-	{"text": "Note that this only counts UNMORTGAGED properties. So think twice before mortgaging!"},
-	{"text": "Since you have two sky blue properties, you can cast it at level 2. Or level 1, if you wanted to."},
+	{"text": "Each spell has different levels, determined by the amount of unmortgaged properties you own of that spell's color."},
+	{"text": "For example, since you have two sky-blue properties, you can cast Migraine at level 2."},
+	{"text": "Left click Migraine to cast it.", "action": "cast_migraine"},
 	{"text": "For now let's cast it at level 2.", "action": "pick_level"},
 	{"text": "Now target your opponent.", "action": "pick_target"},
 	{"text": "Great job! You just cast your first spell!"},
 	{"text": "Now let's roll the dice to move for our turn. Click the Roll button.", "action": "roll", "forced_roll": Vector2i(1, 3), "tag": "roll"},
 	{"text": "Quick! Press Space Bar!", "action": "press_space"},
 	{"text": "Space Bar is how you pause the game to indicate that you want to cast a spell."},
-	{"text": "This is important because many spells have effects that can only be used at certain times. For example, right-click on Adrenaline.", "action": "inspect_adrenaline"},
+	{"text": "This is important because many spells have effects that can only be used at certain times. For example, look at Adrenaline."},
 	{"text": "Adrenaline lets you increase your roll so that instead of landing on Income Tax, you can land on a property you want."},
 	{"text": "The problem is, you don't own any green properties! But fortunately, there's another way to gain Attunement to a color."},
 	{"text": "Left-click on your other green spell, Reclaimed by Nature.", "action": "cast_rbn"},
 	{"text": "As you can see, all spells have the 'burn for attunement' option. This means you can discard that spell to gain 1 Temporary Attunement to that color. Burn Reclaimed by Nature now.", "action": "burn_rbn"},
-	{"text": "Now we'd be able to cast Adrenaline at Level 1, but we can do better than that. Right click on your Manastone.", "action": "inspect_manastone"},
+	{"text": "Now we'd be able to cast Adrenaline at Level 1, but we can do better than that. Look at your Manastone."},
 	{"text": "Manastones are a special type of card that help smooth out your mana. They get stronger if you own utilities, but even without them, you can still cast them at level 0."},
 	{"text": "Cast Manastone at level 0 now, adding 1 Green Attunement.", "action": "cast_manastone"},
 	{"text": "Spells go on the stack when cast, where they wait to resolve. Players can cast other spells in response."},
 	{"text": "You could pause now to cast a spell in response to Manastone, but we want to let it resolve first to give you your attunement."},
 	{"text": "Wait for the Manastone to resolve...", "action": "await_manastone"},
-	{"text": "Press Spacebar to pause again.", "action": "pause_after_manastone"},
-	{"text": "Great! Now you have all the attunement you need."},
+	{"text": "You automatically pause again after your spell resolves. Now you have all the Green attunement you need."},
 	{"text": "Cast Adrenaline at level 2.", "action": "cast_adrenaline"},
 	{"text": "Wait for Adrenaline to resolve...", "action": "await_adrenaline"},
-	{"text": "Perfect! Now, instead of landing on a tax space, you can buy Oriental Avenue to secure your monopoly.", "action": "buy_oriental"},
+	{"text": "As you can see, your path has changed. Now you are landing on Oriental Avenue instead of Income Tax."},
+	{"text": "Since you have no more spells to cast, press spacebar again to unpause.", "action": "unpause_after_adrenaline"},
+	{"text": "Now you can buy Oriental Avenue.", "action": "buy_oriental"},
 	{"text": "One last thing: You'll notice you still have your temporary attunement. That lasts until the start of your next turn."},
 	{"text": "Let's make use of it before it goes away. Cast Sinkhole on your opponent.", "action": "cast_sinkhole"},
 	{"text": "Great job!"},
@@ -180,9 +181,6 @@ const TUTORIAL_STEPS: Array[Dictionary] = [
 # window; the next click jumps back to the "roll" step. Not a TUTORIAL_STEPS
 # entry so it never lands in the linear flow.
 const TUTORIAL_MISSED_TEXT: String = "Darn, you missed it! Let's rewind and try that again."
-# Shown when the player misses the "pause_after_manastone" window; the window
-# just re-opens and this replaces the prompt (see _ensure_response_window).
-const TUTORIAL_MISSED_PAUSE_TEXT: String = "You missed it! We'll give you another chance. Press Spacebar to pause again."
 
 # The fixed opening hands for Tutorial mode -- the script relies on exactly
 # these cards. P1 (the human) gets two sky-blue properties and five spells;
@@ -235,6 +233,7 @@ var dice_label: DiceSink = DiceSink.new()
 @onready var info_prompt: PopupPanel = $UI/InfoPrompt
 @onready var pause_menu: Control = $UI/PauseMenu
 @onready var pause_settings_menu: PopupPanel = $UI/SettingsMenu
+@onready var rules_viewer: Control = $UI/RulesViewer
 @onready var property_card: PopupPanel = $UI/PropertyCard
 @onready var asset_card: PopupPanel = $UI/AssetCard
 @onready var player_picker: PopupPanel = $UI/PlayerPicker
@@ -313,6 +312,19 @@ var _window_deadline_msec: int = 0
 # the stack (between reaction windows). Pausing is blocked during this -- the
 # resolution itself isn't interruptible.
 var _resolving_stack: bool = false
+
+# Pause Options (Settings window). MANUAL: nothing automatic. HALF: the seat
+# auto-pauses its own roll windows and the window after its own spell
+# resolves. FULL: also every other roll, every cast, and every resolution.
+# Auto-pause only ever fires for a seat holding >= 1 spell.
+const PAUSE_MANUAL: int = 0
+const PAUSE_HALF: int = 1
+const PAUSE_FULL: int = 2
+# This machine's setting (mirrors pause_settings_menu.pause_option).
+var _pause_option: int = PAUSE_HALF
+# Per player_id, host-authoritative. Local seats copy _pause_option; remote
+# seats report theirs via _net_report_pause_option. Read by _apply_auto_pause.
+var _seat_pause_option: Array[int] = []
 # True for the whole time a roll is "in flight" -- from right after it's
 # shown until movement actually happens -- so Instant spells timed to a roll
 # (e.g. T3 Escape Spell) know a roll is actually what's being responded to,
@@ -340,11 +352,11 @@ var _roll_seq: int = 0
 
 
 # Wizard Vision: while a roll is in flight (the response window right after
-# rolling, before it resolves into a move), draws a red line from the
-# roller's current position to where they'll actually land -- kept live as
-# _current_roll changes (a roll-modifying Instant spell like T3 Escape
-# Spell/Adrenaline), so players can see at a glance whether it's worth
-# reacting. Both setters above call this on every change to either var.
+# rolling, before it resolves into a move), draws a line -- in the rolling
+# player's own colour -- from the roller's current position to where they'll
+# actually land. Kept live as _current_roll changes (a roll-modifying Instant
+# spell like T3 Escape Spell/Adrenaline), so players can see at a glance
+# whether it's worth reacting. Both setters above call this on every change.
 func _update_wizard_vision() -> void:
 	if not wizard_vision_line:
 		return
@@ -353,7 +365,7 @@ func _update_wizard_vision() -> void:
 		return
 	var roller: Node2D = players[current_player]
 	var landing_index: int = (roller.current_space + _current_roll) % board.TOTAL_SPACES
-	wizard_vision_line.show_line(roller.position, board.get_space_center(landing_index))
+	wizard_vision_line.show_line(roller.position, board.get_space_center(landing_index), PLAYER_COLORS[current_player])
 
 # The pending spell stack: each entry is {"id": int, "caster_id": int,
 # "spell_name": String, "level": int, "display_name": String, "resolve":
@@ -371,10 +383,24 @@ var _next_stack_id: int = 0
 # snapshot -- clients don't have the real _spell_stack. Drives the
 # spell-cast card display; see _spell_stack_names().
 var _net_spell_stack_names: Array = []
-# Set by a _prepare_* step to the name of the target it just picked (an
-# opponent or a property), so _finish_cast can name it in the log line.
-# Read and cleared there.
-var _pending_spell_target: String = ""
+# Targets picked by the _prepare_* step of the cast currently being set up.
+# Each entry is {"kind": "player"|"property", "id": int}. _finish_cast copies
+# this onto the stack entry (as "target_marks"), names it in the log line
+# ("... targeting X"), then clears it. Also cleared at the top of
+# _prepare_spell_cast so a cancelled cast can't leak its picks into the next.
+# An optional label overrides the derived name in the log only (used by
+# side-of-the-board spells like Line of Fire, and by counter spells naming
+# the spell they target).
+var _pending_spell_target_marks: Array = []
+var _pending_spell_target_label: String = ""
+# Client mirror (host has the real _spell_stack): flat list of every live
+# stack entry's target marks, from the snapshot. Drives the red outlines.
+var _net_spell_target_marks: Array = []
+# Board side (0 bottom, 1 left, 2 top, 3 right) -> display name, for the log.
+const BOARD_SIDE_NAMES: Array[String] = ["Bottom", "Left", "Top", "Right"]
+# Shown next to a player's name in the Players panel while a pending spell
+# targets them (renders via the OS emoji-font fallback, like the ★ markers).
+const SPELL_TARGET_SYMBOL: String = "🎯"
 
 # The shared Spell Deck every player draws from (game start, and one card
 # whenever anyone passes Go). Every spell that leaves a hand -- resolved,
@@ -482,7 +508,15 @@ func _ready() -> void:
 	trader2_money_edit.text_changed.connect(_on_trade_money_changed)
 	card_picker.zoom_requested.connect(spell_card.show_card)
 	spell_card.reveal_pressed.connect(_on_zoom_reveal_pressed)
+	_seat_pause_option.resize(players.size())
+	_seat_pause_option.fill(PAUSE_HALF)
+	_pause_option = pause_settings_menu.pause_option
+	_apply_local_pause_option()
+	pause_settings_menu.pause_option_changed.connect(_on_pause_option_changed)
+	if GameState.online and not GameState.is_authority():
+		_net_report_pause_option.rpc_id(1, _pause_option)
 	pause_menu.set_settings_menu(pause_settings_menu)
+	pause_menu.set_rules_viewer(rules_viewer)
 	pause_menu.quit_to_menu_requested.connect(_quit_to_main_menu)
 	pause_menu.quit_to_desktop_requested.connect(get_tree().quit)
 	board.space_clicked.connect(_on_space_clicked)
@@ -591,7 +625,12 @@ func _quit_to_main_menu() -> void:
 	_returning_to_menu = true
 	if GameState.online:
 		Net.leave()
-	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
+	# Let any in-flight coroutine (response window loop, AI turn, routed
+	# prompt) see _returning_to_menu and bail before this scene is freed --
+	# otherwise it resumes on a get_tree() that's gone null.
+	await get_tree().process_frame
+	if is_inside_tree():
+		get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
 
 
 # ============================================================================
@@ -744,10 +783,11 @@ func _end_tutorial() -> void:
 #  - a zoomed-in spell card is dismissed by the next click, which is then
 #    swallowed and does NOT advance (the card was covering the text; the
 #    player reads it after, then clicks again to move on);
-#  - on a "click to continue" step, every mouse press is swallowed (so it
-#    can't dismiss an open picker or hit a button underneath); a left click
-#    advances, unless a spell is mid-resolution (window open, nobody paused),
-#    in which case the click is still eaten but we wait.
+#  - on a "click to continue" step, a LEFT click is swallowed (so it can't
+#    dismiss an open picker or hit a button underneath) and advances -- unless
+#    a spell is mid-resolution (window open, nobody paused), in which case the
+#    click is still eaten but we wait. A RIGHT click falls through, so you can
+#    right-click a card to zoom it at any point in the tutorial.
 # Action steps otherwise let input through untouched.
 func _input(event: InputEvent) -> void:
 	if not _tutorial_active:
@@ -764,9 +804,10 @@ func _input(event: InputEvent) -> void:
 		return
 	if _tutorial_expected_action != "":
 		return
+	if event.button_index != MOUSE_BUTTON_LEFT:
+		return
 	get_viewport().set_input_as_handled()
-	if event.button_index == MOUSE_BUTTON_LEFT:
-		_tutorial_try_click_advance()
+	_tutorial_try_click_advance()
 
 
 func _tutorial_try_click_advance() -> void:
@@ -852,12 +893,12 @@ func _tutorial_left_click_spell() -> String:
 	return ""
 
 
-# The spell the current step wants RIGHT-clicked ("" = none).
+# The spell the current step wants RIGHT-clicked ("" = none). Adrenaline and
+# Manastone are only "look at" steps now (plain click-to-continue), so
+# right-clicking them just zooms the card without advancing.
 func _tutorial_right_click_spell() -> String:
 	match _tutorial_expected_action:
 		"inspect_migraine": return "Migraine"
-		"inspect_adrenaline": return "Adrenaline"
-		"inspect_manastone": return "Manastone"
 	return ""
 
 
@@ -883,27 +924,31 @@ func _tutorial_on_spell_resolved(spell_name: String) -> void:
 	match _tutorial_expected_action:
 		"await_manastone":
 			if spell_name == "Manastone":
-				_tutorial_advance()  # -> "Press Spacebar to pause again."
+				_tutorial_advance()  # -> "You automatically pause again..."
 		"await_adrenaline":
 			if spell_name == "Adrenaline":
-				_tutorial_advance()  # -> "Perfect! ...buy Oriental Avenue"
+				_tutorial_advance()  # -> "As you can see, your path has changed..."
 
 
 # Space during the tutorial: pause a reaction window. Returns true if it
 # handled the press (else the caller toasts "Follow the instructions!").
 func _tutorial_handle_space() -> bool:
-	if not _response_window_open or _response_window_paused_by[0]:
+	if not _response_window_open:
 		return false
 	match _tutorial_expected_action:
 		"press_space":
+			if _response_window_paused_by[0]:
+				return false
 			_toggle_pause_for_player(0)
 			if _response_window_paused_by[0]:
 				_tutorial_advance()  # -> "Space Bar is how you pause the game..."
 			return true
-		"pause_after_manastone":
+		"unpause_after_adrenaline":
+			if not _response_window_paused_by[0]:
+				return false
 			_toggle_pause_for_player(0)
-			if _response_window_paused_by[0]:
-				_tutorial_advance()  # -> "Great! Now you have all the attunement you need."
+			if not _response_window_paused_by[0]:
+				_tutorial_advance()  # -> "Now you can buy Oriental Avenue."
 			return true
 	return false
 
@@ -1409,12 +1454,14 @@ func _run_ai_turn_body() -> void:
 	if not players[ai_index].is_placeholder_ai:
 		await _ai_p2_opening_burn(players[ai_index])
 	while current_player == ai_index and not players[ai_index].is_bankrupt:
+		if _returning_to_menu or not is_inside_tree():
+			return
 		_refresh_action_buttons()
 		await get_tree().create_timer(0.6).timeout
 		var die1: int = randi_range(1, 6)
 		var die2: int = randi_range(1, 6)
 		await _perform_roll(die1, die2)
-		if current_player != ai_index or players[ai_index].is_bankrupt:
+		if current_player != ai_index or players[ai_index].is_bankrupt or _returning_to_menu or not is_inside_tree():
 			return
 		if _awaiting_end_turn:
 			await get_tree().create_timer(0.6).timeout
@@ -1439,6 +1486,10 @@ func _ai_p2_opening_burn(player: Node2D) -> void:
 		return
 	var amount: int = SpellData.SPELLS["T1 Burn Spell"]["levels"][1].get("amount", 0)
 	var resolve: Callable = _resolve_t1_burn_spell.bind(player, 1, 0, amount)
+	# This bypasses _prepare_spell_cast, so set the target mark by hand (P1).
+	_pending_spell_target_marks = []
+	_pending_spell_target_label = ""
+	_spell_target_player(0)
 	await _finish_cast(player, "T1 Burn Spell", 1, resolve)
 
 
@@ -1759,7 +1810,7 @@ func _mortgage_property(index: int) -> void:
 	var player: Node2D = players[_acting_player_id()]
 	# Terminus Station (index 0) isn't a normal SPACE_DATA "property" -- see
 	# _terminus_aware_price() -- but the card explicitly allows mortgaging it.
-	var property_name: String = "Terminus Station" if index == 0 else info.get("name", "")
+	var property_name: String = _property_name(index)
 	var mortgage_value: int = _mortgage_value(_terminus_aware_price(index))
 
 	if index != 0 and info.get("type", "") != "property":
@@ -1782,7 +1833,7 @@ func _unmortgage_property(index: int) -> void:
 	var info: Dictionary = board.get_space_info(index)
 	var space: Node2D = board.spaces[index]
 	var player: Node2D = players[_acting_player_id()]
-	var property_name: String = "Terminus Station" if index == 0 else info.get("name", "")
+	var property_name: String = _property_name(index)
 	var unmortgage_value: int = _unmortgage_value(_terminus_aware_price(index))
 
 	if index != 0 and info.get("type", "") != "property":
@@ -1999,20 +2050,26 @@ func _response_window_seconds() -> float:
 	if _tutorial_active:
 		# A generous window for the moments the player has to react to; snappier
 		# for the tutorial's own auto-resolutions (Migraine, Manastone, etc.).
-		return 5.0 if _tutorial_expected_action in ["press_space", "pause_after_manastone"] else 1.5
+		return 5.0 if _tutorial_expected_action == "press_space" else 1.5
 	# Online, widen the window so a remote player's pause has time to reach
 	# the host before the countdown expires.
 	return RESPONSE_WINDOW_SECONDS * 2.0 if GameState.online else RESPONSE_WINDOW_SECONDS
 
 
-func _ensure_response_window() -> void:
+# trigger / trigger_seat drive auto-pause (Pause Options) -- "roll" from
+# _perform_roll, "cast" from _finish_cast, "resolve" is applied by the loop
+# itself as each spell comes off the stack.
+func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> void:
 	var seconds: float = _response_window_seconds()
 	_window_deadline_msec = Time.get_ticks_msec() + int(seconds * 1000.0)
 	if _response_window_open or _resolving_stack:
+		# A cast landing in a window that's already running still auto-pauses.
+		_apply_auto_pause(trigger, trigger_seat)
 		return
 	_response_window_open = true
 	_response_window_paused_by.resize(players.size())
 	_response_window_paused_by.fill(false)
+	_apply_auto_pause(trigger, trigger_seat)
 	_refresh_action_buttons()
 	dice_label.text += "\n(Press Space or your player number within %ds to pause from that player's perspective and react with an Instant spell.)" % int(seconds)
 
@@ -2027,24 +2084,20 @@ func _ensure_response_window() -> void:
 		# the rolling player's buy prompt gets misrouted to them (see
 		# _prompt_target / _ask_buy_property).
 		while _response_window_paused_by.has(true) or _casting_spell or Time.get_ticks_msec() < _window_deadline_msec:
+			# Quit to Main Menu (or a disconnect) frees this scene mid-loop --
+			# bail before touching a get_tree() that's about to go null.
+			if _returning_to_menu or not is_inside_tree():
+				return
 			await get_tree().process_frame
 
 		_response_window_open = false
 		_refresh_action_buttons()
 		if _spell_stack.is_empty():
-			# Tutorial: the player was meant to pause this window and didn't --
-			# don't let the roll proceed, re-open the window and re-prompt.
-			if _tutorial_active and _tutorial_expected_action == "pause_after_manastone":
-				tutorial_bubble_label.text = TUTORIAL_MISSED_PAUSE_TEXT
-				_response_window_open = true
-				_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
-				_response_window_paused_by.fill(false)
-				_refresh_action_buttons()
-				continue
 			break
 
 		_resolving_stack = true
-		var resolved_name: String = await _resolve_top_of_stack()
+		var resolved: Dictionary = await _resolve_top_of_stack()
+		var resolved_name: String = resolved.get("spell_name", "")
 		_resolving_stack = false
 		_update_player_panels()
 		# A spell cast to earn money out of a raise-money window may have done it.
@@ -2065,6 +2118,11 @@ func _ensure_response_window() -> void:
 		_response_window_open = true
 		_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
 		_response_window_paused_by.fill(false)
+		var resolved_caster: int = int(resolved.get("caster_id", -1))
+		# A player who cast this spell while paused gets paused again now, so
+		# they keep reacting -- for every Pause Options setting.
+		var repause_seat: int = resolved_caster if resolved.get("caster_was_paused", false) else -1
+		_apply_auto_pause("resolve", resolved_caster, repause_seat)
 		_refresh_action_buttons()
 		if not _tutorial_active:
 			dice_label.text += "\n(Reaction window -- press Space or your player number to respond.)"
@@ -2073,16 +2131,16 @@ func _ensure_response_window() -> void:
 	_maybe_resolve_debt()
 
 
-# Pops and resolves just the top of _spell_stack (LIFO), returning its spell
-# name (or "" if the stack was empty) -- driven by _ensure_response_window()
+# Pops and resolves just the top of _spell_stack (LIFO), returning its stack
+# entry ({} if the stack was empty) -- driven by _ensure_response_window()
 # once a reaction window has fully elapsed. Countering a spell (T2 Response
 # Spell, Level 1) removes its entry before it's ever popped here, so it's
 # simply skipped -- per "countering negates the effect and discards it", its
 # own resolve never runs, but _resolve_t2_counter() shuffles it back into the
 # deck itself, same as any spell that resolves normally here does.
-func _resolve_top_of_stack() -> String:
+func _resolve_top_of_stack() -> Dictionary:
 	if _spell_stack.is_empty():
-		return ""
+		return {}
 	var entry: Dictionary = _spell_stack.pop_back()
 	# The card leaves the visual stack the moment it starts resolving.
 	_update_spell_stack_display()
@@ -2090,7 +2148,7 @@ func _resolve_top_of_stack() -> String:
 	if resolve.is_valid():
 		await resolve.call()
 		_return_spell_to_deck(entry["spell_name"])
-	return entry.get("spell_name", "")
+	return entry
 
 
 # Spell names on the stack, bottom (oldest) -> top (newest / resolves first).
@@ -2116,6 +2174,7 @@ var _spell_stack_display_cache: Array = []
 func _update_spell_stack_display() -> void:
 	if spell_cast_stack == null:
 		return
+	_refresh_spell_target_highlights()
 	var names: Array = _spell_stack_names()
 	if names == _spell_stack_display_cache:
 		return
@@ -2195,6 +2254,86 @@ func _toggle_pause_for_player(player_index: int) -> void:
 	_update_player_panels()
 
 
+# --- Pause Options (Settings): auto-pause ------------------------------
+
+# Copies this machine's Pause Options setting onto the seat(s) it controls
+# (every human seat in a hotseat game; this client's own online). Remote seats
+# keep whatever they last reported via _net_report_pause_option.
+func _apply_local_pause_option() -> void:
+	for seat in players.size():
+		if seat >= _seat_pause_option.size():
+			continue
+		var local: bool = GameState.is_slot_local(seat) if GameState.online else not players[seat].is_ai
+		if local:
+			_seat_pause_option[seat] = _pause_option
+
+
+func _on_pause_option_changed(option: int) -> void:
+	_pause_option = option
+	_apply_local_pause_option()
+	if GameState.online and not GameState.is_authority():
+		_net_report_pause_option.rpc_id(1, option)
+
+
+# A client tells the host which Pause Options mode it's on, so the host can
+# auto-pause that seat on its behalf (the seat's pause state then reaches the
+# client through the normal snapshot).
+@rpc("any_peer", "call_remote", "reliable")
+func _net_report_pause_option(option: int) -> void:
+	if not GameState.is_authority():
+		return
+	var sender: int = multiplayer.get_remote_sender_id()
+	var opt: int = clampi(option, PAUSE_MANUAL, PAUSE_FULL)
+	for seat in players.size():
+		if seat < GameState.slot_peer.size() and GameState.slot_peer[seat] == sender and seat < _seat_pause_option.size():
+			_seat_pause_option[seat] = opt
+
+
+# Auto-pauses seats whose Pause Options setting says to, for a reaction-window
+# trigger: event is "roll" | "cast" | "resolve" and trigger_seat is the roller
+# / caster. Host-side; normally only pauses a seat that holds at least one
+# spell. `force_seat`, if set, is a seat that pauses regardless of its Pause
+# Options setting or hand size -- used to re-pause a player after a spell they
+# cast while paused resolves.
+func _apply_auto_pause(event: String, trigger_seat: int, force_seat: int = -1) -> void:
+	if not _response_window_open or not GameState.is_authority():
+		return
+	# The tutorial choreographs its own pauses -- but the cast-while-paused
+	# re-pause (force_seat) still applies, so its script can rely on it.
+	if _tutorial_active and force_seat < 0:
+		return
+	var paused_names: Array[String] = []
+	for seat in players.size():
+		if seat >= _response_window_paused_by.size() or _response_window_paused_by[seat]:
+			continue
+		if players[seat].is_ai or players[seat].is_bankrupt:
+			continue
+		var forced: bool = seat == force_seat
+		if not forced and players[seat].spell_hand.is_empty():
+			continue
+		var opt: int = _seat_pause_option[seat] if seat < _seat_pause_option.size() else PAUSE_HALF
+		if not forced and not _auto_pause_applies(opt, event, seat, trigger_seat):
+			continue
+		_response_window_paused_by[seat] = true
+		paused_names.append(PLAYER_NAMES[seat])
+	if not paused_names.is_empty():
+		dice_roller.finish_now()
+		dice_label.text += "\nAuto-paused: %s (press Space / your number to resume)." % ", ".join(paused_names)
+		_refresh_action_buttons()
+		_update_player_panels()
+
+
+func _auto_pause_applies(opt: int, event: String, seat: int, trigger_seat: int) -> bool:
+	match opt:
+		PAUSE_HALF:
+			return (event == "roll" or event == "resolve") and trigger_seat == seat
+		PAUSE_FULL:
+			if event == "cast":
+				return trigger_seat != seat
+			return event == "roll" or event == "resolve"
+	return false  # PAUSE_MANUAL / unknown
+
+
 func _perform_roll(die1: int, die2: int) -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
@@ -2239,7 +2378,9 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# opens; the player must pause it within the window (see _unhandled_input).
 	if _tutorial_active and _tutorial_expected_action == "roll":
 		_tutorial_advance()
-	await _ensure_response_window()
+	await _ensure_response_window("roll", current_player)
+	if _returning_to_menu or not is_inside_tree():
+		return
 	_roll_in_flight = false
 	dice_roller.finish_now()
 	roll = _current_roll
@@ -2339,12 +2480,12 @@ func _move_player(player: Node2D, roll: int) -> bool:
 		var owned_railroads: int = _unmortgaged_railroad_count(board.spaces[0].owner_id)
 		var rent_amount: int = _apply_payment_reduction(player, _railroad_rent(owned_railroads, TERMINUS_RAILROAD_RENTS))
 		if rent_amount > player.money:
-			dice_label.text += "\nTerminus Station (owned by %s)! Owes $%d rent." % [PLAYER_NAMES[board.spaces[0].owner_id], rent_amount]
+			dice_label.text += "\nTerminus (owned by %s)! Owes $%d rent." % [PLAYER_NAMES[board.spaces[0].owner_id], rent_amount]
 			await _collect_debt(player, rent_amount, terminus_owner)
 			return player.is_bankrupt
 		player.money -= rent_amount
 		terminus_owner.money += rent_amount
-		dice_label.text += "\nTerminus Station (owned by %s)! Paid $%d rent (%d railroads owned)." % [PLAYER_NAMES[board.spaces[0].owner_id], rent_amount, owned_railroads]
+		dice_label.text += "\nTerminus (owned by %s)! Paid $%d rent (%d railroads owned)." % [PLAYER_NAMES[board.spaces[0].owner_id], rent_amount, owned_railroads]
 		_log_payment(player.player_id, rent_amount, PLAYER_NAMES[board.spaces[0].owner_id])
 
 	var landed_info: Dictionary = board.get_space_info(player.current_space)
@@ -3268,7 +3409,7 @@ func _populate_trade_flow(flow: HFlowContainer, indices: Array[int]) -> void:
 		var color: Color = board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY)
 		var mini_card: Control = MINI_CARD_SCENE.instantiate()
 		flow.add_child(mini_card)
-		mini_card.setup(space_index, info.get("name", ""), color, board.spaces[space_index].house_count, board.spaces[space_index].is_mortgaged)
+		mini_card.setup(space_index, _property_name(space_index), color, board.spaces[space_index].house_count, board.spaces[space_index].is_mortgaged)
 		mini_card.card_clicked.connect(_on_space_clicked)
 		mini_card.card_right_clicked.connect(_show_property_details)
 
@@ -3540,6 +3681,38 @@ func _reassert_buy_prompt_if_needed() -> void:
 		_cf_open("Buy %s for $%d?" % [_pending_buy_property_name, _pending_buy_price])
 
 
+# Completes a spell-driven property purchase (Promised Land, The Cult of
+# Terminus L3) the same way a normal purchase would: if `buyer` is short of
+# `price`, they drop into the Raise Money window (sell houses / mortgage /
+# trade / cast a spell) with a Cancel that abandons the buy. `seller_id` -1
+# means the bank; otherwise that player is paid and loses the property.
+# Returns true if the property actually changed hands.
+func _buy_property_via_spell(buyer: Node2D, space_index: int, price: int, seller_id: int) -> bool:
+	var space: Node2D = board.spaces[space_index]
+	if buyer.money < price:
+		_prompt_slot = buyer.player_id
+		var outcome: String = await _raise_money(buyer, price, null, true, false)
+		_prompt_slot = -1
+		if outcome != "paid" or buyer.money < price:
+			return false
+	# Time may have passed raising the money -- make sure the target is still
+	# up for grabs / still owned by the same seller.
+	if seller_id == -1:
+		if space.owner_id != -1:
+			return false
+	elif space.owner_id != seller_id:
+		return false
+	buyer.money -= price
+	if seller_id != -1:
+		players[seller_id].owned_property_indices.erase(space_index)
+		players[seller_id].money += price
+	space.owner_id = buyer.player_id
+	buyer.owned_property_indices.append(space_index)
+	_sort_owned_properties(buyer)
+	_update_player_panels()
+	return true
+
+
 func _sort_owned_properties(player: Node2D) -> void:
 	player.owned_property_indices.sort_custom(_compare_property_order)
 
@@ -3548,8 +3721,10 @@ func _sort_owned_properties(player: Node2D) -> void:
 # within a group. Unlisted colors (shouldn't happen -- only owned property
 # spaces get sorted) fall to the end rather than crashing on find()'s -1.
 func _compare_property_order(a: int, b: int) -> bool:
-	var color_a: String = board.get_space_info(a).get("color", "")
-	var color_b: String = board.get_space_info(b).get("color", "")
+	# Space 0 in a hand is Terminus -- a railroad card, so it sorts with the
+	# other railroads (its SPACE_DATA has no "color").
+	var color_a: String = "railroad" if a == 0 else board.get_space_info(a).get("color", "")
+	var color_b: String = "railroad" if b == 0 else board.get_space_info(b).get("color", "")
 	var rank_a: int = PROPERTY_COLOR_ORDER.find(color_a)
 	var rank_b: int = PROPERTY_COLOR_ORDER.find(color_b)
 	if rank_a == -1:
@@ -4137,7 +4312,7 @@ func _spell_extra_validation(caster: Node2D, spell_name: String, level: int) -> 
 		# Temporary Attunement doesn't help here -- this checks actual owned
 		# railroads, same idea as Escape Plan's board-state preconditions.
 		if board.spaces[0].owner_id != -1:
-			return "Terminus Station has already been summoned."
+			return "Terminus has already been summoned."
 		if _owned_railroad_count(caster.player_id) < 4:
 			return "%s doesn't own all 4 railroads." % _player_display_name(caster.player_id)
 	return ""
@@ -4149,6 +4324,9 @@ func _spell_extra_validation(caster: Node2D, spell_name: String, level: int) -> 
 # or an invalid Callable if nothing was actually cast, in which case the
 # caller must leave the card in the caster's hand untouched.
 func _prepare_spell_cast(caster: Node2D, hand_index: int, spell_name: String, level: int) -> Callable:
+	# Any targets a previous (cancelled) prepare picked are stale now.
+	_pending_spell_target_marks = []
+	_pending_spell_target_label = ""
 	match spell_name:
 		"T1 Burn Spell":
 			return await _prepare_t1_burn_spell(caster, level)
@@ -4180,8 +4358,8 @@ func _prepare_spell_cast(caster: Node2D, hand_index: int, spell_name: String, le
 			return await _prepare_impossible_architecture(caster, level)
 		"Promised Land":
 			return await _prepare_promised_land(caster, level)
-		"Share the Wealth":
-			return _prepare_share_the_wealth(caster, level)
+		"Break Bread":
+			return _prepare_break_bread(caster, level)
 		"Smite":
 			return _prepare_smite(caster, level)
 		"Divine Protection":
@@ -4252,10 +4430,28 @@ func _finish_cast(caster: Node2D, spell_name: String, level: int, resolve: Calla
 	var stack_id: int = _next_stack_id
 	_next_stack_id += 1
 	var display_name: String = "%s (Level %d)" % [spell_name, level]
-	_spell_stack.append({"id": stack_id, "caster_id": caster.player_id, "spell_name": spell_name, "level": level, "display_name": display_name, "resolve": resolve})
+	# Whether the caster was paused (i.e. cast this as a reaction during a
+	# response window) -- if so, they auto-pause again once it resolves, so a
+	# player who's actively engaging keeps their say regardless of Pause
+	# Options. Captured now, before the un-pause below.
+	var caster_was_paused: bool = caster.player_id >= 0 \
+		and caster.player_id < _response_window_paused_by.size() \
+		and _response_window_paused_by[caster.player_id]
+	_spell_stack.append({
+		"id": stack_id, "caster_id": caster.player_id, "spell_name": spell_name,
+		"level": level, "display_name": display_name, "resolve": resolve,
+		"target_marks": _pending_spell_target_marks.duplicate(true),
+		"caster_was_paused": caster_was_paused,
+	})
 	dice_label.text += "\n%s casts %s!" % [_player_display_name(caster.player_id), display_name]
-	var target_suffix: String = "" if _pending_spell_target == "" else (" targeting %s" % _pending_spell_target)
-	_pending_spell_target = ""
+	var target_suffix: String = ""
+	var target_text: String = _pending_spell_target_label
+	if target_text == "":
+		target_text = _spell_target_names(_pending_spell_target_marks)
+	if target_text != "":
+		target_suffix = " targeting %s" % target_text
+	_pending_spell_target_marks = []
+	_pending_spell_target_label = ""
 	_log("%s cast %s at Level %d%s." % [PLAYER_NAMES[caster.player_id], spell_name, level, target_suffix])
 	# The caster's reaction is spent -- un-pause them so the fresh window that
 	# opens now is a clean chance for anyone (them included) to answer this
@@ -4263,9 +4459,82 @@ func _finish_cast(caster: Node2D, spell_name: String, level: int, resolve: Calla
 	if not _tutorial_active and caster.player_id >= 0 and caster.player_id < _response_window_paused_by.size():
 		_response_window_paused_by[caster.player_id] = false
 	_update_player_panels()
-	await _ensure_response_window()
+	await _ensure_response_window("cast", caster.player_id)
 	if _tutorial_active:
 		await _tutorial_on_spell_finished(spell_name)
+
+
+# --- Spell targeting: outlines + "targeting X" log suffix -------------------
+# A _prepare_* step calls these as it picks each player / property target.
+# _pending_spell_target_marks is consumed by _finish_cast (above).
+
+func _spell_target_player(player_id: int) -> void:
+	_pending_spell_target_marks.append({"kind": "player", "id": player_id})
+
+
+func _spell_target_property(space_index: int) -> void:
+	_pending_spell_target_marks.append({"kind": "property", "id": space_index})
+
+
+# A counter spell (Counterbalance, T2 Response Spell L1, Spell Mastery)
+# "targets" another spell on the stack -- name it in the log line, but there's
+# no token / tile to outline.
+func _spell_target_spell(stack_id: int) -> void:
+	for entry in _spell_stack:
+		if entry["id"] == stack_id:
+			_pending_spell_target_label = "%s's %s" % [_player_display_name(entry["caster_id"]), entry["display_name"]]
+			return
+
+
+# Human-readable name(s) for a list of target marks, e.g. "Player 2" or
+# "Park Place and Boardwalk". Empty string for no targets.
+func _spell_target_names(marks: Array) -> String:
+	var names: Array[String] = []
+	for mark in marks:
+		match mark.get("kind", ""):
+			"player":
+				names.append(_player_display_name(int(mark["id"])))
+			"property":
+				names.append(_property_name(int(mark["id"])))
+	if names.is_empty():
+		return ""
+	if names.size() == 1:
+		return names[0]
+	return "%s and %s" % [", ".join(names.slice(0, names.size() - 1)), names[-1]]
+
+
+# Every live stack entry's target marks, flattened -- host-authoritative
+# source for _refresh_spell_target_highlights() and the snapshot.
+func _all_stack_target_marks() -> Array:
+	var out: Array = []
+	for entry in _spell_stack:
+		for mark in entry.get("target_marks", []):
+			out.append({"kind": mark["kind"], "id": int(mark["id"])})
+	return out
+
+
+# Player ids a spell on the pending stack currently targets -- read by
+# _update_player_panels() to show a target symbol next to the name.
+var _targeted_player_ids: Dictionary = {}
+
+
+# Marks every board space a pending spell targets with a red outline, and
+# records which players are targeted (shown as a symbol by the name, not a
+# token highlight). Called from _update_player_panels() and
+# _update_spell_stack_display(), so it re-runs on every cast, resolution,
+# counter, and client snapshot.
+func _refresh_spell_target_highlights() -> void:
+	var marks: Array = _net_spell_target_marks if (GameState.online and not GameState.is_authority()) else _all_stack_target_marks()
+	_targeted_player_ids = {}
+	var targeted_spaces: Dictionary = {}
+	for mark in marks:
+		match mark.get("kind", ""):
+			"player":
+				_targeted_player_ids[int(mark["id"])] = true
+			"property":
+				targeted_spaces[int(mark["id"])] = true
+	for i in board.spaces.size():
+		board.spaces[i].set_targeted(targeted_spaces.has(i))
 
 
 # T1 Burn Spell: the caster picks an opponent to target now; the payment
@@ -4284,6 +4553,7 @@ func _prepare_t1_burn_spell(caster: Node2D, level: int) -> Callable:
 	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
+	_spell_target_player(target_index)
 
 	var amount: int = SpellData.SPELLS["T1 Burn Spell"]["levels"][level].get("amount", 0)
 	return _resolve_t1_burn_spell.bind(caster, level, target_index, amount)
@@ -4332,6 +4602,7 @@ func _prepare_t2_counter(caster: Node2D) -> Callable:
 	var target_id: int = await _pp_result()
 	if target_id == -1:
 		return Callable()
+	_spell_target_spell(target_id)
 	return _resolve_counter_spell.bind(caster, "T2 Response Spell (Level 1)", target_id)
 
 
@@ -4347,6 +4618,7 @@ func _prepare_counterbalance(caster: Node2D, level: int) -> Callable:
 	var target_id: int = await _pp_result()
 	if target_id == -1:
 		return Callable()
+	_spell_target_spell(target_id)
 	return _resolve_counter_spell.bind(caster, "Counterbalance (Level %d)" % level, target_id)
 
 
@@ -4425,6 +4697,7 @@ func _prepare_snatch_purse(caster: Node2D, level: int) -> Callable:
 	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
+	_spell_target_player(target_index)
 
 	var count: int = SpellData.SPELLS["Snatch Purse"]["levels"][level].get("count", 1)
 	return _resolve_snatch_purse.bind(caster, level, target_index, count)
@@ -4533,6 +4806,7 @@ func _prepare_migraine(caster: Node2D, level: int) -> Callable:
 	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
+	_spell_target_player(target_index)
 
 	var pay_per_card: int = SpellData.SPELLS["Migraine"]["levels"][level].get("pay_per_card", 0)
 	var card_count: int = players[target_index].spell_hand.size()
@@ -4562,7 +4836,7 @@ func _prepare_impossible_architecture(caster: Node2D, level: int) -> Callable:
 	for space_index in caster.owned_property_indices:
 		var color_name: String = board.get_space_info(space_index).get("color", "")
 		if board.HOUSE_COSTS_BY_COLOR.has(color_name):
-			entries.append({"index": space_index, "name": board.get_space_info(space_index).get("name", ""), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
+			entries.append({"index": space_index, "name": _property_name(space_index), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
 	if entries.is_empty():
 		dice_label.text += "\nThere's no property to build on."
 		return Callable()
@@ -4571,8 +4845,9 @@ func _prepare_impossible_architecture(caster: Node2D, level: int) -> Callable:
 	var space_index: int = await _pp_result()
 	if space_index == -1:
 		return Callable()
+	_spell_target_property(space_index)
 
-	var property_name: String = board.get_space_info(space_index).get("name", "")
+	var property_name: String = _property_name(space_index)
 	var space: Node2D = board.spaces[space_index]
 	if space.is_mortgaged:
 		dice_label.text += "\n%s is mortgaged and can't be built on." % property_name
@@ -4597,7 +4872,7 @@ func _prepare_impossible_architecture(caster: Node2D, level: int) -> Callable:
 
 func _resolve_impossible_architecture(caster: Node2D, level: int, space_index: int, houses: int, total_cost: int) -> void:
 	var space: Node2D = board.spaces[space_index]
-	var property_name: String = board.get_space_info(space_index).get("name", "")
+	var property_name: String = _property_name(space_index)
 	space.house_count = mini(5, space.house_count + houses)
 	caster.money -= total_cost
 	var house_word: String = "house" if houses == 1 else "houses"
@@ -4647,33 +4922,28 @@ func _prepare_promised_land(caster: Node2D, level: int) -> Callable:
 				return Callable()
 			space_index = clicked
 
-	var info: Dictionary = board.get_space_info(space_index)
-	var price: int = info.get("price", 0)
-	_cf_open("Promised Land: buy %s for $%d?" % [info.get("name", ""), price])
+	var price: int = board.get_space_info(space_index).get("price", 0)
+	_cf_open("Promised Land: buy %s for $%d?" % [_property_name(space_index), price])
 	var yes: bool = await _cf_result()
 	if not yes:
 		return Callable()
+	_spell_target_property(space_index)
 	return _resolve_promised_land.bind(caster, level, space_index, price)
 
 
-# Re-checks ownership and affordability at resolution (rather than trusting
-# the cast-time snapshot) since real time -- and an opposing response, e.g.
-# Migraine draining the caster -- passes between the "yes" and this.
+# Resolves like a normal purchase (see _buy_property_via_spell): re-checks the
+# property is still unowned, then buys it -- dropping the caster into Raise
+# Money if they're short (an opposing response like Migraine may have drained
+# them since the "yes"), with a Cancel that just abandons the buy.
 func _resolve_promised_land(caster: Node2D, level: int, space_index: int, price: int) -> void:
-	var space: Node2D = board.spaces[space_index]
-	var property_name: String = board.get_space_info(space_index).get("name", "")
-	if space.owner_id != -1:
+	var property_name: String = _property_name(space_index)
+	if board.spaces[space_index].owner_id != -1:
 		dice_label.text = "%s's Promised Land (Level %d) fizzles -- %s was already bought." % [_player_display_name(caster.player_id), level, property_name]
 		return
-	if caster.money < price:
-		dice_label.text = "%s's Promised Land (Level %d) fizzles -- can't afford %s ($%d)." % [_player_display_name(caster.player_id), level, property_name, price]
-		return
-	caster.money -= price
-	space.owner_id = caster.player_id
-	caster.owned_property_indices.append(space_index)
-	_sort_owned_properties(caster)
-	dice_label.text = "%s's Promised Land (Level %d) resolves! Bought %s for $%d." % [_player_display_name(caster.player_id), level, property_name, price]
-	_update_player_panels()
+	if await _buy_property_via_spell(caster, space_index, price, -1):
+		dice_label.text = "%s's Promised Land (Level %d) resolves! Bought %s for $%d." % [_player_display_name(caster.player_id), level, property_name, price]
+	else:
+		dice_label.text = "%s's Promised Land (Level %d): %s wasn't bought." % [_player_display_name(caster.player_id), level, property_name]
 
 
 # Every currently-unowned property-type space (color groups, railroads, and
@@ -4696,25 +4966,31 @@ func _unowned_property_indices_on_side(side: int) -> Array[int]:
 	return result
 
 
-# Share the Wealth: no target to pick -- the "other random player" is
-# resolved fresh at resolution.
-func _prepare_share_the_wealth(caster: Node2D, level: int) -> Callable:
-	var amount: int = SpellData.SPELLS["Share the Wealth"]["levels"][level].get("amount", 0)
-	return _resolve_share_the_wealth.bind(caster, level, amount)
-
-
-func _resolve_share_the_wealth(caster: Node2D, level: int, amount: int) -> void:
-	caster.money += amount
+# Break Bread: the random opponent who also gains is rolled here, at cast time
+# -- from then on it behaves like any normally-picked target (red outline,
+# "targeting X" in the log). If that player is bankrupt by the time it
+# resolves, only the caster gains, same as a normally-picked target that's
+# since left the game.
+func _prepare_break_bread(caster: Node2D, level: int) -> Callable:
+	var amount: int = SpellData.SPELLS["Break Bread"]["levels"][level].get("amount", 0)
 	var others: Array[int] = []
 	for i in players.size():
 		if i != caster.player_id and not players[i].is_bankrupt:
 			others.append(i)
-	if others.is_empty():
-		dice_label.text = "%s's Share the Wealth (Level %d) resolves! They gain $%d (no one else around to share with)." % [_player_display_name(caster.player_id), level, amount]
+	var lucky_index: int = -1
+	if not others.is_empty():
+		lucky_index = others[randi_range(0, others.size() - 1)]
+		_spell_target_player(lucky_index)
+	return _resolve_break_bread.bind(caster, level, amount, lucky_index)
+
+
+func _resolve_break_bread(caster: Node2D, level: int, amount: int, lucky_index: int) -> void:
+	caster.money += amount
+	if lucky_index == -1 or players[lucky_index].is_bankrupt:
+		dice_label.text = "%s's Break Bread (Level %d) resolves! They gain $%d (no one else around to share with)." % [_player_display_name(caster.player_id), level, amount]
 	else:
-		var lucky_index: int = others[randi_range(0, others.size() - 1)]
 		players[lucky_index].money += amount
-		dice_label.text = "%s's Share the Wealth (Level %d) resolves! %s and %s each gain $%d." % [_player_display_name(caster.player_id), level, _player_display_name(caster.player_id), PLAYER_NAMES[lucky_index], amount]
+		dice_label.text = "%s's Break Bread (Level %d) resolves! %s and %s each gain $%d." % [_player_display_name(caster.player_id), level, _player_display_name(caster.player_id), PLAYER_NAMES[lucky_index], amount]
 	_update_player_panels()
 
 
@@ -4797,6 +5073,7 @@ func _prepare_art_of_the_deal(caster: Node2D, hand_index: int, level: int) -> Ca
 	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
+	_spell_target_player(target_index)
 
 	var give_entries: Array = []
 	for i in giveable_indices:
@@ -4866,12 +5143,13 @@ func _prepare_escape_plan(caster: Node2D, level: int) -> Callable:
 		landing = (landing + 1) % board.TOTAL_SPACES
 		if condition.call(landing):
 			break
+	_spell_target_property(landing)
 	return _resolve_escape_plan.bind(caster, level, steps, landing)
 
 
 func _resolve_escape_plan(caster: Node2D, level: int, steps: int, landing_index: int) -> void:
 	_current_roll += steps
-	var destination: String = board.get_space_info(landing_index).get("name", "")
+	var destination: String = _property_name(landing_index)
 	dice_label.text = "%s's Escape Plan (Level %d) resolves! Roll increased by %d to land on %s (now %d)." % [_player_display_name(caster.player_id), level, steps, destination, _current_roll]
 	_log("%s's Escape Plan modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
@@ -4889,8 +5167,7 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 	for space_index in board.TOTAL_SPACES:
 		var space: Node2D = board.spaces[space_index]
 		if space.owner_id != -1 and space.owner_id != caster.player_id and space.house_count == 0 and board.get_space_info(space_index).get("type", "") == "property":
-			var info: Dictionary = board.get_space_info(space_index)
-			target_entries.append({"index": space_index, "name": "%s (%s)" % [info.get("name", ""), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
+			target_entries.append({"index": space_index, "name": "%s (%s)" % [_property_name(space_index), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
 	if target_entries.is_empty():
 		dice_label.text += "\nThere's no eligible property to take."
 		return Callable()
@@ -4899,6 +5176,7 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 	var target_space_index: int = await _pp_result()
 	if target_space_index == -1:
 		return Callable()
+	_spell_target_property(target_space_index)
 
 	var target_price: int = board.get_space_info(target_space_index).get("price", 0)
 	var target_owner_id: int = board.spaces[target_space_index].owner_id
@@ -4914,7 +5192,7 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 				var color_name: String = board.get_space_info(space_index).get("color", "")
 				if _max_houses_in_group(color_name, caster.player_id) > 0:
 					continue
-				entries.append({"index": space_index, "name": "%s ($%d)" % [board.get_space_info(space_index).get("name", ""), board.get_space_info(space_index).get("price", 0)], "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
+				entries.append({"index": space_index, "name": "%s ($%d)" % [_property_name(space_index), board.get_space_info(space_index).get("price", 0)], "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
 			if entries.is_empty():
 				dice_label.text += "\n%s doesn't have enough property value to make this offer." % _player_display_name(caster.player_id)
 				return Callable()
@@ -4932,7 +5210,7 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 			var color_name: String = board.get_space_info(space_index).get("color", "")
 			if _max_houses_in_group(color_name, caster.player_id) > 0:
 				continue
-			entries.append({"index": space_index, "name": board.get_space_info(space_index).get("name", ""), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
+			entries.append({"index": space_index, "name": _property_name(space_index), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
 		if entries.is_empty():
 			dice_label.text += "\n%s has no property to give in return." % _player_display_name(caster.player_id)
 			return Callable()
@@ -4951,7 +5229,7 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 
 func _resolve_offer_you_cant_refuse(caster: Node2D, level: int, target_space_index: int, target_owner_id: int, given_properties: Array[int], money_amount: int) -> void:
 	var target_space: Node2D = board.spaces[target_space_index]
-	var property_name: String = board.get_space_info(target_space_index).get("name", "")
+	var property_name: String = _property_name(target_space_index)
 	if target_space.owner_id != target_owner_id:
 		dice_label.text = "%s's Offer You Can't Refuse (Level %d) fizzles -- %s is no longer owned by them." % [_player_display_name(caster.player_id), level, property_name]
 		return
@@ -5000,7 +5278,7 @@ func _prepare_burn_to_the_ground(caster: Node2D, level: int) -> Callable:
 	for i in board.TOTAL_SPACES:
 		if board.spaces[i].house_count > 0:
 			var color_name: String = board.get_space_info(i).get("color", "")
-			entries.append({"index": i, "name": board.get_space_info(i).get("name", ""), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
+			entries.append({"index": i, "name": _property_name(i), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
 	if entries.is_empty():
 		dice_label.text += "\nThere are no houses to destroy."
 		return Callable()
@@ -5009,13 +5287,14 @@ func _prepare_burn_to_the_ground(caster: Node2D, level: int) -> Callable:
 	var space_index: int = await _pp_result()
 	if space_index == -1:
 		return Callable()
+	_spell_target_property(space_index)
 	var houses: int = SpellData.SPELLS["Burn to the Ground"]["levels"][level].get("houses", 0)
 	return _resolve_burn_to_the_ground.bind(caster, level, space_index, houses)
 
 
 func _resolve_burn_to_the_ground(caster: Node2D, level: int, space_index: int, houses: int) -> void:
 	var space: Node2D = board.spaces[space_index]
-	var property_name: String = board.get_space_info(space_index).get("name", "")
+	var property_name: String = _property_name(space_index)
 	var destroyed: int = mini(houses, space.house_count)
 	space.house_count -= destroyed
 	var house_word: String = "house" if destroyed == 1 else "houses"
@@ -5036,6 +5315,17 @@ func _prepare_line_of_fire(caster: Node2D, level: int) -> Callable:
 	var side: int = await _pp_result()
 	if side == -1:
 		return Callable()
+	# Outline every opponent-owned property on the chosen side (what the spell
+	# will actually charge for); the log just names the side.
+	_pending_spell_target_label = "the %s Side" % BOARD_SIDE_NAMES[side]
+	for i in board.TOTAL_SPACES:
+		if i / board.SPACES_PER_SIDE != side:
+			continue
+		if board.get_space_info(i).get("type", "") != "property":
+			continue
+		var owner_id: int = board.spaces[i].owner_id
+		if owner_id != -1 and owner_id != caster.player_id:
+			_spell_target_property(i)
 	var amount: int = SpellData.SPELLS["Line of Fire"]["levels"][level].get("amount", 0)
 	return _resolve_line_of_fire.bind(caster, level, side, amount)
 
@@ -5072,7 +5362,7 @@ func _resolve_line_of_fire(caster: Node2D, level: int, side: int, amount: int) -
 		if owner_id == -1 or owner_id == caster.player_id:
 			continue
 		var owner: Node2D = players[owner_id]
-		var property_name: String = board.get_space_info(space_index).get("name", "")
+		var property_name: String = _property_name(space_index)
 		var owed: int = _apply_payment_reduction(owner, amount)
 		var resolve_message: String = "%s's Line of Fire (Level %d) collects $%d from %s (%s)!" % [_player_display_name(caster.player_id), level, owed, PLAYER_NAMES[owner_id], property_name]
 		var debt_message: String = "%s's Line of Fire (Level %d) charges %s $%d for %s, who owes it!" % [_player_display_name(caster.player_id), level, PLAYER_NAMES[owner_id], owed, property_name]
@@ -5105,8 +5395,7 @@ func _prepare_threaten(caster: Node2D, level: int) -> Callable:
 	for space_index in board.TOTAL_SPACES:
 		var space: Node2D = board.spaces[space_index]
 		if space.owner_id != -1 and space.owner_id != caster.player_id and space.house_count == 0 and board.get_space_info(space_index).get("type", "") == "property":
-			var info: Dictionary = board.get_space_info(space_index)
-			entries.append({"index": space_index, "name": "%s (%s)" % [info.get("name", ""), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
+			entries.append({"index": space_index, "name": "%s (%s)" % [_property_name(space_index), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
 	if entries.is_empty():
 		dice_label.text += "\nThere's no eligible property to threaten."
 		return Callable()
@@ -5115,13 +5404,14 @@ func _prepare_threaten(caster: Node2D, level: int) -> Callable:
 	var space_index: int = await _pp_result()
 	if space_index == -1:
 		return Callable()
+	_spell_target_property(space_index)
 	var amount: int = SpellData.SPELLS["Threaten"]["levels"][level].get("amount", 0)
 	return _resolve_threaten.bind(caster, level, space_index, amount)
 
 
 func _resolve_threaten(caster: Node2D, level: int, space_index: int, amount: int) -> void:
 	var space: Node2D = board.spaces[space_index]
-	var property_name: String = board.get_space_info(space_index).get("name", "")
+	var property_name: String = _property_name(space_index)
 	if space.owner_id == -1 or space.owner_id == caster.player_id:
 		dice_label.text = "%s's Threaten (Level %d) fizzles -- %s is no longer a valid target." % [_player_display_name(caster.player_id), level, property_name]
 		return
@@ -5172,7 +5462,7 @@ func _prepare_royal_aid(caster: Node2D, level: int) -> Callable:
 				continue
 			if not board.spaces[space_index].is_mortgaged:
 				continue
-			var display_name: String = "Terminus Station" if space_index == 0 else board.get_space_info(space_index).get("name", "")
+			var display_name: String = _property_name(space_index)
 			entries.append({"index": space_index, "name": display_name, "color": Color.WHITE})
 		if entries.is_empty():
 			break
@@ -5185,6 +5475,8 @@ func _prepare_royal_aid(caster: Node2D, level: int) -> Callable:
 	if chosen.is_empty():
 		dice_label.text += "\nThere's nothing to unmortgage."
 		return Callable()
+	for space_index in chosen:
+		_spell_target_property(space_index)
 	return _resolve_royal_aid.bind(caster, level, chosen)
 
 
@@ -5195,7 +5487,7 @@ func _resolve_royal_aid(caster: Node2D, level: int, chosen: Array[int]) -> void:
 		if not space.is_mortgaged:
 			continue
 		space.is_mortgaged = false  # free -- Royal Aid pays nothing
-		names.append("Terminus Station" if space_index == 0 else board.get_space_info(space_index).get("name", ""))
+		names.append(_property_name(space_index))
 	if names.is_empty():
 		dice_label.text = "%s's Royal Aid (Level %d) resolves, but nothing was unmortgaged." % [_player_display_name(caster.player_id), level]
 	else:
@@ -5218,6 +5510,7 @@ func _prepare_taxes(caster: Node2D, level: int) -> Callable:
 	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
+	_spell_target_player(target_index)
 	var divisor: int = SpellData.SPELLS["Taxes"]["levels"][level].get("divisor", 1)
 	return _resolve_taxes.bind(caster, level, target_index, divisor)
 
@@ -5251,6 +5544,7 @@ func _prepare_far_reaching_empire(caster: Node2D, level: int) -> Callable:
 	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
+	_spell_target_player(target_index)
 	var amount: int = SpellData.SPELLS["Far-Reaching Empire"]["levels"][level].get("amount", 0)
 	return _resolve_far_reaching_empire.bind(caster, level, target_index, amount)
 
@@ -5291,7 +5585,7 @@ func _prepare_annexation(caster: Node2D, level: int) -> Callable:
 		if _count_owned_in_group(caster.player_id, color_name) < required_owned:
 			continue
 		var owner_note: String = "bank" if space.owner_id == -1 else PLAYER_NAMES[space.owner_id]
-		entries.append({"index": space_index, "name": "%s (%s)" % [board.get_space_info(space_index).get("name", ""), owner_note], "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
+		entries.append({"index": space_index, "name": "%s (%s)" % [_property_name(space_index), owner_note], "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
 	if entries.is_empty():
 		dice_label.text += "\nThere's no eligible property to annex."
 		return Callable()
@@ -5300,13 +5594,14 @@ func _prepare_annexation(caster: Node2D, level: int) -> Callable:
 	var target_space_index: int = await _pp_result()
 	if target_space_index == -1:
 		return Callable()
+	_spell_target_property(target_space_index)
 	var target_owner_id: int = board.spaces[target_space_index].owner_id
 	return _resolve_annexation.bind(caster, level, target_space_index, target_owner_id)
 
 
 func _resolve_annexation(caster: Node2D, level: int, target_space_index: int, target_owner_id: int) -> void:
 	var space: Node2D = board.spaces[target_space_index]
-	var property_name: String = board.get_space_info(target_space_index).get("name", "")
+	var property_name: String = _property_name(target_space_index)
 	if space.owner_id != target_owner_id or space.house_count > 0:
 		dice_label.text = "%s's Annexation (Level %d) fizzles -- %s is no longer eligible." % [_player_display_name(caster.player_id), level, property_name]
 		return
@@ -5361,6 +5656,7 @@ func _prepare_sinkhole(caster: Node2D, level: int) -> Callable:
 	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
+	_spell_target_player(target_index)
 	var amount: int = SpellData.SPELLS["Sinkhole"]["levels"][level].get("amount", 0)
 	return _resolve_sinkhole.bind(caster, level, target_index, amount)
 
@@ -5407,8 +5703,7 @@ func _prepare_reclaimed_by_nature(caster: Node2D, level: int) -> Callable:
 			var space: Node2D = board.spaces[space_index]
 			if not space.is_mortgaged:
 				continue
-			var info: Dictionary = board.get_space_info(space_index)
-			entries.append({"index": space_index, "name": "%s (%s)" % [info.get("name", ""), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
+			entries.append({"index": space_index, "name": "%s (%s)" % [_property_name(space_index), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
 		if entries.is_empty():
 			break
 		_pp_open("Reclaimed by Nature: choose a mortgaged property to return to the bank (%d/%d)." % [chosen.size() + 1, count], entries)
@@ -5420,6 +5715,8 @@ func _prepare_reclaimed_by_nature(caster: Node2D, level: int) -> Callable:
 	if chosen.is_empty():
 		dice_label.text += "\nThere's nothing mortgaged to return to the bank."
 		return Callable()
+	for space_index in chosen:
+		_spell_target_property(space_index)
 	return _resolve_reclaimed_by_nature.bind(caster, level, chosen)
 
 
@@ -5433,7 +5730,7 @@ func _resolve_reclaimed_by_nature(caster: Node2D, level: int, chosen: Array[int]
 			players[space.owner_id].owned_property_indices.erase(space_index)
 		space.owner_id = -1
 		space.is_mortgaged = false
-		names.append(board.get_space_info(space_index).get("name", ""))
+		names.append(_property_name(space_index))
 	if names.is_empty():
 		dice_label.text = "%s's Reclaimed by Nature (Level %d) resolves, but nothing was returned." % [_player_display_name(caster.player_id), level]
 	else:
@@ -5457,6 +5754,7 @@ func _prepare_sanity_grinding(caster: Node2D, level: int) -> Callable:
 	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
+	_spell_target_player(target_index)
 	var amount: int = SpellData.SPELLS["Sanity Grinding"]["levels"][level].get("amount", 0)
 	return _resolve_sanity_grinding.bind(caster, level, target_index, amount)
 
@@ -5485,6 +5783,7 @@ func _prepare_spell_mastery(caster: Node2D, level: int) -> Callable:
 	var target_id: int = await _pp_result()
 	if target_id == -1:
 		return Callable()
+	_spell_target_spell(target_id)
 	return _resolve_spell_mastery.bind(caster, level, target_id)
 
 
@@ -5607,12 +5906,13 @@ func _prepare_cult_of_terminus_advance(caster: Node2D) -> Callable:
 		landing = (landing + 1) % board.TOTAL_SPACES
 		if _cult_of_terminus_railroad_condition(landing):
 			break
+	_spell_target_property(landing)
 	return _resolve_cult_of_terminus_advance.bind(caster, steps, landing)
 
 
 func _resolve_cult_of_terminus_advance(caster: Node2D, steps: int, landing_index: int) -> void:
 	_current_roll += steps
-	var destination: String = "Terminus Station" if landing_index == 0 else board.get_space_info(landing_index).get("name", "")
+	var destination: String = _property_name(landing_index)
 	dice_label.text = "%s's The Cult of Terminus (Level 2) resolves! Roll increased by %d to land on %s (now %d)." % [_player_display_name(caster.player_id), steps, destination, _current_roll]
 	_log("%s's The Cult of Terminus modified the dice roll." % PLAYER_NAMES[caster.player_id])
 	_update_player_panels()
@@ -5630,44 +5930,36 @@ func _prepare_cult_of_terminus_buy_railroad(caster: Node2D) -> Callable:
 			continue
 		var owner_id: int = board.spaces[space_index].owner_id
 		var owner_note: String = "bank" if owner_id == -1 else PLAYER_NAMES[owner_id]
-		var display_name: String = "Terminus Station" if space_index == 0 else board.get_space_info(space_index).get("name", "")
+		var display_name: String = _property_name(space_index)
 		entries.append({"index": space_index, "name": "%s (%s)" % [display_name, owner_note], "color": Color.WHITE})
 	if entries.is_empty():
 		dice_label.text += "\nThere's no railroad left to buy."
-		return Callable()
-	if caster.money < price:
-		dice_label.text += "\n%s can't afford $%d." % [_player_display_name(caster.player_id), price]
 		return Callable()
 
 	_pp_open("The Cult of Terminus: choose a railroad to buy for $%d." % price, entries)
 	var target_space_index: int = await _pp_result()
 	if target_space_index == -1:
 		return Callable()
+	_spell_target_property(target_space_index)
 	var target_owner_id: int = board.spaces[target_space_index].owner_id
 	return _resolve_cult_of_terminus_buy_railroad.bind(caster, target_space_index, target_owner_id, price)
 
 
 func _resolve_cult_of_terminus_buy_railroad(caster: Node2D, target_space_index: int, target_owner_id: int, price: int) -> void:
 	var space: Node2D = board.spaces[target_space_index]
-	var display_name: String = "Terminus Station" if target_space_index == 0 else board.get_space_info(target_space_index).get("name", "")
+	var display_name: String = _property_name(target_space_index)
 	if space.owner_id != target_owner_id or space.owner_id == caster.player_id:
 		dice_label.text = "%s's The Cult of Terminus (Level 3) fizzles -- %s is no longer available." % [_player_display_name(caster.player_id), display_name]
 		return
-	if caster.money < price:
-		dice_label.text = "%s's The Cult of Terminus (Level 3) fizzles -- they can't afford $%d." % [_player_display_name(caster.player_id), price]
+	# Resolves like a normal purchase -- Raise Money (mortgage / sell / trade)
+	# if the caster is short of the $200, with a Cancel that abandons the buy.
+	if not await _buy_property_via_spell(caster, target_space_index, price, target_owner_id):
+		dice_label.text = "%s's The Cult of Terminus (Level 3): %s wasn't bought." % [_player_display_name(caster.player_id), display_name]
 		return
-	caster.money -= price
 	if target_owner_id == -1:
 		dice_label.text = "%s's The Cult of Terminus (Level 3) resolves! Bought %s from the bank for $%d." % [_player_display_name(caster.player_id), display_name, price]
 	else:
-		var seller: Node2D = players[target_owner_id]
-		seller.owned_property_indices.erase(target_space_index)
-		seller.money += price
 		dice_label.text = "%s's The Cult of Terminus (Level 3) resolves! Bought %s from %s for $%d." % [_player_display_name(caster.player_id), display_name, PLAYER_NAMES[target_owner_id], price]
-	space.owner_id = caster.player_id
-	caster.owned_property_indices.append(target_space_index)
-	_sort_owned_properties(caster)
-	_update_player_panels()
 
 
 # The Cult of Terminus, Level 4: _spell_extra_validation() already gated
@@ -5680,7 +5972,7 @@ func _prepare_cult_of_terminus_summon_terminus(caster: Node2D) -> Callable:
 
 func _resolve_cult_of_terminus_summon_terminus(caster: Node2D) -> void:
 	if board.spaces[0].owner_id != -1:
-		dice_label.text = "%s's The Cult of Terminus (Level 4) fizzles -- Terminus Station already exists." % _player_display_name(caster.player_id)
+		dice_label.text = "%s's The Cult of Terminus (Level 4) fizzles -- Terminus already exists." % _player_display_name(caster.player_id)
 		return
 	if _owned_railroad_count(caster.player_id) < 4:
 		dice_label.text = "%s's The Cult of Terminus (Level 4) fizzles -- they no longer own all 4 railroads." % _player_display_name(caster.player_id)
@@ -5688,7 +5980,7 @@ func _resolve_cult_of_terminus_summon_terminus(caster: Node2D) -> void:
 	board.spaces[0].owner_id = caster.player_id
 	caster.owned_property_indices.append(0)
 	_sort_owned_properties(caster)
-	dice_label.text = "%s's The Cult of Terminus (Level 4) resolves! Terminus Station has been summoned." % _player_display_name(caster.player_id)
+	dice_label.text = "%s's The Cult of Terminus (Level 4) resolves! Terminus has been summoned." % _player_display_name(caster.player_id)
 	_update_player_panels()
 
 
@@ -5762,9 +6054,12 @@ func _update_player_panels() -> void:
 		space.set_owner_banner(space.owner_id, owner_color)
 	# GO shows the Go asset, or Terminus 2 while Terminus Station is in play.
 	board.refresh_go_tile()
+	_refresh_spell_target_highlights()
 	for i in players.size():
 		var pause_marker: String = " (Paused)" if _response_window_paused_by[i] else ""
-		player_header_labels[i].text = "%s%s -- $%d" % [_player_display_name(i), pause_marker, players[i].money]
+		# Small target symbol next to the name while a pending spell targets them.
+		var target_marker: String = " %s" % SPELL_TARGET_SYMBOL if _targeted_player_ids.has(i) else ""
+		player_header_labels[i].text = "%s%s%s -- $%d" % [_player_display_name(i), target_marker, pause_marker, players[i].money]
 
 		var flow: HFlowContainer = player_properties_flows[i]
 		for child in flow.get_children():
@@ -5902,6 +6197,7 @@ func _build_snapshot() -> Dictionary:
 		"debt_amount": _debt_amount,
 		"debt_cancellable": _debt_cancellable,
 		"spell_stack": _spell_stack_names(),
+		"spell_target_marks": _all_stack_target_marks(),
 		"awaiting_buy": _awaiting_buy_decision,
 		"casting_spell": _casting_spell,
 		"buying_ho": _buying_house_or_unmortgaging,
@@ -5952,7 +6248,7 @@ func _net_request_initial_snapshot() -> void:
 	# request, so the RPC doesn't arrive at an empty /root.
 	await get_tree().create_timer(0.3).timeout
 	for _attempt in 12:
-		if not _net_last_snapshot.is_empty():
+		if not _net_last_snapshot.is_empty() or _returning_to_menu or not is_inside_tree():
 			return
 		_request_snapshot.rpc_id(1)
 		await get_tree().create_timer(0.5).timeout
@@ -6001,6 +6297,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_debt_amount = snap.get("debt_amount", 0)
 	_debt_cancellable = snap.get("debt_cancellable", false)
 	_net_spell_stack_names = snap.get("spell_stack", [])
+	_net_spell_target_marks = snap.get("spell_target_marks", [])
 	_awaiting_buy_decision = snap.get("awaiting_buy", false)
 	_casting_spell = snap.get("casting_spell", false)
 	_buying_house_or_unmortgaging = snap.get("buying_ho", false)
@@ -6215,6 +6512,9 @@ func _net_await_reply() -> Variant:
 			# default so host logic never hangs. (Phase 6 handles this
 			# properly; for now the turn just proceeds as a decline.)
 			return false if _net_pending_kind == "confirm" else -1
+		# Scene torn down (quit to menu) -- stop before get_tree() goes null.
+		if _returning_to_menu or not is_inside_tree():
+			return false if _net_pending_kind == "confirm" else -1
 		await get_tree().process_frame
 	var value: Variant = _net_prompt_replies[req]
 	_net_prompt_replies.erase(req)
@@ -6389,7 +6689,7 @@ func _build_log_markup() -> void:
 			"bbcode": "[color=#%s]%s[/color]" % [pc.to_html(false), info["name"]],
 		})
 	var rc: Color = _log_name_color(board.COLOR_GROUP_COLORS["railroad"])
-	_log_markup.append({"name": "Terminus Station", "bbcode": "[color=#%s]Terminus Station[/color]" % rc.to_html(false)})
+	_log_markup.append({"name": "Terminus", "bbcode": "[color=#%s]Terminus[/color]" % rc.to_html(false)})
 	_log_markup.sort_custom(func(a, b): return a["name"].length() > b["name"].length())
 
 
@@ -6489,9 +6789,13 @@ func _note_ownership(space_index: int) -> void:
 		_logged_owners[space_index] = board.spaces[space_index].owner_id
 
 
+# The display name for a space -- the SPACE_DATA name, except space 0 once it's
+# been claimed as Terminus (the GO overlay from The Cult of Terminus L4), which
+# shows as "Terminus" rather than "GO". Use this everywhere a property is named
+# in a picker / prompt / log line.
 func _property_name(space_index: int) -> String:
 	if space_index == 0 and board.spaces[0].owner_id != -1:
-		return "Terminus Station"
+		return "Terminus"
 	return board.get_space_info(space_index).get("name", "Space %d" % space_index)
 
 

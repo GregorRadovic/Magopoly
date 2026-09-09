@@ -1,10 +1,10 @@
 extends PopupPanel
 
 # Small settings window opened from the Start Menu and the in-game pause menu.
-# Controls: a Resolution dropdown and a Music Volume slider. Both are applied
+# Controls: Resolution, Music Volume, and Pause Options. All are applied
 # immediately, saved to user://settings.cfg, and restored on the next launch
 # (resolution via apply_saved() from start_menu.gd; music volume by the Music
-# autoload itself).
+# autoload; pause option read by main.gd, live via pause_option_changed).
 #
 # "Resolution" here is the game's render resolution, not the window size: the
 # window stays fullscreen and we set Window.content_scale_size (the project's
@@ -18,9 +18,15 @@ extends PopupPanel
 
 signal kick_player_requested
 signal unpause_player_requested
+# Fired when the Pause Options dropdown changes (in-game so main.gd can react
+# live). MANUAL = 0, HALF_CONTROL = 1, FULL_CONTROL = 2.
+signal pause_option_changed(option: int)
+
+enum PauseOption { MANUAL, HALF_CONTROL, FULL_CONTROL }
+const PAUSE_OPTION_LABELS: Array[String] = ["Manual", "Half-Control", "Full Control"]
 
 const CONFIG_PATH: String = "user://settings.cfg"
-const POPUP_SIZE: Vector2i = Vector2i(560, 300)
+const POPUP_SIZE: Vector2i = Vector2i(560, 370)
 # Extra height when the Host tools section is showing.
 const HOST_TOOLS_EXTRA_HEIGHT: int = 200
 
@@ -40,10 +46,14 @@ const RESOLUTIONS: Array[Vector2i] = [
 @onready var resolution_option: OptionButton = $VBox/ResolutionRow/ResolutionOption
 @onready var music_volume_slider: HSlider = $VBox/MusicVolumeRow/MusicVolumeSlider
 @onready var music_volume_value: Label = $VBox/MusicVolumeRow/MusicVolumeValue
+@onready var pause_option_button: OptionButton = $VBox/PauseOptionsRow/PauseOptionButton
 @onready var host_tools: VBoxContainer = $VBox/HostTools
 @onready var kick_player_button: Button = $VBox/HostTools/KickPlayerButton
 @onready var unpause_player_button: Button = $VBox/HostTools/UnpausePlayerButton
 @onready var close_button: Button = $VBox/CloseButton
+
+# The current Pause Options selection (mirrors the dropdown; read by main.gd).
+var pause_option: int = PauseOption.HALF_CONTROL
 
 
 func _ready() -> void:
@@ -56,6 +66,12 @@ func _ready() -> void:
 	music_volume_slider.value = volume
 	_update_volume_label(volume)
 	music_volume_slider.value_changed.connect(_on_music_volume_changed)
+
+	for label in PAUSE_OPTION_LABELS:
+		pause_option_button.add_item(label)
+	pause_option = load_pause_option()
+	pause_option_button.selected = pause_option
+	pause_option_button.item_selected.connect(_on_pause_option_selected)
 
 	host_tools.visible = false
 	kick_player_button.pressed.connect(func() -> void:
@@ -77,6 +93,12 @@ func _on_music_volume_changed(value: float) -> void:
 	var percent: int = int(round(value))
 	Music.set_volume_percent(percent)
 	_update_volume_label(percent)
+
+
+func _on_pause_option_selected(index: int) -> void:
+	pause_option = index
+	_save_pause_option(index)
+	pause_option_changed.emit(index)
 
 
 func _update_volume_label(percent: int) -> void:
@@ -119,6 +141,22 @@ static func _save_resolution(res: Vector2i) -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(CONFIG_PATH)  # keep any other keys; a missing file just starts fresh
 	cfg.set_value("display", "resolution", res)
+	cfg.save(CONFIG_PATH)
+
+
+# Pause Options: MANUAL / HALF_CONTROL / FULL_CONTROL (see PauseOption).
+# Defaults to HALF_CONTROL when nothing is saved yet.
+static func load_pause_option() -> int:
+	var cfg := ConfigFile.new()
+	if cfg.load(CONFIG_PATH) != OK:
+		return PauseOption.HALF_CONTROL
+	return clampi(int(cfg.get_value("gameplay", "pause_option", PauseOption.HALF_CONTROL)), 0, 2)
+
+
+static func _save_pause_option(option: int) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(CONFIG_PATH)
+	cfg.set_value("gameplay", "pause_option", option)
 	cfg.save(CONFIG_PATH)
 
 
