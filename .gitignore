@@ -7,8 +7,12 @@
 export.cfg
 export_credentials.cfg
 
-# Exported builds
+# Exported builds -- never commit these. Distribute the .exe via GitHub
+# Releases (2 GB per-file limit, kept out of the repo). See BUILDING.md.
 /build/
+/Magopoly.exe
+/Magopoly.console.exe
+/Magopoly.pck
 
 # Imported translations (automatically generated from CSV files)
 *.translation
