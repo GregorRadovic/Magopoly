@@ -15,6 +15,9 @@ const PRICE_H: float = 16.0
 
 const MAGIC_FOREST_COLOR: Color = Color(0.6, 0.2, 0.85)
 const SPELL_SHOP_COIN_COLOR: Color = Color(0.9, 0.75, 0.15)
+# Bright red frame drawn around a property while a spell targeting it sits on
+# the pending spell stack (toggled by main.gd via set_targeted()).
+const TARGET_OUTLINE_COLOR: Color = Color(1.0, 0.08, 0.08)
 
 @export var index: int = 0:
 	set(value):
@@ -103,8 +106,14 @@ var house_count: int = 0:
 
 var is_mortgaged: bool = false
 
+# Bright red targeting frame -- built in code (so no .tscn churn) and kept as
+# the last child so it draws on top of the tile. Toggled by set_targeted().
+var target_outline: Panel = null
+var _targeted: bool = false
+
 
 func _ready() -> void:
+	_build_target_outline()
 	_apply_layout()
 	_update_label()
 	_update_banner()
@@ -113,6 +122,34 @@ func _ready() -> void:
 	_update_price()
 	_update_tile_image()
 	click_area.gui_input.connect(_on_click_area_gui_input)
+
+
+func _build_target_outline() -> void:
+	target_outline = Panel.new()
+	target_outline.name = "TargetOutline"
+	target_outline.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	target_outline.visible = false
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0, 0, 0, 0)
+	style.border_color = TARGET_OUTLINE_COLOR
+	style.set_border_width_all(4)
+	target_outline.add_theme_stylebox_override("panel", style)
+	add_child(target_outline)
+	_position_target_outline()
+
+
+func _position_target_outline() -> void:
+	if target_outline:
+		_set_rect(target_outline, -3.0, -3.0, tile_size.x + 3.0, tile_size.y + 3.0)
+
+
+# Called by main.gd's _refresh_spell_target_highlights().
+func set_targeted(value: bool) -> void:
+	if _targeted == value:
+		return
+	_targeted = value
+	if target_outline:
+		target_outline.visible = value
 
 
 func _on_click_area_gui_input(event: InputEvent) -> void:
@@ -141,6 +178,7 @@ func _apply_layout() -> void:
 	_position_price_label()
 	_position_name_label()
 	_position_owner_banner()
+	_position_target_outline()
 
 
 # The special marker (Magic Forest star / Spell Shop coin) sits in the tile's

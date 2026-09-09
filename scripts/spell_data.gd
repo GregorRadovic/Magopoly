@@ -374,7 +374,7 @@ const SPELLS: Dictionary = {
 			1: {"description": "The next railroad you buy this turn costs $0.", "timings": ["turn", "roll_response", "spell_response"]},
 			2: {"description": "Increase your roll until you land on the nearest railroad.", "timings": ["roll_response"], "requires_current_player": true},
 			3: {"description": "Buy a railroad from a player or the bank.", "timings": ["turn", "roll_response", "spell_response"]},
-			4: {"description": "If you own all 4 railroads, gain Terminus Station.", "timings": ["turn", "roll_response", "spell_response"]},
+			4: {"description": "If you own all 4 railroads, gain Terminus.", "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
 }
