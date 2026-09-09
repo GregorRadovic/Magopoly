@@ -121,7 +121,7 @@ const TERMINUS_FIVE_RAILROAD_RENT: int = 300
 # rewind after missing the pause window). "forced_roll" pins the dice.
 #
 # Action slugs and where they're handled:
-#   inspect_<spell>  -- right-click that card                (_on_spell_right_clicked)
+#   inspect_migraine -- right-click the Migraine card        (_on_spell_right_clicked)
 #   cast_<spell>     -- left-click that card, then its pickers (_on_spell_clicked
 #                       + _tutorial_gate_check + _tutorial_on_spell_finished)
 #   burn_rbn         -- pick "Burn for Attunement" in RbN's picker
@@ -130,10 +130,11 @@ const TERMINUS_FIVE_RAILROAD_RENT: int = 300
 #   press_space      -- press Space to pause the roll's response window
 #   await_manastone / await_adrenaline -- no input: the game un-pauses and the
 #                       open reaction window runs down so that spell resolves
-#                       on its own (advanced by _tutorial_on_spell_resolved)
-#   pause_after_manastone -- press Space to pause the fresh window that opens
-#                       once Manastone has resolved; missing it re-opens the
-#                       window and re-prompts (see _ensure_response_window)
+#                       on its own (advanced by _tutorial_on_spell_resolved).
+#                       The caster is auto-paused again once it resolves (the
+#                       cast-while-paused rule -- see _apply_auto_pause).
+#   unpause_after_adrenaline -- press Space to lift that auto-pause so the
+#                       (Adrenaline-boosted) roll finally resolves
 #   buy_oriental     -- click Yes on the Oriental Avenue buy prompt
 #   end_turn         -- click End Turn
 const TUTORIAL_STEPS: Array[Dictionary] = [
@@ -141,32 +142,32 @@ const TUTORIAL_STEPS: Array[Dictionary] = [
 	{"text": "We assume you know the rules of regular Monopoly; this tutorial will tell you how spells work."},
 	{"text": "We've started you with a few properties and a few spells to make this easier."},
 	{"text": "Right click on a spell to see what it does. Right click on the sky blue spell, Migraine.", "action": "inspect_migraine"},
-	{"text": "To cast a spell, left click it. Let's cast Migraine now.", "action": "cast_migraine"},
-	{"text": "As you can see, the spell has different levels. These levels are determined by the amount of properties you own of that color."},
-	{"text": "Note that this only counts UNMORTGAGED properties. So think twice before mortgaging!"},
-	{"text": "Since you have two sky blue properties, you can cast it at level 2. Or level 1, if you wanted to."},
+	{"text": "Each spell has different levels, determined by the amount of unmortgaged properties you own of that spell's color."},
+	{"text": "For example, since you have two sky-blue properties, you can cast Migraine at level 2."},
+	{"text": "Left click Migraine to cast it.", "action": "cast_migraine"},
 	{"text": "For now let's cast it at level 2.", "action": "pick_level"},
 	{"text": "Now target your opponent.", "action": "pick_target"},
 	{"text": "Great job! You just cast your first spell!"},
 	{"text": "Now let's roll the dice to move for our turn. Click the Roll button.", "action": "roll", "forced_roll": Vector2i(1, 3), "tag": "roll"},
 	{"text": "Quick! Press Space Bar!", "action": "press_space"},
 	{"text": "Space Bar is how you pause the game to indicate that you want to cast a spell."},
-	{"text": "This is important because many spells have effects that can only be used at certain times. For example, right-click on Adrenaline.", "action": "inspect_adrenaline"},
+	{"text": "This is important because many spells have effects that can only be used at certain times. For example, look at Adrenaline."},
 	{"text": "Adrenaline lets you increase your roll so that instead of landing on Income Tax, you can land on a property you want."},
 	{"text": "The problem is, you don't own any green properties! But fortunately, there's another way to gain Attunement to a color."},
 	{"text": "Left-click on your other green spell, Reclaimed by Nature.", "action": "cast_rbn"},
 	{"text": "As you can see, all spells have the 'burn for attunement' option. This means you can discard that spell to gain 1 Temporary Attunement to that color. Burn Reclaimed by Nature now.", "action": "burn_rbn"},
-	{"text": "Now we'd be able to cast Adrenaline at Level 1, but we can do better than that. Right click on your Manastone.", "action": "inspect_manastone"},
+	{"text": "Now we'd be able to cast Adrenaline at Level 1, but we can do better than that. Look at your Manastone."},
 	{"text": "Manastones are a special type of card that help smooth out your mana. They get stronger if you own utilities, but even without them, you can still cast them at level 0."},
 	{"text": "Cast Manastone at level 0 now, adding 1 Green Attunement.", "action": "cast_manastone"},
 	{"text": "Spells go on the stack when cast, where they wait to resolve. Players can cast other spells in response."},
 	{"text": "You could pause now to cast a spell in response to Manastone, but we want to let it resolve first to give you your attunement."},
 	{"text": "Wait for the Manastone to resolve...", "action": "await_manastone"},
-	{"text": "Press Spacebar to pause again.", "action": "pause_after_manastone"},
-	{"text": "Great! Now you have all the attunement you need."},
+	{"text": "You automatically pause again after your spell resolves. Now you have all the Green attunement you need."},
 	{"text": "Cast Adrenaline at level 2.", "action": "cast_adrenaline"},
 	{"text": "Wait for Adrenaline to resolve...", "action": "await_adrenaline"},
-	{"text": "Perfect! Now, instead of landing on a tax space, you can buy Oriental Avenue to secure your monopoly.", "action": "buy_oriental"},
+	{"text": "As you can see, your path has changed. Now you are landing on Oriental Avenue instead of Income Tax."},
+	{"text": "Since you have no more spells to cast, press spacebar again to unpause.", "action": "unpause_after_adrenaline"},
+	{"text": "Now you can buy Oriental Avenue.", "action": "buy_oriental"},
 	{"text": "One last thing: You'll notice you still have your temporary attunement. That lasts until the start of your next turn."},
 	{"text": "Let's make use of it before it goes away. Cast Sinkhole on your opponent.", "action": "cast_sinkhole"},
 	{"text": "Great job!"},
@@ -180,9 +181,6 @@ const TUTORIAL_STEPS: Array[Dictionary] = [
 # window; the next click jumps back to the "roll" step. Not a TUTORIAL_STEPS
 # entry so it never lands in the linear flow.
 const TUTORIAL_MISSED_TEXT: String = "Darn, you missed it! Let's rewind and try that again."
-# Shown when the player misses the "pause_after_manastone" window; the window
-# just re-opens and this replaces the prompt (see _ensure_response_window).
-const TUTORIAL_MISSED_PAUSE_TEXT: String = "You missed it! We'll give you another chance. Press Spacebar to pause again."
 
 # The fixed opening hands for Tutorial mode -- the script relies on exactly
 # these cards. P1 (the human) gets two sky-blue properties and five spells;
@@ -783,10 +781,11 @@ func _end_tutorial() -> void:
 #  - a zoomed-in spell card is dismissed by the next click, which is then
 #    swallowed and does NOT advance (the card was covering the text; the
 #    player reads it after, then clicks again to move on);
-#  - on a "click to continue" step, every mouse press is swallowed (so it
-#    can't dismiss an open picker or hit a button underneath); a left click
-#    advances, unless a spell is mid-resolution (window open, nobody paused),
-#    in which case the click is still eaten but we wait.
+#  - on a "click to continue" step, a LEFT click is swallowed (so it can't
+#    dismiss an open picker or hit a button underneath) and advances -- unless
+#    a spell is mid-resolution (window open, nobody paused), in which case the
+#    click is still eaten but we wait. A RIGHT click falls through, so you can
+#    right-click a card to zoom it at any point in the tutorial.
 # Action steps otherwise let input through untouched.
 func _input(event: InputEvent) -> void:
 	if not _tutorial_active:
@@ -803,9 +802,10 @@ func _input(event: InputEvent) -> void:
 		return
 	if _tutorial_expected_action != "":
 		return
+	if event.button_index != MOUSE_BUTTON_LEFT:
+		return
 	get_viewport().set_input_as_handled()
-	if event.button_index == MOUSE_BUTTON_LEFT:
-		_tutorial_try_click_advance()
+	_tutorial_try_click_advance()
 
 
 func _tutorial_try_click_advance() -> void:
@@ -891,12 +891,12 @@ func _tutorial_left_click_spell() -> String:
 	return ""
 
 
-# The spell the current step wants RIGHT-clicked ("" = none).
+# The spell the current step wants RIGHT-clicked ("" = none). Adrenaline and
+# Manastone are only "look at" steps now (plain click-to-continue), so
+# right-clicking them just zooms the card without advancing.
 func _tutorial_right_click_spell() -> String:
 	match _tutorial_expected_action:
 		"inspect_migraine": return "Migraine"
-		"inspect_adrenaline": return "Adrenaline"
-		"inspect_manastone": return "Manastone"
 	return ""
 
 
@@ -922,27 +922,31 @@ func _tutorial_on_spell_resolved(spell_name: String) -> void:
 	match _tutorial_expected_action:
 		"await_manastone":
 			if spell_name == "Manastone":
-				_tutorial_advance()  # -> "Press Spacebar to pause again."
+				_tutorial_advance()  # -> "You automatically pause again..."
 		"await_adrenaline":
 			if spell_name == "Adrenaline":
-				_tutorial_advance()  # -> "Perfect! ...buy Oriental Avenue"
+				_tutorial_advance()  # -> "As you can see, your path has changed..."
 
 
 # Space during the tutorial: pause a reaction window. Returns true if it
 # handled the press (else the caller toasts "Follow the instructions!").
 func _tutorial_handle_space() -> bool:
-	if not _response_window_open or _response_window_paused_by[0]:
+	if not _response_window_open:
 		return false
 	match _tutorial_expected_action:
 		"press_space":
+			if _response_window_paused_by[0]:
+				return false
 			_toggle_pause_for_player(0)
 			if _response_window_paused_by[0]:
 				_tutorial_advance()  # -> "Space Bar is how you pause the game..."
 			return true
-		"pause_after_manastone":
+		"unpause_after_adrenaline":
+			if not _response_window_paused_by[0]:
+				return false
 			_toggle_pause_for_player(0)
-			if _response_window_paused_by[0]:
-				_tutorial_advance()  # -> "Great! Now you have all the attunement you need."
+			if not _response_window_paused_by[0]:
+				_tutorial_advance()  # -> "Now you can buy Oriental Avenue."
 			return true
 	return false
 
@@ -2044,7 +2048,7 @@ func _response_window_seconds() -> float:
 	if _tutorial_active:
 		# A generous window for the moments the player has to react to; snappier
 		# for the tutorial's own auto-resolutions (Migraine, Manastone, etc.).
-		return 5.0 if _tutorial_expected_action in ["press_space", "pause_after_manastone"] else 1.5
+		return 5.0 if _tutorial_expected_action == "press_space" else 1.5
 	# Online, widen the window so a remote player's pause has time to reach
 	# the host before the countdown expires.
 	return RESPONSE_WINDOW_SECONDS * 2.0 if GameState.online else RESPONSE_WINDOW_SECONDS
@@ -2087,15 +2091,6 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 		_response_window_open = false
 		_refresh_action_buttons()
 		if _spell_stack.is_empty():
-			# Tutorial: the player was meant to pause this window and didn't --
-			# don't let the roll proceed, re-open the window and re-prompt.
-			if _tutorial_active and _tutorial_expected_action == "pause_after_manastone":
-				tutorial_bubble_label.text = TUTORIAL_MISSED_PAUSE_TEXT
-				_response_window_open = true
-				_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
-				_response_window_paused_by.fill(false)
-				_refresh_action_buttons()
-				continue
 			break
 
 		_resolving_stack = true
@@ -2299,7 +2294,11 @@ func _net_report_pause_option(option: int) -> void:
 # Options setting or hand size -- used to re-pause a player after a spell they
 # cast while paused resolves.
 func _apply_auto_pause(event: String, trigger_seat: int, force_seat: int = -1) -> void:
-	if _tutorial_active or not _response_window_open or not GameState.is_authority():
+	if not _response_window_open or not GameState.is_authority():
+		return
+	# The tutorial choreographs its own pauses -- but the cast-while-paused
+	# re-pause (force_seat) still applies, so its script can rely on it.
+	if _tutorial_active and force_seat < 0:
 		return
 	var paused_names: Array[String] = []
 	for seat in players.size():
