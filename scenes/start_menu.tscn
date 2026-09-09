@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/start_menu.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/settings_menu.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/info_panel.tscn" id="4"]
 
 [node name="StartMenu" type="Control"]
 layout_mode = 3
@@ -138,4 +139,32 @@ custom_minimum_size = Vector2(360, 76)
 theme_override_font_sizes/font_size = 32
 text = "Quit"
 
+[node name="CornerButtons" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -252.0
+offset_top = -144.0
+offset_right = -28.0
+offset_bottom = -28.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_constants/separation = 12
+
+[node name="CreditsButton" type="Button" parent="CornerButtons"]
+layout_mode = 2
+custom_minimum_size = Vector2(224, 52)
+theme_override_font_sizes/font_size = 24
+text = "Credits"
+
+[node name="RoadmapButton" type="Button" parent="CornerButtons"]
+layout_mode = 2
+custom_minimum_size = Vector2(224, 52)
+theme_override_font_sizes/font_size = 24
+text = "Roadmap"
+
 [node name="SettingsMenu" parent="." instance=ExtResource("2")]
+
+[node name="InfoPanel" parent="." instance=ExtResource("4")]

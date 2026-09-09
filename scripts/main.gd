@@ -19,7 +19,7 @@ const SPELL_DECK_STARTING_COUNTS: Dictionary = {
 	"Counterbalance": 1,
 	"Impossible Architecture": 1,
 	"Promised Land": 1,
-	"Share the Wealth": 1,
+	"Break Bread": 1,
 	"Smite": 1,
 	"Divine Protection": 1,
 	"Art of the Deal": 1,
@@ -233,6 +233,7 @@ var dice_label: DiceSink = DiceSink.new()
 @onready var info_prompt: PopupPanel = $UI/InfoPrompt
 @onready var pause_menu: Control = $UI/PauseMenu
 @onready var pause_settings_menu: PopupPanel = $UI/SettingsMenu
+@onready var rules_viewer: Control = $UI/RulesViewer
 @onready var property_card: PopupPanel = $UI/PropertyCard
 @onready var asset_card: PopupPanel = $UI/AssetCard
 @onready var player_picker: PopupPanel = $UI/PlayerPicker
@@ -515,6 +516,7 @@ func _ready() -> void:
 	if GameState.online and not GameState.is_authority():
 		_net_report_pause_option.rpc_id(1, _pause_option)
 	pause_menu.set_settings_menu(pause_settings_menu)
+	pause_menu.set_rules_viewer(rules_viewer)
 	pause_menu.quit_to_menu_requested.connect(_quit_to_main_menu)
 	pause_menu.quit_to_desktop_requested.connect(get_tree().quit)
 	board.space_clicked.connect(_on_space_clicked)
@@ -4356,8 +4358,8 @@ func _prepare_spell_cast(caster: Node2D, hand_index: int, spell_name: String, le
 			return await _prepare_impossible_architecture(caster, level)
 		"Promised Land":
 			return await _prepare_promised_land(caster, level)
-		"Share the Wealth":
-			return _prepare_share_the_wealth(caster, level)
+		"Break Bread":
+			return _prepare_break_bread(caster, level)
 		"Smite":
 			return _prepare_smite(caster, level)
 		"Divine Protection":
@@ -4964,13 +4966,13 @@ func _unowned_property_indices_on_side(side: int) -> Array[int]:
 	return result
 
 
-# Share the Wealth: the "other random player" who also gains is rolled here,
-# at cast time -- from then on it behaves like any normally-picked target
-# (red outline, "targeting X" in the log). If that player is bankrupt by the
-# time it resolves, only the caster gains, same as a normally-picked target
-# that's since left the game.
-func _prepare_share_the_wealth(caster: Node2D, level: int) -> Callable:
-	var amount: int = SpellData.SPELLS["Share the Wealth"]["levels"][level].get("amount", 0)
+# Break Bread: the random opponent who also gains is rolled here, at cast time
+# -- from then on it behaves like any normally-picked target (red outline,
+# "targeting X" in the log). If that player is bankrupt by the time it
+# resolves, only the caster gains, same as a normally-picked target that's
+# since left the game.
+func _prepare_break_bread(caster: Node2D, level: int) -> Callable:
+	var amount: int = SpellData.SPELLS["Break Bread"]["levels"][level].get("amount", 0)
 	var others: Array[int] = []
 	for i in players.size():
 		if i != caster.player_id and not players[i].is_bankrupt:
@@ -4979,16 +4981,16 @@ func _prepare_share_the_wealth(caster: Node2D, level: int) -> Callable:
 	if not others.is_empty():
 		lucky_index = others[randi_range(0, others.size() - 1)]
 		_spell_target_player(lucky_index)
-	return _resolve_share_the_wealth.bind(caster, level, amount, lucky_index)
+	return _resolve_break_bread.bind(caster, level, amount, lucky_index)
 
 
-func _resolve_share_the_wealth(caster: Node2D, level: int, amount: int, lucky_index: int) -> void:
+func _resolve_break_bread(caster: Node2D, level: int, amount: int, lucky_index: int) -> void:
 	caster.money += amount
 	if lucky_index == -1 or players[lucky_index].is_bankrupt:
-		dice_label.text = "%s's Share the Wealth (Level %d) resolves! They gain $%d (no one else around to share with)." % [_player_display_name(caster.player_id), level, amount]
+		dice_label.text = "%s's Break Bread (Level %d) resolves! They gain $%d (no one else around to share with)." % [_player_display_name(caster.player_id), level, amount]
 	else:
 		players[lucky_index].money += amount
-		dice_label.text = "%s's Share the Wealth (Level %d) resolves! %s and %s each gain $%d." % [_player_display_name(caster.player_id), level, _player_display_name(caster.player_id), PLAYER_NAMES[lucky_index], amount]
+		dice_label.text = "%s's Break Bread (Level %d) resolves! %s and %s each gain $%d." % [_player_display_name(caster.player_id), level, _player_display_name(caster.player_id), PLAYER_NAMES[lucky_index], amount]
 	_update_player_panels()
 
 

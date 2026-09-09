@@ -1,0 +1,100 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/rules_viewer.gd" id="1"]
+
+[sub_resource type="StyleBoxFlat" id="PanelStyle"]
+bg_color = Color(0.145, 0.145, 0.161, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.361, 0.549, 0.898, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_left = 10
+corner_radius_bottom_right = 10
+
+[node name="RulesViewer" type="ColorRect"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+color = Color(0, 0, 0, 0.75)
+script = ExtResource("1")
+
+[node name="Panel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 120.0
+offset_top = 60.0
+offset_right = -120.0
+offset_bottom = -60.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("PanelStyle")
+
+[node name="Margin" type="MarginContainer" parent="Panel"]
+layout_mode = 2
+theme_override_constants/margin_left = 32
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 32
+theme_override_constants/margin_bottom = 28
+
+[node name="VBox" type="VBoxContainer" parent="Panel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="TopBar" type="HBoxContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="TitleLabel" type="Label" parent="Panel/Margin/VBox/TopBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 32
+text = "Rules"
+vertical_alignment = 1
+
+[node name="CloseButton" type="Button" parent="Panel/Margin/VBox/TopBar"]
+layout_mode = 2
+custom_minimum_size = Vector2(52, 52)
+theme_override_font_sizes/font_size = 26
+text = "X"
+
+[node name="ImageRect" type="TextureRect" parent="Panel/Margin/VBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+custom_minimum_size = Vector2(0, 300)
+expand_mode = 1
+stretch_mode = 5
+
+[node name="NavRow" type="HBoxContainer" parent="Panel/Margin/VBox"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 40
+
+[node name="LeftButton" type="Button" parent="Panel/Margin/VBox/NavRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(220, 60)
+theme_override_font_sizes/font_size = 28
+text = "◀  Left"
+
+[node name="PageLabel" type="Label" parent="Panel/Margin/VBox/NavRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
+theme_override_font_sizes/font_size = 28
+horizontal_alignment = 1
+vertical_alignment = 1
+text = "1 / 6"
+
+[node name="RightButton" type="Button" parent="Panel/Margin/VBox/NavRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(220, 60)
+theme_override_font_sizes/font_size = 28
+text = "Right  ▶"
