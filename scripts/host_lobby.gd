@@ -14,6 +14,19 @@ const SLOT_COLORS: Array[Color] = [
 # to deal everyone a full opening hand).
 const BLITZSTART_MAX_PLAYERS: int = 4
 
+# Services that echo back the caller's public IP as plain text, tried in
+# order until one returns a valid IPv4. The "Others join with" box is meant
+# for a friend on a different network, so it shows this -- not the LAN address.
+const PUBLIC_IP_SERVICES: Array[String] = [
+	"https://api.ipify.org",
+	"https://icanhazip.com",
+	"https://ifconfig.me/ip",
+]
+
+# Kept across Host Game visits in one app run, so re-opening this screen
+# fills the box instantly instead of looking the address up again.
+static var _cached_public_ip: String = ""
+
 @onready var status_label: Label = $VBox/StatusLabel
 @onready var address_value: LineEdit = $VBox/AddressRow/AddressValue
 @onready var copy_button: Button = $VBox/AddressRow/CopyButton
@@ -30,6 +43,14 @@ var slot_widgets: Array[Dictionary] = []
 
 var _host_ok: bool = false
 
+# This machine's LAN address (for same-network friends), and the state of the
+# public-IP lookup: "loading" -> "ok" (box shows the public IP) or "failed"
+# (box falls back to the LAN address).
+var _lan_ip: String = ""
+var _public_ip_state: String = "loading"
+var _ip_request: HTTPRequest
+var _ip_service_index: int = 0
+
 
 func _ready() -> void:
 	Net.lobby_updated.connect(_refresh)
@@ -37,6 +58,12 @@ func _ready() -> void:
 	back_button.pressed.connect(_on_back)
 	copy_button.pressed.connect(_on_copy_pressed)
 	start_button.pressed.connect(_on_start_pressed)
+
+	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_ip_request = HTTPRequest.new()
+	_ip_request.timeout = 8.0
+	_ip_request.request_completed.connect(_on_ip_request_completed)
+	add_child(_ip_request)
 
 	for i in Net.SLOT_COUNT:
 		slot_widgets.append(_build_slot_row(i))
@@ -51,8 +78,58 @@ func _ready() -> void:
 		for w in slot_widgets:
 			(w["option"] as OptionButton).disabled = true
 		return
-	address_value.text = _local_ip()
+
+	_lan_ip = _local_ip()
+	if _cached_public_ip != "":
+		_public_ip_state = "ok"
+		address_value.text = _cached_public_ip
+	else:
+		_public_ip_state = "loading"
+		address_value.text = "Looking up…"
+		copy_button.disabled = true
+		_request_next_ip_service()
 	_refresh()
+
+
+# --- Public-IP lookup --------------------------------------------------
+
+func _request_next_ip_service() -> void:
+	if _ip_service_index >= PUBLIC_IP_SERVICES.size():
+		# Nothing reachable -- fall back to the LAN address (same-network only).
+		_public_ip_state = "failed"
+		address_value.text = _lan_ip
+		copy_button.disabled = false
+		_refresh()
+		return
+	var err: int = _ip_request.request(PUBLIC_IP_SERVICES[_ip_service_index])
+	if err != OK:
+		_ip_service_index += 1
+		_request_next_ip_service()
+
+
+func _on_ip_request_completed(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	var ip: String = body.get_string_from_utf8().strip_edges()
+	if result == HTTPRequest.RESULT_SUCCESS and code == 200 and _is_ipv4(ip):
+		_cached_public_ip = ip
+		_public_ip_state = "ok"
+		address_value.text = ip
+		copy_button.disabled = false
+		_refresh()
+		return
+	# That service was unreachable / gave something odd -- try the next one.
+	_ip_service_index += 1
+	_request_next_ip_service()
+
+
+# True for "ddd.ddd.ddd.ddd" with every octet in 0..255.
+func _is_ipv4(s: String) -> bool:
+	var parts: PackedStringArray = s.split(".")
+	if parts.size() != 4:
+		return false
+	for p in parts:
+		if not p.is_valid_int() or int(p) < 0 or int(p) > 255:
+			return false
+	return true
 
 
 func _build_slot_row(index: int) -> Dictionary:
@@ -103,7 +180,22 @@ func _refresh() -> void:
 			opt.selected = sel if sel != -1 else 0
 
 	start_button.disabled = Net.active_slot_count() < 2
-	status_label.text = "Port %d. Start when your players have joined." % Net.DEFAULT_PORT
+	status_label.text = _address_help_text()
+
+
+func _address_help_text() -> String:
+	var lan_note: String = ""
+	if _lan_ip != "" and _lan_ip != "your IP address":
+		lan_note = " On the same network, join with %s instead." % _lan_ip
+	var head: String
+	match _public_ip_state:
+		"loading":
+			head = "Finding the address for players on other networks…"
+		"failed":
+			head = "Couldn't look up your public address — the box shows your local address (same-network play only)."
+		_:
+			head = "Players on another network join with the address above — you may need to forward UDP %d on your router." % Net.DEFAULT_PORT
+	return "%s%s Start when your players have joined." % [head, lan_note]
 
 
 func _on_start_pressed() -> void:
@@ -146,11 +238,13 @@ func _on_back() -> void:
 	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
 
 
-# Best guess at this machine's LAN address to show the host, skipping
-# loopback and IPv6.
+# Best guess at this machine's LAN address, skipping loopback, IPv6, and the
+# link-local 169.254.x addresses Windows auto-assigns to dead / unplugged
+# adapters (Bluetooth PAN, Wi-Fi Direct, a disconnected Ethernet port) --
+# those aren't routable and can't be joined.
 func _local_ip() -> String:
 	for addr in IP.get_local_addresses():
-		if addr.begins_with("127.") or ":" in addr:
+		if ":" in addr or addr.begins_with("127.") or addr.begins_with("169.254."):
 			continue
 		return addr
 	return "your IP address"
