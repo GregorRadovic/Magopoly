@@ -3,19 +3,25 @@
 #   Usage:   .\build.ps1
 #            .\build.ps1 -Godot "C:\path\to\Godot_v4.7-stable_win64_console.exe"
 #            .\build.ps1 -Run          # build, then launch the result
+#            .\build.ps1 -Zip          # also write build\Magopoly.zip for GitHub Releases
 #
 # Requires Godot 4.7 export templates (a one-time ~700 MB download):
 #   open the project in the editor > Editor menu > Manage Export Templates >
 #   Download and Install.
+#
+# build\ is git-ignored -- the .exe never goes in the repo. Distribute it via
+# GitHub Releases (see BUILDING.md).
 
 param(
     [string]$Godot = "",
-    [switch]$Run
+    [switch]$Run,
+    [switch]$Zip
 )
 
 $ErrorActionPreference = "Stop"
 $ProjectDir = $PSScriptRoot
 $OutFile    = Join-Path $ProjectDir "build\Magopoly.exe"
+$ZipFile    = Join-Path $ProjectDir "build\Magopoly.zip"
 $Preset     = "Windows Desktop"
 
 function Find-Godot {
@@ -65,6 +71,14 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $OutFile)) {
 $sizeMB = [math]::Round((Get-Item $OutFile).Length / 1MB, 1)
 Write-Host ""
 Write-Host "Built $OutFile  ($sizeMB MB)" -ForegroundColor Green
-Write-Host "This single file is the whole game -- send it to your friends as-is."
+
+if ($Zip) {
+    Remove-Item $ZipFile -ErrorAction SilentlyContinue
+    Compress-Archive -Path $OutFile -DestinationPath $ZipFile
+    $zipMB = [math]::Round((Get-Item $ZipFile).Length / 1MB, 1)
+    Write-Host "Zipped $ZipFile  ($zipMB MB)" -ForegroundColor Green
+}
+
+Write-Host "To share it: GitHub > Releases > Draft a new release, and attach this file."
 
 if ($Run) { & $OutFile }
