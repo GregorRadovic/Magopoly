@@ -19,7 +19,7 @@ machines (OpenGL / Compatibility renderer).
 
 - **1–8 players**, any mix of humans and computer opponents
 - **Local hotseat** on one machine, or **online** play over the internet / LAN
-- **37 spell cards**, most with three tiered effects, plus a guided **Tutorial**
+- **40 spell cards**, most with three tiered effects, plus a guided **Tutorial**
 - **Pause Options** so you can freeze the game to react with an instant spell —
   Manual, Half-Control, or Full Control
 - **Quickstart / BlitzStart** modes that deal everyone opening properties and
