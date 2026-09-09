@@ -352,11 +352,11 @@ var _roll_seq: int = 0
 
 
 # Wizard Vision: while a roll is in flight (the response window right after
-# rolling, before it resolves into a move), draws a red line from the
-# roller's current position to where they'll actually land -- kept live as
-# _current_roll changes (a roll-modifying Instant spell like T3 Escape
-# Spell/Adrenaline), so players can see at a glance whether it's worth
-# reacting. Both setters above call this on every change to either var.
+# rolling, before it resolves into a move), draws a line -- in the rolling
+# player's own colour -- from the roller's current position to where they'll
+# actually land. Kept live as _current_roll changes (a roll-modifying Instant
+# spell like T3 Escape Spell/Adrenaline), so players can see at a glance
+# whether it's worth reacting. Both setters above call this on every change.
 func _update_wizard_vision() -> void:
 	if not wizard_vision_line:
 		return
@@ -365,7 +365,7 @@ func _update_wizard_vision() -> void:
 		return
 	var roller: Node2D = players[current_player]
 	var landing_index: int = (roller.current_space + _current_roll) % board.TOTAL_SPACES
-	wizard_vision_line.show_line(roller.position, board.get_space_center(landing_index))
+	wizard_vision_line.show_line(roller.position, board.get_space_center(landing_index), PLAYER_COLORS[current_player])
 
 # The pending spell stack: each entry is {"id": int, "caster_id": int,
 # "spell_name": String, "level": int, "display_name": String, "resolve":

@@ -30,7 +30,9 @@ Licensed under Creative Commons: By Attribution 4.0 License
 Artists credited on their cards.
 Card layouts generated with Magic Set Editor (magicseteditor.boards.net).
 
-[b]MONOPOLY®[/b], the MONOPOLY name and logo, the distinctive MONOPOLY gameboard design, Mr. Monopoly, and other related trademarks and distinctive elements are the property of Hasbro, Inc. and/or its licensors. All rights in those materials are reserved by their respective owners."""
+[b]MONOPOLY®[/b], the MONOPOLY name and logo, the distinctive MONOPOLY gameboard design, Mr. Monopoly, and other related trademarks and distinctive elements are the property of Hasbro, Inc. and/or its licensors. All rights in those materials are reserved by their respective owners.
+
+[b]Magic: The Gathering®[/b], including its card artwork, card names, characters, symbols, and other related intellectual property, is the property of Wizards of the Coast LLC and/or its licensors. All rights in those materials are reserved by their respective owners."""
 
 const ROADMAP_TEXT: String = """[b]Coming Soon...[/b]
 
