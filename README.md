@@ -37,7 +37,7 @@ The build is unsigned, so Windows SmartScreen shows *"Windows protected your
 PC"* the first time; click **More info → Run anyway**. A few antivirus tools
 also flag unsigned Godot builds as a false positive; whitelist it if needed.
 
-*(If there's no release yet, run from source — see below.)*
+*(If there's no release yet, follow the instructions below to run from source.)*
 
 ### Run from source
 
@@ -49,7 +49,7 @@ also flag unsigned Godot builds as a false positive; whitelist it if needed.
 ## Multiplayer
 
 One player picks **Host Game**; everyone else picks **Join Game** and types in
-the host's address. It's a direct connection on **UDP port 27015** — there's no
+the host's address. It's a direct connection on **UDP port 27015**; there's no
 matchmaking server.
 
 - **Same network (same house / Wi-Fi):** joiners use the host's **local
@@ -57,7 +57,7 @@ matchmaking server.
 - **Over the internet:** joiners use the host's **public address** (also shown
   on the Host Game screen). The host must **port-forward UDP 27015** to their PC
   and allow it through the firewall. If port-forwarding isn't an option, a
-  LAN-emulation VPN like Tailscale works — everyone joins the virtual network
+  LAN-emulation VPN like Tailscale works; everyone joins the virtual network
   and uses the host's VPN address.
 
 The host stays authoritative for the whole match. If a player drops, an AI holds
@@ -68,7 +68,7 @@ their seat until they rejoin with **Join Game** (their address is pre-filled).
 - **Programming:** Gregor Radovic (<https://github.com/GregorRadovic>)
 - **Music:** *"The Britons"* by Kevin MacLeod (incompetech.com), licensed under
   [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- **Art:** individual artists are credited on their cards. Card layouts were
+- **Art:** Individual artists are credited on their cards. Card layouts were
   generated with [Magic Set Editor](https://magicseteditor.boards.net/).
 
 ## Legal
