@@ -104,6 +104,7 @@ text = "Player 1's turn"
 
 [node name="RollButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
+focus_mode = 0
 text = "Roll"
 
 [node name="AdminRow" type="HBoxContainer" parent="UI/Panel/VBox"]

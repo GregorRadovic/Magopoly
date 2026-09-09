@@ -55,9 +55,6 @@ const BURN_FOR_ATTUNEMENT_INDEX: int = -100
 # with a real top-of-deck card index (0..3).
 const SPELL_SHOP_SKIP_INDEX: int = -2
 
-# Sentinel for the "Reveal to a player" entry in the spell-interaction picker.
-const REVEAL_INDEX: int = -50
-
 # How long a response window (see _ensure_response_window()) lasts before
 # automatically continuing, if nobody pauses it (or extends it by casting
 # another spell in response). Doubled online (see _response_window_seconds())
@@ -484,6 +481,7 @@ func _ready() -> void:
 	trader1_money_edit.text_changed.connect(_on_trade_money_changed)
 	trader2_money_edit.text_changed.connect(_on_trade_money_changed)
 	card_picker.zoom_requested.connect(spell_card.show_card)
+	spell_card.reveal_pressed.connect(_on_zoom_reveal_pressed)
 	pause_menu.set_settings_menu(pause_settings_menu)
 	pause_menu.quit_to_menu_requested.connect(_quit_to_main_menu)
 	pause_menu.quit_to_desktop_requested.connect(get_tree().quit)
@@ -537,6 +535,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.keycode == KEY_B and not buy_house_unmortgage_button.disabled:
 		_on_buy_house_unmortgage_pressed()
+		return
+
+	# Enter presses the Roll / End Turn button. Space is deliberately NOT bound
+	# to it (roll_button has focus_mode NONE) -- Space is the response-window
+	# pause key. Gated on the button being live, same as S / B above.
+	if event.keycode in [KEY_ENTER, KEY_KP_ENTER] and not roll_button.disabled:
+		_on_roll_pressed()
 		return
 
 	var pause_slot: int = _pause_key_slot(event.keycode)
@@ -1712,8 +1717,8 @@ func _sell_house(index: int) -> void:
 		_toast("You don't own %s." % property_name)
 	elif space.house_count <= 0:
 		_toast("%s has no houses to sell." % property_name)
-	elif space.house_count < _max_houses_in_group(color_name):
-		_toast("You must sell evenly -- other properties in the color set have more houses than %s." % property_name)
+	elif space.house_count < _max_houses_in_group(color_name, player.player_id):
+		_toast("You must sell evenly -- other properties you own in the color set have more houses than %s." % property_name)
 	else:
 		space.house_count -= 1
 		player.money += sale_price
@@ -1723,14 +1728,19 @@ func _sell_house(index: int) -> void:
 		_update_player_panels()
 
 
-# The maximum house count among all properties in a color group, used to
-# enforce even selling: a property can only lose a house while it's tied
-# for the most houses in its group.
-func _max_houses_in_group(color_name: String) -> int:
+# The most houses on any one property in a color group that `owner_id` owns.
+# Used both to enforce even selling (you can only pull a house off a property
+# that's tied for the most among your own in the group) and to block
+# mortgaging / selling / trading a property while another of yours in the same
+# set still has houses. Only that owner's houses count -- an opponent building
+# on the same colour (e.g. via Impossible Architecture, without the full set)
+# never locks your properties.
+func _max_houses_in_group(color_name: String, owner_id: int) -> int:
 	var group: Array = board.get_color_group(color_name)
 	var max_houses: int = 0
 	for space_index in group:
-		max_houses = maxi(max_houses, board.spaces[space_index].house_count)
+		if board.spaces[space_index].owner_id == owner_id:
+			max_houses = maxi(max_houses, board.spaces[space_index].house_count)
 	return max_houses
 
 
@@ -1758,8 +1768,8 @@ func _mortgage_property(index: int) -> void:
 		_toast("You don't own %s." % property_name)
 	elif space.is_mortgaged:
 		_toast("%s is already mortgaged." % property_name)
-	elif _max_houses_in_group(color_name) > 0:
-		_toast("You can't mortgage %s while its color set has houses." % property_name)
+	elif _max_houses_in_group(color_name, player.player_id) > 0:
+		_toast("You can't mortgage %s while another property you own in its color set has houses." % property_name)
 	else:
 		space.is_mortgaged = true
 		player.money += mortgage_value
@@ -1804,7 +1814,7 @@ func _ai_mortgage_properties(player: Node2D, needed: int) -> void:
 			if space_index != 0 and board.get_space_info(space_index).get("type", "") != "property":
 				continue
 			var color_name: String = board.get_space_info(space_index).get("color", "")
-			if _max_houses_in_group(color_name) > 0:
+			if _max_houses_in_group(color_name, player.player_id) > 0:
 				continue
 			candidates.append(space_index)
 		if candidates.is_empty():
@@ -1825,7 +1835,7 @@ func _ai_sell_houses(player: Node2D, needed: int) -> void:
 			if space.house_count <= 0:
 				continue
 			var color_name: String = board.get_space_info(space_index).get("color", "")
-			if space.house_count == _max_houses_in_group(color_name):
+			if space.house_count == _max_houses_in_group(color_name, player.player_id):
 				candidates.append(space_index)
 		if candidates.is_empty():
 			return
@@ -2919,8 +2929,8 @@ func _apply_trade_click(index: int) -> void:
 		_toast("That property isn't part of this trade.")
 		return
 	var color_name: String = board.get_space_info(index).get("color", "")
-	if _max_houses_in_group(color_name) > 0:
-		_toast("That property can't be traded while a property in its color set has houses.")
+	if _max_houses_in_group(color_name, space.owner_id) > 0:
+		_toast("That property can't be traded while its owner has houses on another property in its color set.")
 		return
 
 	var offered: Array[int] = _trade1_offered if space.owner_id == _trader1 else _trade2_offered
@@ -3174,7 +3184,7 @@ func _ai_pick_trade_offer(player: Node2D, target_color: String) -> int:
 			continue
 		if _owns_full_color_group(player.player_id, color_name):
 			continue
-		if _max_houses_in_group(color_name) > 0:
+		if _max_houses_in_group(color_name, player.player_id) > 0:
 			continue
 		candidates.append(space_index)
 	if candidates.is_empty():
@@ -3823,7 +3833,16 @@ func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
 		return
 	var spell_name: String = players[player_index].spell_hand[hand_index]
 	var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
-	spell_card.show_card(load(spell_info.get("icon", "")))
+	# A "Reveal / Hide…" button rides on the zoom for one of your own cards
+	# (online: your local seat; hotseat: any human's, where it's a harmless
+	# no-op since every human hand is already visible) -- not mid-trade or
+	# mid-tutorial, which have their own spell-card semantics.
+	var can_reveal: bool = GameState.is_slot_local(player_index) and not players[player_index].is_ai \
+		and not _trading and not _tutorial_active
+	if can_reveal:
+		spell_card.show_card(load(spell_info.get("icon", "")), player_index, hand_index)
+	else:
+		spell_card.show_card(load(spell_info.get("icon", "")))
 	if _tutorial_active:
 		var want: String = _tutorial_right_click_spell()
 		if want != "" and _tutorial_hand_spell_is(player_index, hand_index, want):
@@ -3911,17 +3930,9 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 	# for it at all; the option simply isn't offered.
 	if color_name != "utility":
 		level_entries.append({"index": BURN_FOR_ATTUNEMENT_INDEX, "name": "Burn for Attunement (+1 %s Attunement)" % color_name.capitalize(), "color": Color.WHITE})
-	level_entries.append({"index": REVEAL_INDEX, "name": "Reveal to a player", "color": Color.WHITE})
 
 	_pp_open("Cast %s at what level?" % spell_name, level_entries)
 	var choice: int = await _pp_result()
-
-	if choice == REVEAL_INDEX:
-		await _reveal_spell(caster, hand_index)
-		_casting_spell = false
-		_prompt_slot = -1
-		_refresh_action_buttons()
-		return
 
 	# Only actually push a cast onto the stack -- and open/extend the
 	# response window for it -- once _casting_spell is released below, so
@@ -3953,28 +3964,81 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 		await post_cast.call()
 
 
-# Reveal: pick an opponent, and the chosen spell becomes face-up for them
-# (and stays so as long as it's in this hand). Additive -- reveal the same
-# card to several players one at a time.
-func _reveal_spell(caster: Node2D, hand_index: int) -> void:
-	if hand_index < 0 or hand_index >= caster.spell_hand.size():
+# True while a _reveal_spell() picker loop is running for the local player, so
+# a second right-click / button press can't stack another one on top.
+var _reveal_in_progress: bool = false
+
+
+# The "Reveal / Hide…" button on the zoomed-in card was pressed. Runs the
+# reveal picker for `owner_id`'s card `hand_index` -- locally on the host / in
+# a hotseat game, or forwarded to the host by a client.
+func _on_zoom_reveal_pressed(owner_id: int, hand_index: int) -> void:
+	if owner_id < 0 or owner_id >= players.size():
 		return
-	var entries: Array = []
-	for i in players.size():
-		if i != caster.player_id and not players[i].is_bankrupt:
-			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
-	if entries.is_empty():
-		_toast("There's no one to reveal it to.")
+	if not GameState.is_slot_local(owner_id) or players[owner_id].is_ai:
 		return
-	_pp_open("Reveal %s to which player?" % caster.spell_hand[hand_index], entries)
-	var target: int = await _pp_result()
-	if target < 0 or hand_index >= caster.spell_revealed_to.size():
+	if _reveal_in_progress or _casting_spell or _trading:
 		return
-	var revealed: Array = caster.spell_revealed_to[hand_index]
-	if not revealed.has(target):
-		revealed.append(target)
-	_log("%s revealed a spell to %s." % [PLAYER_NAMES[caster.player_id], PLAYER_NAMES[target]])
-	_update_player_panels()
+	if GameState.online and not GameState.is_authority():
+		_net_reveal_intent.rpc_id(1, hand_index, owner_id)
+		return
+	await _run_reveal(owner_id, hand_index)
+
+
+# A remote player pressed the reveal button on one of their own cards.
+@rpc("any_peer", "call_remote", "reliable")
+func _net_reveal_intent(hand_index: int, slot: int) -> void:
+	if not GameState.is_authority():
+		return
+	if _peer_for_slot(slot) != multiplayer.get_remote_sender_id():
+		return
+	if _reveal_in_progress or _casting_spell or _trading:
+		return
+	await _run_reveal(slot, hand_index)
+
+
+func _run_reveal(owner_id: int, hand_index: int) -> void:
+	_reveal_in_progress = true
+	_prompt_slot = owner_id
+	await _reveal_spell(players[owner_id], hand_index)
+	_prompt_slot = -1
+	_reveal_in_progress = false
+
+
+# Reveal / hide a spell in `owner`'s hand, one player at a time. A player the
+# card is already revealed to is shown with "(hide)" -- picking them un-reveals
+# it. Loops until the owner cancels, so several can be toggled in one go. The
+# card stays revealed only as long as it's in this hand. The public game log
+# never names the spell (that would defeat a selective reveal).
+func _reveal_spell(owner: Node2D, hand_index: int) -> void:
+	if hand_index < 0 or hand_index >= owner.spell_hand.size():
+		return
+	var spell_name: String = owner.spell_hand[hand_index]
+	while true:
+		if hand_index >= owner.spell_revealed_to.size():
+			return
+		var revealed: Array = owner.spell_revealed_to[hand_index]
+		var entries: Array = []
+		for i in players.size():
+			if i == owner.player_id or players[i].is_bankrupt or players[i].is_ai:
+				continue
+			var suffix: String = " (hide)" if revealed.has(i) else ""
+			entries.append({"index": i, "name": PLAYER_NAMES[i] + suffix, "color": PLAYER_COLORS[i]})
+		if entries.is_empty():
+			_toast("There's no one to reveal it to.")
+			return
+		_pp_open("%s: reveal to / hide from a player (Cancel when done)." % spell_name, entries)
+		var target: int = await _pp_result()
+		if target < 0 or hand_index >= owner.spell_revealed_to.size():
+			return
+		revealed = owner.spell_revealed_to[hand_index]
+		if revealed.has(target):
+			revealed.erase(target)
+			_log("%s hid a spell from %s." % [PLAYER_NAMES[owner.player_id], PLAYER_NAMES[target]])
+		else:
+			revealed.append(target)
+			_log("%s revealed a spell to %s." % [PLAYER_NAMES[owner.player_id], PLAYER_NAMES[target]])
+		_update_player_panels()
 
 
 # Discards a spell without its effect in exchange for +1 Temporary
@@ -4848,7 +4912,7 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 				if space_index in given:
 					continue
 				var color_name: String = board.get_space_info(space_index).get("color", "")
-				if _max_houses_in_group(color_name) > 0:
+				if _max_houses_in_group(color_name, caster.player_id) > 0:
 					continue
 				entries.append({"index": space_index, "name": "%s ($%d)" % [board.get_space_info(space_index).get("name", ""), board.get_space_info(space_index).get("price", 0)], "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
 			if entries.is_empty():
@@ -4866,7 +4930,7 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 		var entries: Array = []
 		for space_index in caster.owned_property_indices:
 			var color_name: String = board.get_space_info(space_index).get("color", "")
-			if _max_houses_in_group(color_name) > 0:
+			if _max_houses_in_group(color_name, caster.player_id) > 0:
 				continue
 			entries.append({"index": space_index, "name": board.get_space_info(space_index).get("name", ""), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
 		if entries.is_empty():
@@ -5029,13 +5093,13 @@ func _resolve_unstable_portal(caster: Node2D, level: int, multiplier: int) -> vo
 	_update_player_panels()
 
 
-# Threaten: the target opponent is the one who decides at resolution --
-# a human picks via player_picker (defaulting to "give up the property" if
-# dismissed some other way); an AI just pays if it can afford to, otherwise
-# gives up the property (no real strategy, just a reasonable default). If a
-# human chooses to pay but can't actually cover it, they get the same
-# debt-collection screen as anyone else short on cash -- see
-# _charge_spell_payment() and _acting_player_id().
+# Threaten: the caster targets a property; its OWNER is the one who then
+# decides -- give it up, or pay the caster. A human owner picks via
+# player_picker, routed to them (_prompt_slot), as a mandatory choice; an AI
+# owner just pays if it can afford to, otherwise gives up the property (no
+# real strategy, just a reasonable default). If a human chooses to pay but
+# can't actually cover it, they get the same debt-collection screen as anyone
+# else short on cash -- see _charge_spell_payment() and _acting_player_id().
 func _prepare_threaten(caster: Node2D, level: int) -> Callable:
 	var entries: Array = []
 	for space_index in board.TOTAL_SPACES:
@@ -5071,8 +5135,13 @@ func _resolve_threaten(caster: Node2D, level: int, space_index: int, amount: int
 			{"index": 0, "name": "Give up %s" % property_name, "color": Color.WHITE},
 			{"index": 1, "name": "Pay $%d" % amount, "color": Color.WHITE},
 		]
-		_pp_open("%s's Threaten (Level %d): give up %s, or pay $%d?" % [_player_display_name(caster.player_id), level, property_name, amount], entries)
+		# The property's owner decides -- route the picker to them, not the
+		# caster / current player. Mandatory: the effect is forced, and this
+		# shouldn't resolve itself if their window loses focus.
+		_prompt_slot = target.player_id
+		_pp_open("%s's Threaten (Level %d): give up %s, or pay $%d?" % [_player_display_name(caster.player_id), level, property_name, amount], entries, true)
 		var choice: int = await _pp_result()
+		_prompt_slot = -1
 		give_up_property = choice != 1
 
 	if give_up_property:
