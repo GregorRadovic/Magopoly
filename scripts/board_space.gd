@@ -111,8 +111,14 @@ var is_mortgaged: bool = false
 var target_outline: Panel = null
 var _targeted: bool = false
 
+# Wizard Vision "you'll land here" highlight -- a translucent tint + border in
+# the moving player's colour. Built in code; sits under the target frame.
+# Toggled by set_landing_highlight().
+var landing_highlight: Panel = null
+
 
 func _ready() -> void:
+	_build_landing_highlight()
 	_build_target_outline()
 	_apply_layout()
 	_update_label()
@@ -141,6 +147,35 @@ func _build_target_outline() -> void:
 func _position_target_outline() -> void:
 	if target_outline:
 		_set_rect(target_outline, -3.0, -3.0, tile_size.x + 3.0, tile_size.y + 3.0)
+
+
+func _build_landing_highlight() -> void:
+	landing_highlight = Panel.new()
+	landing_highlight.name = "LandingHighlight"
+	landing_highlight.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	landing_highlight.visible = false
+	add_child(landing_highlight)
+	_position_landing_highlight()
+
+
+func _position_landing_highlight() -> void:
+	if landing_highlight:
+		_set_rect(landing_highlight, BORDER, BORDER, tile_size.x - BORDER, tile_size.y - BORDER)
+
+
+# Called by main.gd's _update_wizard_vision(). `on` false clears it; `color`
+# is the moving player's colour.
+func set_landing_highlight(on: bool, color: Color = Color.WHITE) -> void:
+	if not landing_highlight:
+		return
+	landing_highlight.visible = on
+	if not on:
+		return
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(color.r, color.g, color.b, 0.30)
+	style.border_color = color
+	style.set_border_width_all(3)
+	landing_highlight.add_theme_stylebox_override("panel", style)
 
 
 # Called by main.gd's _refresh_spell_target_highlights().
@@ -173,6 +208,7 @@ func _apply_layout() -> void:
 	if click_area:
 		_set_rect(click_area, 0.0, 0.0, w, h)
 
+	_position_landing_highlight()
 	_position_special_marker()
 	_position_color_banner()
 	_position_price_label()

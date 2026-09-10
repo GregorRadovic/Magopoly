@@ -176,9 +176,9 @@ const SPELLS: Dictionary = {
 		"color": "orange",
 		"icon": "res://Magopoly Assets/Cards/4 3 Offer You Cant Refuse.png",
 		"levels": {
-			1: {"description": "Take a property without houses from an opponent. In return, give them properties of greater or equal value."},
-			2: {"description": "Take a property without houses from an opponent. In return, give them any property you own."},
-			3: {"description": "Take a property without houses from an opponent. In return, give them money equal to that property's value."},
+			1: {"description": "Take a property without houses from an opponent. In return, give them two of your properties.", "give_count": 2},
+			2: {"description": "Take a property without houses from an opponent. In return, give them one of your properties of greater or equal value.", "give_count": 1, "min_value": true},
+			3: {"description": "Take a property without houses from an opponent. In return, give them one of your properties.", "give_count": 1},
 		},
 	},
 	"Haggling": {
@@ -253,19 +253,22 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Cards/6 3 Far-Reaching Empire.png",
 		"levels": {
 			1: {"description": "For each different color among properties you own, an opponent pays you $30.", "amount": 30, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "For each different color among properties you own, an opponent pays you $60.", "amount": 60, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "For each different color among properties you own, an opponent pays you $80.", "amount": 80, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "For each different color among properties you own, an opponent pays you $50.", "amount": 50, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "For each different color among properties you own, an opponent pays you $70.", "amount": 70, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
-	# The card restricts the target to a property owned by another player, but
-	# chat explicitly widened this to also allow unowned (bank) properties.
+	# Reworked: the caster BUYS an opponent's property at its listed price
+	# (never from the bank). The colour-count gate is EXACT and reversed from
+	# the old version -- the closer the buy gets to completing your own
+	# monopoly, the higher the level you need: own 0 of that colour -> L1,
+	# exactly 1 -> L2, exactly 2 -> L3. `owned_in_group` is that exact count.
 	"Annexation": {
 		"color": "yellow",
 		"icon": "res://Magopoly Assets/Cards/6 4 Annexation.png",
 		"levels": {
-			1: {"description": "Choose a property without houses. Take it if you own two properties of that color set. The property can be taken from the bank or from another player.", "required_owned": 2},
-			2: {"description": "Choose a property without houses. Take it if you own one property of that color set. The property can be taken from the bank or from another player.", "required_owned": 1},
-			3: {"description": "Choose a property without houses. Take it. The property can be taken from the bank or from another player.", "required_owned": 0},
+			1: {"description": "Choose an opponent's property without houses. Buy it at its price, if you own no properties of its color.", "owned_in_group": 0},
+			2: {"description": "Choose an opponent's property without houses. Buy it at its price, if you own exactly 1 property of its color.", "owned_in_group": 1},
+			3: {"description": "Choose an opponent's property without houses. Buy it at its price, if you own exactly 2 properties of its color.", "owned_in_group": 2},
 		},
 	},
 	"Adrenaline": {

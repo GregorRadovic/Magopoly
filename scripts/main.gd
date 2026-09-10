@@ -321,7 +321,12 @@ const PAUSE_MANUAL: int = 0
 const PAUSE_HALF: int = 1
 const PAUSE_FULL: int = 2
 # This machine's setting (mirrors pause_settings_menu.pause_option).
-var _pause_option: int = PAUSE_HALF
+var _pause_option: int = PAUSE_MANUAL
+# This machine's Wizard Vision setting (mirrors pause_settings_menu). The
+# roll-prediction arrow + landing-tile highlight; on by default.
+var _wizard_vision_enabled: bool = true
+# The board space currently lit up as the predicted landing tile, or -1.
+var _wv_landing_index: int = -1
 # Per player_id, host-authoritative. Local seats copy _pause_option; remote
 # seats report theirs via _net_report_pause_option. Read by _apply_auto_pause.
 var _seat_pause_option: Array[int] = []
@@ -352,20 +357,38 @@ var _roll_seq: int = 0
 
 
 # Wizard Vision: while a roll is in flight (the response window right after
-# rolling, before it resolves into a move), draws a line -- in the rolling
-# player's own colour -- from the roller's current position to where they'll
-# actually land. Kept live as _current_roll changes (a roll-modifying Instant
-# spell like T3 Escape Spell/Adrenaline), so players can see at a glance
-# whether it's worth reacting. Both setters above call this on every change.
+# rolling, before it resolves into a move), draws an arrow -- in the rolling
+# player's own colour -- from the roller's token to the tile they'd land on,
+# and highlights that tile. Kept live as _current_roll changes (a roll-
+# modifying Instant spell like T3 Escape Spell/Adrenaline), so players can see
+# at a glance whether it's worth reacting. Off if the player unchecked it in
+# Settings. Both setters above call this on every change.
 func _update_wizard_vision() -> void:
 	if not wizard_vision_line:
 		return
-	if not _roll_in_flight:
+	if not _roll_in_flight or not _wizard_vision_enabled:
 		wizard_vision_line.hide_line()
+		_clear_wv_landing_highlight()
 		return
 	var roller: Node2D = players[current_player]
 	var landing_index: int = (roller.current_space + _current_roll) % board.TOTAL_SPACES
-	wizard_vision_line.show_line(roller.position, board.get_space_center(landing_index), PLAYER_COLORS[current_player])
+	var col: Color = PLAYER_COLORS[current_player]
+	wizard_vision_line.show_line(roller.position, board.get_space_center(landing_index), col)
+	if landing_index != _wv_landing_index:
+		_clear_wv_landing_highlight()
+		board.spaces[landing_index].set_landing_highlight(true, col)
+		_wv_landing_index = landing_index
+
+
+func _clear_wv_landing_highlight() -> void:
+	if _wv_landing_index != -1 and _wv_landing_index < board.spaces.size():
+		board.spaces[_wv_landing_index].set_landing_highlight(false)
+	_wv_landing_index = -1
+
+
+func _on_wizard_vision_changed(on: bool) -> void:
+	_wizard_vision_enabled = on
+	_update_wizard_vision()
 
 # The pending spell stack: each entry is {"id": int, "caster_id": int,
 # "spell_name": String, "level": int, "display_name": String, "resolve":
@@ -409,9 +432,22 @@ const SPELL_TARGET_SYMBOL: String = "🎯"
 # from SPELL_DECK_STARTING_COUNTS.
 var _spell_deck: Array[String] = []
 
-# Set while the current player owes more money than they have on hand and is
-# being given a chance to raise it (selling houses / mortgaging) before
-# bankruptcy. See _collect_debt().
+# Raise Money mode -- entered whenever someone owes more than they hold on
+# hand (unpayable rent/tax, a spell charge, or an optional buy they can't
+# afford). See _collect_debt() / _raise_money().
+#
+# It's a LIFO STACK, not one debt: a spell the debtor casts to earn the money
+# can itself charge someone who can't pay, so that debt goes on top and is
+# settled first (P2 owes P1 -> P2's spell charges P1 -> P1 raises money and
+# pays P2 -> P2, now flush, finishes their own debt). Each entry is
+# {"player_id", "amount", "creditor" (Node2D or null), "cancellable",
+# "auto_pay", "outcome" ("" | "paid" | "cancelled" | "bankrupt")}.
+#
+# The _debt_* vars below always MIRROR the top entry (or are cleared when the
+# stack is empty) -- read them anywhere, but only ever change a debt through
+# the helpers (_raise_money / _finish_current_debt / _fail_all_debts_for /
+# _sync_current_debt).
+var _debt_stack: Array[Dictionary] = []
 var _in_debt: bool = false
 var _debt_amount: int = 0
 var _debt_creditor: Node2D = null
@@ -426,7 +462,8 @@ var _debt_player_id: int = -1
 # opened this does the actual charge).
 var _debt_cancellable: bool = false
 var _debt_auto_pay: bool = true
-# How the last raise-money window ended: "paid", "cancelled" or "bankrupt".
+# How the current (top) raise-money window is going: "" while unresolved,
+# then "paid", "cancelled" or "bankrupt".
 var _debt_outcome: String = ""
 
 # Set while the current player is deciding whether to buy the property they
@@ -482,6 +519,13 @@ var _tutorial_pick_phase: int = 0
 # True while the "Darn, you missed it!" message is showing -- the next click
 # jumps back to the roll step rather than advancing.
 var _tutorial_rewind_pending: bool = false
+# Focus cues for the current step, recomputed from its text by
+# _tutorial_refresh_focus(): every spell name the bubble mentions (highlighted
+# on that card in the Players panel) and whether it points at the Roll / End
+# Turn button (glow overlay on roll_button).
+var _tutorial_focus_spells: Array[String] = []
+var _tutorial_focus_roll_button: bool = false
+var _tutorial_roll_button_glow: Panel = null
 
 
 func _ready() -> void:
@@ -509,10 +553,12 @@ func _ready() -> void:
 	card_picker.zoom_requested.connect(spell_card.show_card)
 	spell_card.reveal_pressed.connect(_on_zoom_reveal_pressed)
 	_seat_pause_option.resize(players.size())
-	_seat_pause_option.fill(PAUSE_HALF)
+	_seat_pause_option.fill(PAUSE_MANUAL)
 	_pause_option = pause_settings_menu.pause_option
 	_apply_local_pause_option()
 	pause_settings_menu.pause_option_changed.connect(_on_pause_option_changed)
+	_wizard_vision_enabled = pause_settings_menu.wizard_vision_on
+	pause_settings_menu.wizard_vision_changed.connect(_on_wizard_vision_changed)
 	if GameState.online and not GameState.is_authority():
 		_net_report_pause_option.rpc_id(1, _pause_option)
 	pause_menu.set_settings_menu(pause_settings_menu)
@@ -740,6 +786,7 @@ func _tutorial_apply_current_step() -> void:
 	tutorial_bubble_label.text = step.get("text", "")
 	tutorial_bubble.visible = true
 	tutorial_bubble_hint.visible = _tutorial_expected_action == ""
+	_tutorial_refresh_focus(step.get("text", ""))
 
 	# The "await a spell to resolve" steps just un-pause the player and re-arm
 	# the open reaction window's countdown, so _ensure_response_window()'s loop
@@ -751,6 +798,47 @@ func _tutorial_apply_current_step() -> void:
 		_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
 		_refresh_action_buttons()
 		_update_player_panels()
+
+
+# Works out what the current bubble text is pointing at and lights it up:
+# any spell it names by card title gets a gold outline on that card in the
+# Players panel, and phrases like "Roll the dice" / "Click the Roll button" /
+# "End Turn" glow the Roll button. Called on every step change (and the
+# missed-window message).
+func _tutorial_refresh_focus(text: String) -> void:
+	_tutorial_focus_spells.clear()
+	if _tutorial_active:
+		for p in players:
+			for spell_name in p.spell_hand:
+				if spell_name != "" and spell_name in text and not _tutorial_focus_spells.has(spell_name):
+					_tutorial_focus_spells.append(spell_name)
+	var lower: String = text.to_lower()
+	_tutorial_focus_roll_button = _tutorial_active and (
+		"roll button" in lower or "roll the dice" in lower or "end turn" in lower)
+	_tutorial_apply_roll_button_glow()
+	_update_player_panels()
+
+
+func _tutorial_apply_roll_button_glow() -> void:
+	if not _tutorial_roll_button_glow:
+		if not _tutorial_focus_roll_button:
+			return
+		_tutorial_roll_button_glow = Panel.new()
+		_tutorial_roll_button_glow.name = "TutorialGlow"
+		_tutorial_roll_button_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_tutorial_roll_button_glow.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_tutorial_roll_button_glow.offset_left = -3.0
+		_tutorial_roll_button_glow.offset_top = -3.0
+		_tutorial_roll_button_glow.offset_right = 3.0
+		_tutorial_roll_button_glow.offset_bottom = 3.0
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(1.0, 0.82, 0.15, 0.0)
+		style.border_color = Color(1.0, 0.82, 0.15)
+		style.set_border_width_all(3)
+		style.set_corner_radius_all(6)
+		_tutorial_roll_button_glow.add_theme_stylebox_override("panel", style)
+		roll_button.add_child(_tutorial_roll_button_glow)
+	_tutorial_roll_button_glow.visible = _tutorial_focus_roll_button
 
 
 func _tutorial_find_step(tag: String) -> int:
@@ -773,9 +861,13 @@ func _end_tutorial() -> void:
 	_tutorial_active = false
 	_tutorial_expected_action = ""
 	_tutorial_forced_roll = Vector2i.ZERO
+	_tutorial_focus_spells.clear()
+	_tutorial_focus_roll_button = false
+	if _tutorial_roll_button_glow:
+		_tutorial_roll_button_glow.visible = false
 	tutorial_bubble.visible = false
 	GameState.tutorial_mode = false
-	get_tree().call_deferred("change_scene_to_file", "res://scenes/start_menu.tscn")
+	get_tree().call_deferred("change_scene_to_file", "res://scenes/tutorial_menu.tscn")
 
 
 # Runs before GUI/subwindow handling, so set_input_as_handled() actually stops
@@ -970,6 +1062,7 @@ func _tutorial_rewind_roll() -> void:
 	tutorial_bubble_label.text = TUTORIAL_MISSED_TEXT
 	tutorial_bubble_hint.visible = true
 	tutorial_bubble.visible = true
+	_tutorial_refresh_focus(TUTORIAL_MISSED_TEXT)
 
 
 # Whether hand slot `hand_index` of player `player_index` currently holds
@@ -1314,9 +1407,10 @@ func _on_peer_gone(peer_id: int) -> void:
 	if _trading and (affected.has(_trader1) or affected.has(_trader2)):
 		_end_trade()
 
-	# A debt the departed player was raising money for: settle it AI-style now
-	# (mortgage, sell houses, forfeit if still short).
-	if _in_debt and affected.has(_debt_player_id):
+	# Debts a departed player was raising money for (the live one and any
+	# suspended deeper in the stack): settle them AI-style now (mortgage, sell
+	# houses, forfeit if still short).
+	while _in_debt and affected.has(_debt_player_id):
 		_ai_settle_debt_now(_debt_player_id)
 
 	_update_player_panels()
@@ -1336,26 +1430,27 @@ func _on_peer_gone(peer_id: int) -> void:
 # disconnects mid-collection. Emits debt_resolved either way so the
 # _collect_debt() call still awaiting it can continue.
 func _ai_settle_debt_now(slot: int) -> void:
+	if _debt_stack.is_empty() or int(_debt_stack.back()["player_id"]) != slot:
+		return
 	var player: Node2D = players[slot]
-	var amount: int = _debt_amount
-	var creditor: Node2D = _debt_creditor
+	var amount: int = int(_debt_stack.back()["amount"])
+	var creditor: Node2D = _debt_stack.back()["creditor"]
+	var cancellable: bool = bool(_debt_stack.back()["cancellable"])
 	_ai_mortgage_properties(player, amount)
 	if player.money < amount:
 		_ai_sell_houses(player, amount)
 	if player.money < amount:
 		_ai_mortgage_properties(player, amount)
+	if _debt_stack.is_empty() or int(_debt_stack.back()["player_id"]) != slot:
+		return  # a mid-loop _maybe_resolve_debt already cleared it
 	if player.money >= amount:
 		_maybe_resolve_debt()
-	elif _debt_cancellable:
-		_debt_outcome = "cancelled"
-		_clear_debt_state()
-		debt_resolved.emit()
+	elif cancellable:
+		_finish_current_debt("cancelled")
 	else:
 		dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(slot)
 		_forfeit_to_bankruptcy(player, creditor)
-		_debt_outcome = "bankrupt"
-		_clear_debt_state()
-		debt_resolved.emit()
+		_fail_all_debts_for(slot, "bankrupt")
 
 
 # Host: a dropped player reconnected (Net.player_reconnected). Splice their new
@@ -2062,7 +2157,14 @@ func _response_window_seconds() -> float:
 func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> void:
 	var seconds: float = _response_window_seconds()
 	_window_deadline_msec = Time.get_ticks_msec() + int(seconds * 1000.0)
-	if _response_window_open or _resolving_stack:
+	# When a spell's resolution has stalled inside Raise Money mode -- it
+	# charged someone who can't pay and is now awaiting `debt_resolved` -- the
+	# loop that owns the stack is frozen and can't drain anything. A spell the
+	# debtor now casts to earn their way out needs THIS call to run the stack
+	# instead. `drain_only`: drive it down to empty (ignoring any roll still in
+	# flight), then hand control back to the frozen loop.
+	var drain_only: bool = _resolving_stack and _in_debt and not _response_window_open
+	if (_response_window_open or _resolving_stack) and not drain_only:
 		# A cast landing in a window that's already running still auto-pauses.
 		_apply_auto_pause(trigger, trigger_seat)
 		return
@@ -2106,8 +2208,9 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 			_tutorial_on_spell_resolved(resolved_name)
 
 		# Nothing more to answer -- the stack is empty and no roll is waiting on
-		# a final reaction to what just resolved.
-		if _spell_stack.is_empty() and not _roll_in_flight:
+		# a final reaction to what just resolved. (`drain_only`: stop the moment
+		# the stack is clear and let the frozen Raise Money loop take over.)
+		if _spell_stack.is_empty() and (drain_only or not _roll_in_flight):
 			break
 
 		# Fresh reaction window: more spells still on the stack to answer, or a
@@ -2129,6 +2232,9 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 
 	_update_player_panels()
 	_maybe_resolve_debt()
+	# If the debtor cast a spell that didn't raise quite enough, they're back
+	# in Raise Money mode -- make sure its buttons are showing.
+	_refresh_action_buttons()
 
 
 # Pops and resolves just the top of _spell_stack (LIFO), returning its stack
@@ -2311,7 +2417,7 @@ func _apply_auto_pause(event: String, trigger_seat: int, force_seat: int = -1) -
 		var forced: bool = seat == force_seat
 		if not forced and players[seat].spell_hand.is_empty():
 			continue
-		var opt: int = _seat_pause_option[seat] if seat < _seat_pause_option.size() else PAUSE_HALF
+		var opt: int = _seat_pause_option[seat] if seat < _seat_pause_option.size() else PAUSE_MANUAL
 		if not forced and not _auto_pause_applies(opt, event, seat, trigger_seat):
 			continue
 		_response_window_paused_by[seat] = true
@@ -2828,13 +2934,54 @@ func _collect_debt(player: Node2D, amount: int, creditor: Node2D) -> void:
 	await _raise_money(player, amount, creditor, false, true)
 
 
-func _clear_debt_state() -> void:
-	_in_debt = false
-	_debt_amount = 0
-	_debt_creditor = null
-	_debt_player_id = -1
-	_debt_cancellable = false
-	_debt_auto_pay = true
+# Point the _debt_* mirror vars at the top of _debt_stack (or clear them if
+# it's empty). Call after every push/pop.
+func _sync_current_debt() -> void:
+	if _debt_stack.is_empty():
+		_in_debt = false
+		_debt_amount = 0
+		_debt_creditor = null
+		_debt_player_id = -1
+		_debt_cancellable = false
+		_debt_auto_pay = true
+		_debt_outcome = ""
+		return
+	var d: Dictionary = _debt_stack.back()
+	_in_debt = true
+	_debt_amount = int(d["amount"])
+	_debt_creditor = d["creditor"]
+	_debt_player_id = int(d["player_id"])
+	_debt_cancellable = bool(d["cancellable"])
+	_debt_auto_pay = bool(d["auto_pay"])
+	_debt_outcome = String(d["outcome"])
+
+
+# Mark the current (top) debt finished with `outcome`, pop it, re-point the
+# mirror at whatever's underneath, and wake the _raise_money() awaiting it.
+func _finish_current_debt(outcome: String) -> void:
+	if _debt_stack.is_empty():
+		return
+	_debt_stack.back()["outcome"] = outcome  # the awaiting _raise_money reads this
+	_debt_stack.pop_back()
+	_sync_current_debt()
+	_update_player_panels()
+	debt_resolved.emit()
+
+
+# A player left the game (bankrupt / disconnected-and-forfeited): resolve
+# EVERY debt they owe -- the one being raised now and any suspended deeper in
+# the stack -- so no _raise_money() is left waiting on them.
+func _fail_all_debts_for(player_id: int, outcome: String) -> void:
+	var changed: bool = false
+	for i in range(_debt_stack.size() - 1, -1, -1):
+		if int(_debt_stack[i]["player_id"]) == player_id:
+			_debt_stack[i]["outcome"] = outcome
+			_debt_stack.remove_at(i)
+			changed = true
+	if changed:
+		_sync_current_debt()
+		_update_player_panels()
+		debt_resolved.emit()
 
 
 # The "Raise Money" window. Restricts the acting player to the money-raising
@@ -2843,14 +2990,17 @@ func _clear_debt_state() -> void:
 # (an optional purchase they can't afford). Returns "paid", "cancelled" or
 # "bankrupt". `auto_pay` false means reaching the amount just ends the
 # window; whoever opened it does the actual charge.
+#
+# Re-entrant: a spell cast to raise money can charge someone who can't pay,
+# stacking a new debt on top -- that one is settled first, then this one
+# resumes (see the _debt_stack note up top).
 func _raise_money(player: Node2D, amount: int, creditor: Node2D, cancellable: bool, auto_pay: bool) -> String:
-	_in_debt = true
-	_debt_amount = amount
-	_debt_creditor = creditor
-	_debt_player_id = player.player_id
-	_debt_cancellable = cancellable
-	_debt_auto_pay = auto_pay
-	_debt_outcome = ""
+	var entry: Dictionary = {
+		"player_id": player.player_id, "amount": amount, "creditor": creditor,
+		"cancellable": cancellable, "auto_pay": auto_pay, "outcome": "",
+	}
+	_debt_stack.push_back(entry)
+	_sync_current_debt()
 	_log("%s needs to raise $%d." % [PLAYER_NAMES[player.player_id], amount])
 	dice_label.text += "\n%s: raise $%d (sell houses / mortgage, trade, or cast a spell)." % [_player_display_name(player.player_id), amount]
 
@@ -2864,62 +3014,60 @@ func _raise_money(player: Node2D, amount: int, creditor: Node2D, cancellable: bo
 			_ai_sell_houses(player, amount)
 		if player.money < amount:
 			_ai_mortgage_properties(player, amount)
-		if player.money >= amount:
-			_maybe_resolve_debt()
-		elif cancellable:
-			_debt_outcome = "cancelled"
-			_clear_debt_state()
-		else:
-			dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(player.player_id)
-			_forfeit_to_bankruptcy(player, creditor)
-			_debt_outcome = "bankrupt"
-			_clear_debt_state()
-		return _debt_outcome
+		if entry["outcome"] == "":  # a mid-loop _maybe_resolve_debt may have paid it
+			if player.money >= int(entry["amount"]):
+				_maybe_resolve_debt()
+			elif cancellable:
+				_finish_current_debt("cancelled")
+			else:
+				dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(player.player_id)
+				_forfeit_to_bankruptcy(player, creditor)
+				_fail_all_debts_for(player.player_id, "bankrupt")
+		return String(entry["outcome"])
 
 	_refresh_action_buttons()
-	await debt_resolved
-	return _debt_outcome
+	while entry["outcome"] == "":
+		await debt_resolved
+		if _returning_to_menu or not is_inside_tree():
+			return "cancelled"
+	return String(entry["outcome"])
 
 
 # Cancel button in a cancellable raise-money window (an optional purchase the
-# player decided against once they saw the price).
+# player decided against once they saw the price). Only ever the top debt.
 func _cancel_raise_money() -> void:
-	if not _in_debt or not _debt_cancellable:
+	if _debt_stack.is_empty() or not bool(_debt_stack.back()["cancellable"]):
 		return
-	dice_label.text += "\n%s cancelled the purchase." % _player_display_name(_debt_player_id)
-	_debt_outcome = "cancelled"
-	_clear_debt_state()
-	_update_player_panels()
-	debt_resolved.emit()
+	dice_label.text += "\n%s cancelled the purchase." % _player_display_name(int(_debt_stack.back()["player_id"]))
+	_finish_current_debt("cancelled")
 
 
-# Called after every action that can change the acting player's money while a
-# raise-money window is open (sell house, mortgage, trade, spell resolving).
-# Once they've got enough, pays the debt (unless _debt_auto_pay is off -- an
-# optional purchase pays itself) and lets play continue.
+# Called after every action that can change a debtor's money while a
+# raise-money window is open (sell house, mortgage, trade, a spell resolving).
+# Once the top debt's owner has enough, pays it (unless auto_pay is off -- an
+# optional purchase pays itself) and lets that _raise_money() continue.
 func _maybe_resolve_debt() -> void:
-	if not _in_debt:
+	if _debt_stack.is_empty():
 		return
-	var player: Node2D = players[_debt_player_id]
-	if player.money < _debt_amount:
+	var d: Dictionary = _debt_stack.back()
+	var player: Node2D = players[int(d["player_id"])]
+	var owed: int = int(d["amount"])
+	if player.money < owed:
 		return
-
-	if _debt_auto_pay:
-		player.money -= _debt_amount
-		if _debt_creditor:
-			_debt_creditor.money += _debt_amount
+	var creditor: Node2D = d["creditor"]
+	if bool(d["auto_pay"]):
+		player.money -= owed
+		if creditor != null and not creditor.is_bankrupt:
+			creditor.money += owed
+			_log_payment(player.player_id, owed, PLAYER_NAMES[creditor.player_id])
 		else:
-			free_parking_amount += _debt_amount
-		dice_label.text += "\n%s raised enough money and paid the $%d owed." % [_player_display_name(player.player_id), _debt_amount]
-		_log_payment(player.player_id, _debt_amount,
-			PLAYER_NAMES[_debt_creditor.player_id] if _debt_creditor else "Free Parking")
+			free_parking_amount += owed
+			_log_payment(player.player_id, owed, "Free Parking")
+		dice_label.text += "\n%s raised enough money and paid the $%d owed." % [_player_display_name(player.player_id), owed]
 	else:
-		dice_label.text += "\n%s raised the $%d." % [_player_display_name(player.player_id), _debt_amount]
+		dice_label.text += "\n%s raised the $%d." % [_player_display_name(player.player_id), owed]
 
-	_debt_outcome = "paid"
-	_clear_debt_state()
-	_update_player_panels()
-	debt_resolved.emit()
+	_finish_current_debt("paid")
 
 
 # Sets each action button's enabled state for the current situation: while a
@@ -3614,9 +3762,7 @@ func _on_declare_bankruptcy_pressed() -> void:
 		dice_label.text = "%s declared bankruptcy and forfeits the game." % forfeiting_name
 		_forfeit_to_bankruptcy(player, creditor)
 		if _in_debt:
-			_debt_outcome = "bankrupt"
-			_clear_debt_state()
-			debt_resolved.emit()
+			_fail_all_debts_for(player.player_id, "bankrupt")
 		else:
 			_advance_turn()
 
@@ -4677,6 +4823,18 @@ func _prepare_counterfeit_currency(caster: Node2D, level: int) -> Callable:
 
 
 func _resolve_counterfeit_currency(caster: Node2D, level: int, reduction: int) -> void:
+	# Cast while raising money to pay an opponent: that debt *is* "the next
+	# payment", so cut it directly instead of arming a buffer for later. (A
+	# tax / Free Parking debt has no creditor and isn't a payment "to an
+	# opponent", so it still gets the buffer.)
+	if not _debt_stack.is_empty() and int(_debt_stack.back()["player_id"]) == caster.player_id and _debt_stack.back()["creditor"] != null:
+		var owed_before: int = int(_debt_stack.back()["amount"])
+		var cut: int = mini(reduction, owed_before)
+		_debt_stack.back()["amount"] = owed_before - cut
+		_sync_current_debt()
+		dice_label.text = "%s's Counterfeit Currency (Level %d) resolves! The $%d owed to %s is cut by $%d (now $%d)." % [_player_display_name(caster.player_id), level, owed_before, _player_display_name(_debt_creditor.player_id), cut, _debt_amount]
+		_update_player_panels()
+		return
 	caster.payment_reduction_buffer = reduction
 	dice_label.text = "%s's Counterfeit Currency (Level %d) resolves! Their next payment to an opponent this turn is $%d less." % [_player_display_name(caster.player_id), level, reduction]
 	_update_player_panels()
@@ -5155,14 +5313,19 @@ func _resolve_escape_plan(caster: Node2D, level: int, steps: int, landing_index:
 	_update_player_panels()
 
 
-# Offer You Can't Refuse: forces a trade for an opponent's houseless
-# property. Properties offered in return (Levels 1-2) exclude anything
-# whose color group currently has houses, matching the normal trade UI's
-# own restriction. Level 1 loops picking properties until their combined
-# price meets or beats the target's; running out of eligible properties (or
-# backing out of any pick) cancels the whole cast, since the "in return"
-# side is mandatory, not optional.
+# Offer You Can't Refuse: a forced property-for-property swap (no money any
+# more). The caster takes one houseless property from an opponent and must
+# hand property back in return -- Level 1 gives two of their properties,
+# Level 3 gives one, Level 2 gives one worth at least as much as what's taken.
+# Properties offered back exclude anything whose color group currently has
+# houses, matching the normal trade UI's own restriction. Running out of
+# eligible properties (or backing out of any pick) cancels the whole cast,
+# since the "in return" side is mandatory, not optional.
 func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
+	var level_info: Dictionary = SpellData.SPELLS["Offer You Can't Refuse"]["levels"][level]
+	var give_count: int = level_info.get("give_count", 1)
+	var min_value: bool = level_info.get("min_value", false)
+
 	var target_entries: Array = []
 	for space_index in board.TOTAL_SPACES:
 		var space: Node2D = board.spaces[space_index]
@@ -5181,53 +5344,41 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 	var target_price: int = board.get_space_info(target_space_index).get("price", 0)
 	var target_owner_id: int = board.spaces[target_space_index].owner_id
 
-	if level == 1:
-		var given: Array[int] = []
-		var total_value: int = 0
-		while total_value < target_price:
-			var entries: Array = []
-			for space_index in caster.owned_property_indices:
-				if space_index in given:
-					continue
-				var color_name: String = board.get_space_info(space_index).get("color", "")
-				if _max_houses_in_group(color_name, caster.player_id) > 0:
-					continue
-				entries.append({"index": space_index, "name": "%s ($%d)" % [_property_name(space_index), board.get_space_info(space_index).get("price", 0)], "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
-			if entries.is_empty():
-				dice_label.text += "\n%s doesn't have enough property value to make this offer." % _player_display_name(caster.player_id)
-				return Callable()
-			_pp_open("Offer You Can't Refuse: give properties worth $%d or more (have $%d so far)." % [target_price, total_value], entries)
-			var picked: int = await _pp_result()
-			if picked == -1:
-				return Callable()
-			given.append(picked)
-			total_value += board.get_space_info(picked).get("price", 0)
-		return _resolve_offer_you_cant_refuse.bind(caster, level, target_space_index, target_owner_id, given, 0)
-
-	if level == 2:
+	var given: Array[int] = []
+	while given.size() < give_count:
 		var entries: Array = []
 		for space_index in caster.owned_property_indices:
+			if space_index in given:
+				continue
 			var color_name: String = board.get_space_info(space_index).get("color", "")
 			if _max_houses_in_group(color_name, caster.player_id) > 0:
 				continue
-			entries.append({"index": space_index, "name": _property_name(space_index), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
+			var price: int = board.get_space_info(space_index).get("price", 0)
+			if min_value and price < target_price:
+				continue
+			entries.append({"index": space_index, "name": "%s ($%d)" % [_property_name(space_index), price], "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
 		if entries.is_empty():
-			dice_label.text += "\n%s has no property to give in return." % _player_display_name(caster.player_id)
+			if min_value:
+				dice_label.text += "\n%s has no property worth $%d or more to give in return." % [_player_display_name(caster.player_id), target_price]
+			else:
+				dice_label.text += "\n%s doesn't have %d propert%s to give in return." % [_player_display_name(caster.player_id), give_count, "y" if give_count == 1 else "ies"]
 			return Callable()
-		_pp_open("Offer You Can't Refuse: choose a property to give in return.", entries)
+		var prompt: String
+		if min_value:
+			prompt = "Offer You Can't Refuse: give a property worth $%d or more in return." % target_price
+		elif give_count == 1:
+			prompt = "Offer You Can't Refuse: choose a property to give in return."
+		else:
+			prompt = "Offer You Can't Refuse: choose %d properties to give in return (%d picked)." % [give_count, given.size()]
+		_pp_open(prompt, entries)
 		var picked: int = await _pp_result()
 		if picked == -1:
 			return Callable()
-		return _resolve_offer_you_cant_refuse.bind(caster, level, target_space_index, target_owner_id, [picked] as Array[int], 0)
-
-	# Level 3.
-	if caster.money < target_price:
-		dice_label.text += "\n%s can't afford to pay $%d." % [_player_display_name(caster.player_id), target_price]
-		return Callable()
-	return _resolve_offer_you_cant_refuse.bind(caster, level, target_space_index, target_owner_id, [] as Array[int], target_price)
+		given.append(picked)
+	return _resolve_offer_you_cant_refuse.bind(caster, level, target_space_index, target_owner_id, given)
 
 
-func _resolve_offer_you_cant_refuse(caster: Node2D, level: int, target_space_index: int, target_owner_id: int, given_properties: Array[int], money_amount: int) -> void:
+func _resolve_offer_you_cant_refuse(caster: Node2D, level: int, target_space_index: int, target_owner_id: int, given_properties: Array[int]) -> void:
 	var target_space: Node2D = board.spaces[target_space_index]
 	var property_name: String = _property_name(target_space_index)
 	if target_space.owner_id != target_owner_id:
@@ -5240,20 +5391,18 @@ func _resolve_offer_you_cant_refuse(caster: Node2D, level: int, target_space_ind
 	target_space.owner_id = caster.player_id
 	_sort_owned_properties(caster)
 
+	var given_names: Array[String] = []
 	for space_index in given_properties:
 		caster.owned_property_indices.erase(space_index)
 		target.owned_property_indices.append(space_index)
 		board.spaces[space_index].owner_id = target_owner_id
+		given_names.append(_property_name(space_index))
 	if not given_properties.is_empty():
 		_sort_owned_properties(target)
 
-	if money_amount > 0:
-		var resolve_message: String = "%s's Offer You Can't Refuse (Level %d) resolves! Took %s from %s for $%d." % [_player_display_name(caster.player_id), level, property_name, PLAYER_NAMES[target_owner_id], money_amount]
-		var debt_message: String = "%s's Offer You Can't Refuse (Level %d) takes %s from %s, but owes $%d for it!" % [_player_display_name(caster.player_id), level, property_name, PLAYER_NAMES[target_owner_id], money_amount]
-		await _charge_spell_payment(caster, money_amount, target, resolve_message, debt_message)
-	else:
-		dice_label.text = "%s's Offer You Can't Refuse (Level %d) resolves! Took %s from %s." % [_player_display_name(caster.player_id), level, property_name, PLAYER_NAMES[target_owner_id]]
-		_update_player_panels()
+	var swap_note: String = ", gave back %s" % ", ".join(given_names) if not given_names.is_empty() else ""
+	dice_label.text = "%s's Offer You Can't Refuse (Level %d) resolves! Took %s from %s%s." % [_player_display_name(caster.player_id), level, property_name, PLAYER_NAMES[target_owner_id], swap_note]
+	_update_player_panels()
 
 
 # Haggling: no target to pick -- just arms the discount, consumed by
@@ -5566,52 +5715,56 @@ func _resolve_far_reaching_empire(caster: Node2D, level: int, target_index: int,
 	await _charge_spell_payment(opponent, total, caster, resolve_message, debt_message)
 
 
-# Annexation: chat widened the card's "owned by another player" restriction
-# to also include unowned (bank) properties. The picker is filtered down to
-# only properties the caster is currently eligible to take, per the level's
-# ownership requirement, rather than letting them pick an ineligible one.
-# Matches Offer You Can't Refuse / Threaten's precedent of leaving a forced
-# transfer's mortgage status untouched.
+# Annexation: the caster BUYS an opponent's houseless property at its listed
+# price -- Cult of Terminus L3's pattern (Raise Money if short, Cancel
+# abandons the buy). Never targets the bank. The colour-count gate is EXACT
+# and reversed: own 0 of that colour needs L1, exactly 1 needs L2, exactly 2
+# needs L3 -- so the closer a buy gets to completing the caster's own
+# monopoly, the higher the level required. The picker only lists currently-
+# eligible properties.
 func _prepare_annexation(caster: Node2D, level: int) -> Callable:
-	var required_owned: int = SpellData.SPELLS["Annexation"]["levels"][level].get("required_owned", 0)
+	var level_info: Dictionary = SpellData.SPELLS["Annexation"]["levels"][level]
+	var owned_in_group: int = level_info.get("owned_in_group", 0)
 	var entries: Array = []
 	for space_index in board.TOTAL_SPACES:
 		if board.get_space_info(space_index).get("type", "") != "property":
 			continue
 		var space: Node2D = board.spaces[space_index]
-		if space.owner_id == caster.player_id or space.house_count > 0:
+		if space.house_count > 0:
+			continue
+		if space.owner_id == -1 or space.owner_id == caster.player_id:
 			continue
 		var color_name: String = board.get_space_info(space_index).get("color", "")
-		if _count_owned_in_group(caster.player_id, color_name) < required_owned:
+		if _count_owned_in_group(caster.player_id, color_name) != owned_in_group:
 			continue
-		var owner_note: String = "bank" if space.owner_id == -1 else PLAYER_NAMES[space.owner_id]
-		entries.append({"index": space_index, "name": "%s (%s)" % [_property_name(space_index), owner_note], "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
+		var price: int = board.get_space_info(space_index).get("price", 0)
+		entries.append({"index": space_index, "name": "%s (%s, $%d)" % [_property_name(space_index), PLAYER_NAMES[space.owner_id], price], "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
 	if entries.is_empty():
 		dice_label.text += "\nThere's no eligible property to annex."
 		return Callable()
 
-	_pp_open("Annexation: choose a property without houses.", entries)
+	_pp_open("Annexation: choose an opponent's property without houses to buy.", entries)
 	var target_space_index: int = await _pp_result()
 	if target_space_index == -1:
 		return Callable()
 	_spell_target_property(target_space_index)
 	var target_owner_id: int = board.spaces[target_space_index].owner_id
-	return _resolve_annexation.bind(caster, level, target_space_index, target_owner_id)
+	var target_price: int = board.get_space_info(target_space_index).get("price", 0)
+	return _resolve_annexation.bind(caster, level, target_space_index, target_owner_id, target_price)
 
 
-func _resolve_annexation(caster: Node2D, level: int, target_space_index: int, target_owner_id: int) -> void:
+func _resolve_annexation(caster: Node2D, level: int, target_space_index: int, target_owner_id: int, price: int) -> void:
 	var space: Node2D = board.spaces[target_space_index]
 	var property_name: String = _property_name(target_space_index)
-	if space.owner_id != target_owner_id or space.house_count > 0:
+	if space.owner_id != target_owner_id or target_owner_id == -1 or space.house_count > 0:
 		dice_label.text = "%s's Annexation (Level %d) fizzles -- %s is no longer eligible." % [_player_display_name(caster.player_id), level, property_name]
 		return
-	if target_owner_id != -1:
-		players[target_owner_id].owned_property_indices.erase(target_space_index)
-	space.owner_id = caster.player_id
-	caster.owned_property_indices.append(target_space_index)
-	_sort_owned_properties(caster)
-	dice_label.text = "%s's Annexation (Level %d) resolves! Took %s." % [_player_display_name(caster.player_id), level, property_name]
-	_update_player_panels()
+	# Resolves like a normal purchase -- Raise Money (mortgage / sell / trade)
+	# if the caster is short, with a Cancel that abandons the buy.
+	if not await _buy_property_via_spell(caster, target_space_index, price, target_owner_id):
+		dice_label.text = "%s's Annexation (Level %d): %s wasn't bought." % [_player_display_name(caster.player_id), level, property_name]
+		return
+	dice_label.text = "%s's Annexation (Level %d) resolves! Bought %s from %s for $%d." % [_player_display_name(caster.player_id), level, property_name, PLAYER_NAMES[target_owner_id], price]
 
 
 # Adrenaline: same shape as T3 Escape Spell.
@@ -6097,6 +6250,8 @@ func _update_player_panels() -> void:
 			mini_spell.setup(hand_index, load(spell_info.get("icon", "")) if face_up else CARDBACK_TEXTURE, face_up)
 			mini_spell.card_clicked.connect(_on_spell_clicked.bind(i))
 			mini_spell.card_right_clicked.connect(_on_spell_right_clicked.bind(i))
+			if _tutorial_active and _tutorial_focus_spells.has(spell_name):
+				mini_spell.set_highlight(true)
 
 		var attunement_flow: HFlowContainer = player_attunement_flows[i]
 		for child in attunement_flow.get_children():
