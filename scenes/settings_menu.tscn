@@ -9,7 +9,7 @@ script = ExtResource("1")
 offset_left = 24.0
 offset_top = 24.0
 offset_right = 536.0
-offset_bottom = 346.0
+offset_bottom = 406.0
 theme_override_constants/separation = 20
 
 [node name="TitleLabel" type="Label" parent="VBox"]
@@ -75,6 +75,24 @@ text = "Pause Options"
 layout_mode = 2
 custom_minimum_size = Vector2(240, 48)
 theme_override_font_sizes/font_size = 24
+
+[node name="WizardVisionRow" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="WizardVisionLabel" type="Label" parent="VBox/WizardVisionRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 24
+text = "Wizard Vision"
+
+[node name="WizardVisionCheck" type="CheckBox" parent="VBox/WizardVisionRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(240, 48)
+theme_override_font_sizes/font_size = 24
+button_pressed = true
+text = "Show"
 
 [node name="HostTools" type="VBoxContainer" parent="VBox"]
 visible = false

@@ -21,12 +21,14 @@ signal unpause_player_requested
 # Fired when the Pause Options dropdown changes (in-game so main.gd can react
 # live). MANUAL = 0, HALF_CONTROL = 1, FULL_CONTROL = 2.
 signal pause_option_changed(option: int)
+# Fired when the Wizard Vision checkbox is toggled (main.gd reacts live).
+signal wizard_vision_changed(on: bool)
 
 enum PauseOption { MANUAL, HALF_CONTROL, FULL_CONTROL }
 const PAUSE_OPTION_LABELS: Array[String] = ["Manual", "Half-Control", "Full Control"]
 
 const CONFIG_PATH: String = "user://settings.cfg"
-const POPUP_SIZE: Vector2i = Vector2i(560, 370)
+const POPUP_SIZE: Vector2i = Vector2i(560, 430)
 # Extra height when the Host tools section is showing.
 const HOST_TOOLS_EXTRA_HEIGHT: int = 200
 
@@ -47,13 +49,17 @@ const RESOLUTIONS: Array[Vector2i] = [
 @onready var music_volume_slider: HSlider = $VBox/MusicVolumeRow/MusicVolumeSlider
 @onready var music_volume_value: Label = $VBox/MusicVolumeRow/MusicVolumeValue
 @onready var pause_option_button: OptionButton = $VBox/PauseOptionsRow/PauseOptionButton
+@onready var wizard_vision_check: CheckBox = $VBox/WizardVisionRow/WizardVisionCheck
 @onready var host_tools: VBoxContainer = $VBox/HostTools
 @onready var kick_player_button: Button = $VBox/HostTools/KickPlayerButton
 @onready var unpause_player_button: Button = $VBox/HostTools/UnpausePlayerButton
 @onready var close_button: Button = $VBox/CloseButton
 
 # The current Pause Options selection (mirrors the dropdown; read by main.gd).
-var pause_option: int = PauseOption.HALF_CONTROL
+var pause_option: int = PauseOption.MANUAL
+# Wizard Vision on/off (the roll-prediction arrow + landing highlight). Read
+# by main.gd, kept live via wizard_vision_changed. Default on.
+var wizard_vision_on: bool = true
 
 
 func _ready() -> void:
@@ -72,6 +78,10 @@ func _ready() -> void:
 	pause_option = load_pause_option()
 	pause_option_button.selected = pause_option
 	pause_option_button.item_selected.connect(_on_pause_option_selected)
+
+	wizard_vision_on = load_wizard_vision()
+	wizard_vision_check.button_pressed = wizard_vision_on
+	wizard_vision_check.toggled.connect(_on_wizard_vision_toggled)
 
 	host_tools.visible = false
 	kick_player_button.pressed.connect(func() -> void:
@@ -99,6 +109,12 @@ func _on_pause_option_selected(index: int) -> void:
 	pause_option = index
 	_save_pause_option(index)
 	pause_option_changed.emit(index)
+
+
+func _on_wizard_vision_toggled(on: bool) -> void:
+	wizard_vision_on = on
+	_save_wizard_vision(on)
+	wizard_vision_changed.emit(on)
 
 
 func _update_volume_label(percent: int) -> void:
@@ -145,18 +161,33 @@ static func _save_resolution(res: Vector2i) -> void:
 
 
 # Pause Options: MANUAL / HALF_CONTROL / FULL_CONTROL (see PauseOption).
-# Defaults to HALF_CONTROL when nothing is saved yet.
+# Defaults to MANUAL when nothing is saved yet.
 static func load_pause_option() -> int:
 	var cfg := ConfigFile.new()
 	if cfg.load(CONFIG_PATH) != OK:
-		return PauseOption.HALF_CONTROL
-	return clampi(int(cfg.get_value("gameplay", "pause_option", PauseOption.HALF_CONTROL)), 0, 2)
+		return PauseOption.MANUAL
+	return clampi(int(cfg.get_value("gameplay", "pause_option", PauseOption.MANUAL)), 0, 2)
 
 
 static func _save_pause_option(option: int) -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(CONFIG_PATH)
 	cfg.set_value("gameplay", "pause_option", option)
+	cfg.save(CONFIG_PATH)
+
+
+# Wizard Vision on/off. Defaults on when nothing is saved yet.
+static func load_wizard_vision() -> bool:
+	var cfg := ConfigFile.new()
+	if cfg.load(CONFIG_PATH) != OK:
+		return true
+	return bool(cfg.get_value("gameplay", "wizard_vision", true))
+
+
+static func _save_wizard_vision(on: bool) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(CONFIG_PATH)
+	cfg.set_value("gameplay", "wizard_vision", on)
 	cfg.save(CONFIG_PATH)
 
 
