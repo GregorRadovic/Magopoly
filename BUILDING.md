@@ -41,12 +41,58 @@ writes to `build/Magopoly.exe` (embed-PCK on, codesign off).
 godot --headless --path . --export-release "Windows Desktop" build/Magopoly.exe
 ```
 
+## Building for macOS
+
+There's no macOS preset in the project yet (only "Windows Desktop" exists,
+and it was built on Windows). Godot can export a macOS build from any host
+OS, including this Windows machine — you don't need a Mac to *build* it,
+just to *test* it:
+
+1. **Project → Export…** → **Add…** → **macOS**. Godot creates the preset
+   with sensible defaults.
+2. Set its output path to `build/Magopoly.zip` (macOS exports as a `.zip`
+   containing `Magopoly.app`, not a bare binary).
+3. Turn on ETC2/ASTC texture import — this is a **project setting**, not a
+   per-preset export option (macOS's export plugin doesn't expose it in the
+   preset the way older Godot versions did): **Project → Project Settings →
+   Rendering → Textures → VRAM Compression → Import Etc2 Astc** (flip
+   **Advanced Settings**, top-right of that window, if the group isn't
+   visible). Already set to `true` in `project.godot`. Apple Silicon Macs
+   (arm64) need ASTC-compressed textures — Intel Macs use S3TC/BPTC like
+   Windows does. Exporting **Universal** or **arm64** with this off either
+   fails outright or ships broken textures on M-series Macs; enabling it
+   makes the import cache a bit bigger (one-time reimport) but runs
+   natively everywhere.
+4. Under the preset's options, **Codesign**: pick **Ad-Hoc** (no Apple
+   Developer account needed). This doesn't remove the Gatekeeper warning
+   below, but it does avoid a harder "app is damaged" error some macOS
+   versions show for completely unsigned bundles.
+5. **Export Project…**. The same 4.7 export templates you already downloaded
+   cover macOS too — no second download.
+6. Commit the new preset entry in `export_presets.cfg` so it's there next
+   time (the `.zip`/`.app` itself stays out of git, same as the Windows build).
+
+### What Mac players will see
+
+Gatekeeper blocks unsigned/ad-hoc apps harder than Windows SmartScreen does.
+The first time they open it, right-click (or Control-click) `Magopoly.app` →
+**Open** → **Open** in the dialog — a plain double-click will just refuse.
+If macOS still calls it "damaged", they can run this once in Terminal:
+```
+xattr -cr /path/to/Magopoly.app
+```
+The only way to remove this warning entirely is notarizing through a paid
+Apple Developer account ($99/yr) — not needed to ship, just smoother.
+
 ## Publishing a release
 
-1. Build (`.\build.ps1 -Zip`).
+1. Build (`.\build.ps1 -Zip`), and separately export the macOS `.zip` if
+   you're shipping that too.
 2. On GitHub: **Releases → Draft a new release**, pick a tag (e.g. `v1.0`).
-3. Drag `build\Magopoly.exe` (or the `.zip`) into the **"Attach binaries"** box
-   and publish. Release assets allow up to 2 GB per file and stay out of git.
+3. Drag `build\Magopoly.exe` (or the `.zip`) — and `Magopoly-macOS.zip` if you
+   have one — into the **"Attach binaries"** box and publish. Release assets
+   allow up to 2 GB per file and stay out of git. Name the files so players
+   can tell which is which (e.g. `Magopoly-Windows.zip` / `Magopoly-macOS.zip`).
 
 The README's download link already points at the Releases page.
 
