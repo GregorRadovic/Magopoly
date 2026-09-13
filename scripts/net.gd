@@ -16,7 +16,7 @@ signal join_succeeded
 signal join_failed(reason: String)
 signal kicked(reason: String)
 # Host, in-game: a dropped client came back and reclaimed its seat. main.gd
-# takes the Placeholder AI off that slot and hands control back.
+# clears that slot's inactive state and hands control back.
 signal player_reconnected(slot: int, peer_id: int)
 
 const DEFAULT_PORT: int = 27015
@@ -168,9 +168,9 @@ func _register_client(client_name: String, token: String = "") -> void:
 
 
 func _on_peer_disconnected(id: int) -> void:
-	# In-game drops are a gameplay event -- main.gd's _on_peer_gone puts a
-	# Placeholder AI on the seat and the token_slot entry stays put so the
-	# player can reconnect. Nothing to do here.
+	# In-game drops are a gameplay event -- main.gd's _on_peer_gone marks the
+	# seat inactive and the token_slot entry stays put so the player can
+	# reconnect. Nothing to do here.
 	if not hosting or game_started:
 		return
 	for i in SLOT_COUNT:
@@ -185,7 +185,7 @@ func _on_peer_disconnected(id: int) -> void:
 
 # Host, in-game: `id` (a freshly connected peer) is claiming to be a player who
 # dropped. If their token still maps to a seat, splice the new peer id in and
-# hand them back into main.tscn; main.gd clears the Placeholder AI.
+# hand them back into main.tscn; main.gd clears their inactive state.
 func _try_reconnect(id: int, client_name: String, token: String) -> void:
 	if token == "" or not token_slot.has(token):
 		_kick.rpc_id(id, "This game is already in progress.")
@@ -209,10 +209,6 @@ func note_kick(slot: int) -> void:
 	for t in token_slot.keys():
 		if token_slot[t] == slot:
 			token_slot.erase(t)
-
-
-func slot_is_reconnectable(slot: int) -> bool:
-	return token_slot.values().has(slot)
 
 
 # Host UI: retype an OPEN/COMPUTER/DISABLED slot. Slot 0 (host) and TAKEN

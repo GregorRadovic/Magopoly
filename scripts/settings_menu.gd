@@ -17,6 +17,7 @@ extends PopupPanel
 # button just fires a signal main.gd acts on -- see there.
 
 signal kick_player_requested
+signal take_player_turn_requested
 signal unpause_player_requested
 # Fired when the Pause Options dropdown changes (in-game so main.gd can react
 # live). MANUAL = 0, HALF_CONTROL = 1, FULL_CONTROL = 2.
@@ -30,7 +31,7 @@ const PAUSE_OPTION_LABELS: Array[String] = ["Manual", "Half-Control", "Full Cont
 const CONFIG_PATH: String = "user://settings.cfg"
 const POPUP_SIZE: Vector2i = Vector2i(560, 430)
 # Extra height when the Host tools section is showing.
-const HOST_TOOLS_EXTRA_HEIGHT: int = 200
+const HOST_TOOLS_EXTRA_HEIGHT: int = 270
 
 # Ordered list shown in the dropdown. The first entry is the project default
 # (see project.godot's window/size/viewport_*).
@@ -52,6 +53,7 @@ const RESOLUTIONS: Array[Vector2i] = [
 @onready var wizard_vision_check: CheckBox = $VBox/WizardVisionRow/WizardVisionCheck
 @onready var host_tools: VBoxContainer = $VBox/HostTools
 @onready var kick_player_button: Button = $VBox/HostTools/KickPlayerButton
+@onready var take_player_turn_button: Button = $VBox/HostTools/TakePlayerTurnButton
 @onready var unpause_player_button: Button = $VBox/HostTools/UnpausePlayerButton
 @onready var close_button: Button = $VBox/CloseButton
 
@@ -87,6 +89,9 @@ func _ready() -> void:
 	kick_player_button.pressed.connect(func() -> void:
 		hide()
 		kick_player_requested.emit())
+	take_player_turn_button.pressed.connect(func() -> void:
+		hide()
+		take_player_turn_requested.emit())
 	unpause_player_button.pressed.connect(func() -> void:
 		hide()
 		unpause_player_requested.emit())

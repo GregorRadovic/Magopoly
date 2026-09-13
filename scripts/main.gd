@@ -578,6 +578,7 @@ func _ready() -> void:
 			# Host-only AFK tools in the pause menu's Settings window.
 			pause_settings_menu.enable_host_tools()
 			pause_settings_menu.kick_player_requested.connect(_host_kick_player)
+			pause_settings_menu.take_player_turn_requested.connect(_host_take_player_turn)
 			pause_settings_menu.unpause_player_requested.connect(_host_unpause_player)
 		else:
 			multiplayer.server_disconnected.connect(_on_host_gone)
@@ -684,29 +685,35 @@ func _quit_to_main_menu() -> void:
 # window, host side only. See settings_menu.gd's "Host tools" section.
 # ============================================================================
 
-# "Kick Player": pick a remote human and drop their connection. The host's own
-# multiplayer.peer_disconnected -> _on_peer_gone then hands their seat(s) to a
-# Computer, exactly like a genuine disconnect.
+# "Kick Player": pick a human seat -- connected or already disconnected --
+# and force them bankrupt immediately. This is the permanent fix for a seat
+# that isn't coming back: unlike a plain disconnect (which just leaves the
+# seat inactive), a kick can't be undone by reconnecting. If they're still
+# connected their link is also severed and barred from reconnecting; if
+# they'd already dropped, there's no link left to sever.
 func _host_kick_player() -> void:
 	if not (GameState.online and GameState.is_authority()):
 		return
 	pause_menu.hide()
 	var entries: Array = []
 	for i in players.size():
-		# slot_peer > 1 == a connected client peer (1 is the host itself).
-		if GameState.slot_peer[i] > 1 and not players[i].is_bankrupt:
+		# slot_peer > 1 == a connected client peer (1 is the host itself);
+		# is_disconnected == a dropped seat still sitting in the game.
+		if (GameState.slot_peer[i] > 1 or players[i].is_disconnected) and not players[i].is_bankrupt:
 			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
 	if entries.is_empty():
 		_toast("No remote players to kick.")
 		return
 	player_picker.open("Kick which player?", entries)
 	var slot: int = await player_picker.player_chosen
-	if slot < 0:
+	if slot < 0 or players[slot].is_bankrupt:
 		return
+	_log("%s was kicked by the host and forfeits the game." % PLAYER_NAMES[slot])
+	_kick_forfeit(slot)
+
 	var peer_id: int = GameState.slot_peer[slot]
 	if peer_id <= 1:
-		return
-	_log("%s was kicked by the host." % PLAYER_NAMES[slot])
+		return  # already disconnected -- no link left to sever
 	# Bar the reconnect path first: a kick is meant to stick.
 	Net.note_kick(slot)
 	_net_you_were_kicked.rpc_id(peer_id)
@@ -714,6 +721,27 @@ func _host_kick_player() -> void:
 	await get_tree().create_timer(0.2).timeout
 	if multiplayer.multiplayer_peer is ENetMultiplayerPeer:
 		multiplayer.multiplayer_peer.disconnect_peer(peer_id)
+
+
+# Forces `slot` bankrupt right now, regardless of whose turn it is or
+# whether they owed anything. If the debt they're actively raising money for
+# is their own, that creditor gets everything (matching a voluntary
+# bankruptcy declaration); otherwise assets return to the bank. Any debt of
+# theirs -- live or suspended deeper in the stack -- is resolved as part of
+# the same forfeiture.
+func _kick_forfeit(slot: int) -> void:
+	var player: Node2D = players[slot]
+	var creditor: Node2D = _debt_creditor if (_in_debt and _debt_player_id == slot) else null
+	dice_label.text = "%s was kicked by the host and forfeits the game." % _player_display_name(slot)
+	_forfeit_to_bankruptcy(player, creditor)
+	_fail_all_debts_for(slot, "bankrupt")
+	# If it was their own turn and nothing else is blocking, move on right
+	# away -- otherwise the per-frame watchdog (_net_ai_takeover_watchdog)
+	# catches it once whatever's still resolving elsewhere finishes.
+	if current_player == slot and not (_casting_spell or _response_window_open or _trading or _in_debt or _awaiting_buy_decision):
+		_advance_turn()
+	_update_player_panels()
+	_refresh_action_buttons()
 
 
 # Client: the host removed you. Mirrors _on_host_gone (which also fires, a beat
@@ -753,6 +781,57 @@ func _host_unpause_player() -> void:
 		return
 	_log("The host unpaused %s." % PLAYER_NAMES[slot])
 	_toggle_pause_for_player(slot)
+
+
+# "Take Player's Turn": pick a human seat, and if it's currently their turn,
+# a stripped-down AI (the same restricted behaviour a Placeholder AI used to
+# run permanently -- roll, buy whatever it lands on if it can, raise money
+# as needed, forfeit if it can't) plays exactly that one turn for them, then
+# hands the seat straight back to being inactive. It never trades, builds
+# houses, unmortgages, or casts spells -- only real players (or the AI
+# opponents already in the game) do those. The intended use is a seat that's
+# been inactive too long to just wait out; it works on any non-bankrupt
+# human seat, not only a disconnected one, since the host is the one judging
+# when it's needed.
+func _host_take_player_turn() -> void:
+	if not (GameState.online and GameState.is_authority()):
+		return
+	pause_menu.hide()
+	var entries: Array = []
+	for i in players.size():
+		if not players[i].is_ai and not players[i].is_bankrupt:
+			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
+	if entries.is_empty():
+		_toast("No eligible players.")
+		return
+	player_picker.open("Take whose turn?", entries)
+	var slot: int = await player_picker.player_chosen
+	if slot < 0:
+		return
+	if slot != current_player:
+		_toast("It's not %s's turn." % PLAYER_NAMES[slot])
+		return
+	if players[slot].is_bankrupt or players[slot].is_ai:
+		return
+	if _ai_turn_running or _casting_spell or _response_window_open or _trading or _in_debt or _awaiting_buy_decision:
+		_toast("%s's turn isn't ready to be taken over right now." % PLAYER_NAMES[slot])
+		return
+	_log("The host is taking %s's turn." % PLAYER_NAMES[slot])
+	dice_label.text = "The host is taking %s's turn." % _player_display_name(slot)
+	players[slot].is_ai = true
+	players[slot].is_placeholder_ai = true
+	_update_player_panels()
+	_refresh_action_buttons()
+	await _run_ai_turn()
+	# Only clear it if the takeover tool itself is still holding the seat --
+	# a mid-turn reconnect (_reconnect_finalize_slot) already claims it via
+	# _finish_reconnect, and a bankruptcy during the turn leaves both false
+	# already meaningless (is_bankrupt governs everything from here).
+	if players[slot].is_placeholder_ai:
+		players[slot].is_ai = false
+		players[slot].is_placeholder_ai = false
+	_update_player_panels()
+	_refresh_action_buttons()
 
 
 # ============================================================================
@@ -1388,75 +1467,31 @@ func _on_peer_gone(peer_id: int) -> void:
 		return
 
 	for slot in affected:
-		# Reconnectable (an ordinary drop) -> a stripped-down Placeholder AI
-		# holds the seat and the player can rejoin. Not reconnectable (the host
-		# kicked them) -> a normal Computer, permanently.
-		var reconnectable: bool = Net.slot_is_reconnectable(slot)
 		GameState.slot_peer[slot] = 0
-		players[slot].is_ai = true
-		players[slot].is_placeholder_ai = reconnectable
+		# A kick forces bankruptcy itself (see _host_kick_player) before ever
+		# severing the connection, so by the time that peer's disconnect signal
+		# actually lands here the seat is already bankrupt -- nothing to mark.
+		if players[slot].is_bankrupt:
+			continue
+		players[slot].is_disconnected = true
 		_response_window_paused_by[slot] = false
-		if reconnectable:
-			dice_label.text += "\n%s lost connection -- a Placeholder AI holds their seat until they reconnect." % PLAYER_NAMES[slot]
-			_log("%s lost connection; a Placeholder AI holds their seat until they reconnect." % PLAYER_NAMES[slot])
-		else:
-			dice_label.text += "\n%s was removed -- a Computer takes over." % PLAYER_NAMES[slot]
-			_log("%s was removed; a Computer takes over." % PLAYER_NAMES[slot])
+		dice_label.text += "\n%s lost connection and is now inactive until they reconnect, the host takes their turn, or the host kicks them." % PLAYER_NAMES[slot]
+		_log("%s lost connection and is now inactive." % PLAYER_NAMES[slot])
 
 	# A trade with the departed player can't continue.
 	if _trading and (affected.has(_trader1) or affected.has(_trader2)):
 		_end_trade()
 
-	# Debts a departed player was raising money for (the live one and any
-	# suspended deeper in the stack): settle them AI-style now (mortgage, sell
-	# houses, forfeit if still short).
-	while _in_debt and affected.has(_debt_player_id):
-		_ai_settle_debt_now(_debt_player_id)
-
 	_update_player_panels()
 	_refresh_action_buttons()
 
-	# If it's their turn and the turn is idle, get the AI moving. A turn
-	# mid-await (a routed prompt, response window) resolves to a default on
-	# its own and then lands on the End Turn step, which the watchdog clears.
-	if affected.has(current_player) and not players[current_player].is_bankrupt:
-		if _awaiting_end_turn:
-			_end_turn()
-		elif not (_casting_spell or _response_window_open or _trading or _in_debt or _awaiting_buy_decision):
-			_run_ai_turn()
-
-
-# The AI branch of _collect_debt(), run after the fact when a human in debt
-# disconnects mid-collection. Emits debt_resolved either way so the
-# _collect_debt() call still awaiting it can continue.
-func _ai_settle_debt_now(slot: int) -> void:
-	if _debt_stack.is_empty() or int(_debt_stack.back()["player_id"]) != slot:
-		return
-	var player: Node2D = players[slot]
-	var amount: int = int(_debt_stack.back()["amount"])
-	var creditor: Node2D = _debt_stack.back()["creditor"]
-	var cancellable: bool = bool(_debt_stack.back()["cancellable"])
-	_ai_mortgage_properties(player, amount)
-	if player.money < amount:
-		_ai_sell_houses(player, amount)
-	if player.money < amount:
-		_ai_mortgage_properties(player, amount)
-	if _debt_stack.is_empty() or int(_debt_stack.back()["player_id"]) != slot:
-		return  # a mid-loop _maybe_resolve_debt already cleared it
-	if player.money >= amount:
-		_maybe_resolve_debt()
-	elif cancellable:
-		_finish_current_debt("cancelled")
-	else:
-		dice_label.text += "\n%s can't raise the money and forfeits the game." % _player_display_name(slot)
-		_forfeit_to_bankruptcy(player, creditor)
-		_fail_all_debts_for(slot, "bankrupt")
-
 
 # Host: a dropped player reconnected (Net.player_reconnected). Splice their new
-# peer id back in and take the Placeholder AI off their seat. If the Placeholder
-# AI is mid-turn for them right now, defer the hand-off until _run_ai_turn()
-# finishes that turn (so a buy prompt can't get routed to a half-loaded client).
+# peer id back in and clear their inactive state. Usually a no-op beyond that
+# (they were simply idle) -- but if the host's "Take Player's Turn" tool
+# happens to be mid-turn for them right now, defer the hand-off until
+# _run_ai_turn() finishes that turn (so a buy prompt can't get routed to a
+# half-loaded client).
 var _reconnect_finalize_slot: int = -1
 
 func _on_player_reconnected(slot: int, peer_id: int) -> void:
@@ -1474,22 +1509,29 @@ func _on_player_reconnected(slot: int, peer_id: int) -> void:
 func _finish_reconnect(slot: int) -> void:
 	players[slot].is_ai = false
 	players[slot].is_placeholder_ai = false
+	players[slot].is_disconnected = false
 	_update_player_panels()
 	_refresh_action_buttons()
 
 
-# A seat that went AI via a disconnect can get stuck on the End Turn step --
-# _perform_roll() finished, but nothing clicks the button. Once the turn is
-# genuinely idle (no prompt, window, trade or debt in flight) and no real AI
-# turn coroutine is running, end it.
+# Two "stuck turn" safety nets, checked every frame on the host:
+# 1. A seat the host's "Take Player's Turn" tool is driving can get stuck on
+#    the End Turn step -- _perform_roll() finished, but nothing clicks the
+#    button.
+# 2. The current player can end up bankrupt without anything having moved
+#    the turn on from them -- e.g. the host's "Kick Player" bankrupts
+#    whoever's turn it currently is while some unrelated debt elsewhere is
+#    still resolving; once that settles and the turn is genuinely idle,
+#    nothing else is left to click End Turn for them.
+# Both wait for the turn to be genuinely idle (no prompt, window, trade or
+# debt in flight) and no real AI turn coroutine running.
 func _net_ai_takeover_watchdog() -> void:
-	if not _awaiting_end_turn or _ai_turn_running:
+	if _ai_turn_running or _casting_spell or _response_window_open or _trading or _in_debt or _awaiting_buy_decision:
 		return
-	if not players[current_player].is_ai or players[current_player].is_bankrupt:
-		return
-	if _casting_spell or _response_window_open or _trading or _in_debt or _awaiting_buy_decision:
-		return
-	_end_turn()
+	if players[current_player].is_bankrupt:
+		_advance_turn()
+	elif _awaiting_end_turn and players[current_player].is_ai:
+		_end_turn()
 
 
 # Called when the button (showing "End Turn" at this point) is pressed after
@@ -1535,8 +1577,9 @@ func _run_ai_turn() -> void:
 	_ai_turn_running = true
 	await _run_ai_turn_body()
 	_ai_turn_running = false
-	# A player who reconnected mid-turn (while the Placeholder AI was finishing
-	# their turn) gets handed control now that it's safely over.
+	# A player who reconnected mid-turn (while the host's "Take Player's Turn"
+	# tool was finishing their turn) gets handed control now that it's safely
+	# over.
 	if _reconnect_finalize_slot != -1:
 		var slot: int = _reconnect_finalize_slot
 		_reconnect_finalize_slot = -1
@@ -1545,7 +1588,7 @@ func _run_ai_turn() -> void:
 
 func _run_ai_turn_body() -> void:
 	var ai_index: int = current_player
-	# The Placeholder AI (a dropped human's stand-in) never casts spells.
+	# A seat the host's "Take Player's Turn" tool is driving never casts spells.
 	if not players[ai_index].is_placeholder_ai:
 		await _ai_p2_opening_burn(players[ai_index])
 	while current_player == ai_index and not players[ai_index].is_bankrupt:
@@ -1594,10 +1637,10 @@ func _ai_p2_opening_burn(player: Node2D) -> void:
 # frees up cash and properties that the later checks see; a completed set
 # from trading is what the house check will actually build on.
 func _ai_run_end_of_turn_checks(player: Node2D) -> void:
-	# The Placeholder AI holding a disconnected player's seat does none of this
-	# upkeep -- it just rolls, buys what it lands on, pays what it owes, and
-	# ends the turn. It shouldn't be spending the absent player's money on
-	# houses or making trades for them.
+	# The host's "Take Player's Turn" tool does none of this upkeep -- it just
+	# rolls, buys what it lands on, pays what it owes, and ends the turn. It
+	# shouldn't be spending an absent player's money on houses or making
+	# trades for them.
 	if player.is_placeholder_ai:
 		return
 	_ai_mortgage_check(player)
@@ -2644,16 +2687,12 @@ func _move_player(player: Node2D, roll: int) -> bool:
 		var space: Node2D = board.spaces[player.current_space]
 		var property_name: String = landed_info.get("name", "")
 		var price: int = landed_info.get("price", 0)
-		var color_name_for_purchase: String = landed_info.get("color", "")
-		var free_railroad: bool = color_name_for_purchase == "railroad" and player.free_railroad_purchase
 		if space.owner_id == -1:
 			dice_label.text += "\nLanded on %s ($%d)." % [property_name, price]
 			# A peek at what the player would actually pay, without consuming
 			# anything yet -- only an actual purchase (below) should use it up.
 			var effective_price: int = price
-			if free_railroad:
-				effective_price = 0
-			elif player.haggling_discount_percent > 0:
+			if player.haggling_discount_percent > 0:
 				effective_price = maxi(0, price - (price * player.haggling_discount_percent / 100))
 			# _ask_buy_property() only returns true once the player both said
 			# yes AND actually has the money -- it keeps re-asking (letting
@@ -2661,13 +2700,7 @@ func _move_player(player: Node2D, roll: int) -> bool:
 			# true or they say no.
 			var wants_to_buy: bool = await _ask_buy_property(property_name, effective_price)
 			if wants_to_buy:
-				var final_price: int = price
-				if free_railroad:
-					final_price = 0
-					player.free_railroad_purchase = false
-					dice_label.text += "\nThe Cult of Terminus makes this railroad free!"
-				else:
-					final_price = _apply_haggling_discount(player, price)
+				var final_price: int = _apply_haggling_discount(player, price)
 				player.money -= final_price
 				space.owner_id = player.player_id
 				player.owned_property_indices.append(player.current_space)
@@ -3961,16 +3994,6 @@ func _terminus_aware_price(index: int) -> int:
 	return board.get_space_info(index).get("price", 0)
 
 
-func _railroad_space_indices() -> Array[int]:
-	var result: Array[int] = []
-	for space_index in board.TOTAL_SPACES:
-		if board.get_space_info(space_index).get("color", "") == "railroad":
-			result.append(space_index)
-	if board.spaces[0].owner_id != -1:
-		result.append(0)
-	return result
-
-
 # Attunement to a color: how many UNMORTGAGED properties of that color the
 # player owns, plus any Temporary Attunement from burning spells of that
 # color this turn. A mortgaged property provides no Attunement.
@@ -4554,12 +4577,8 @@ func _prepare_spell_cast(caster: Node2D, hand_index: int, spell_name: String, le
 			return await _prepare_manastone(caster, level)
 		"The Cult of Terminus":
 			match level:
-				1:
-					return _prepare_cult_of_terminus_free_railroad(caster)
-				2:
-					return _prepare_cult_of_terminus_advance(caster)
-				3:
-					return await _prepare_cult_of_terminus_buy_railroad(caster)
+				1, 2, 3:
+					return await _prepare_cult_of_terminus_pay(caster, level)
 				4:
 					return _prepare_cult_of_terminus_summon_terminus(caster)
 	return Callable()
@@ -6026,93 +6045,36 @@ func _resolve_manastone(caster: Node2D, level: int, color_name: String, amount: 
 	_update_player_panels()
 
 
-# The Cult of Terminus, Level 1: arms a discount consumed only by the normal
-# landing-purchase flow (see _move_player()) -- deliberately independent of
-# Level 3's forced buy, which always pays full price, to avoid the two
-# levels compounding into a free forced steal from another player.
-func _prepare_cult_of_terminus_free_railroad(caster: Node2D) -> Callable:
-	return _resolve_cult_of_terminus_free_railroad.bind(caster)
-
-
-func _resolve_cult_of_terminus_free_railroad(caster: Node2D) -> void:
-	caster.free_railroad_purchase = true
-	dice_label.text = "%s's The Cult of Terminus (Level 1) resolves! Their next railroad purchase this turn costs $0." % _player_display_name(caster.player_id)
-	_update_player_panels()
-
-
-# The Cult of Terminus, Level 2: matches any of the 4 real railroads, plus
-# Terminus Station itself once it exists.
-func _cult_of_terminus_railroad_condition(space_index: int) -> bool:
-	if board.get_space_info(space_index).get("color", "") == "railroad":
-		return true
-	return space_index == 0 and board.spaces[0].owner_id != -1
-
-
-# No target to pick, and no _spell_extra_validation() guarantee needed --
-# unlike Escape Plan's conditions, there are always at least 4 real
-# railroads permanently on the board, so a match is always reachable.
-func _prepare_cult_of_terminus_advance(caster: Node2D) -> Callable:
-	var landing: int = (caster.current_space + _current_roll) % board.TOTAL_SPACES
-	var steps: int = 0
-	for i in board.TOTAL_SPACES:
-		steps += 1
-		landing = (landing + 1) % board.TOTAL_SPACES
-		if _cult_of_terminus_railroad_condition(landing):
-			break
-	_spell_target_property(landing)
-	return _resolve_cult_of_terminus_advance.bind(caster, steps, landing)
-
-
-func _resolve_cult_of_terminus_advance(caster: Node2D, steps: int, landing_index: int) -> void:
-	_current_roll += steps
-	var destination: String = _property_name(landing_index)
-	dice_label.text = "%s's The Cult of Terminus (Level 2) resolves! Roll increased by %d to land on %s (now %d)." % [_player_display_name(caster.player_id), steps, destination, _current_roll]
-	_log("%s's The Cult of Terminus modified the dice roll." % PLAYER_NAMES[caster.player_id])
-	_update_player_panels()
-
-
-# The Cult of Terminus, Level 3: always the standard $200 railroad price
-# (independent of Level 1's discount -- see above), paid to whoever
-# currently owns the chosen railroad, or the bank if it's unowned. Includes
-# Terminus Station itself in the eligible list once it exists.
-func _prepare_cult_of_terminus_buy_railroad(caster: Node2D) -> Callable:
-	var price: int = 200
+# The Cult of Terminus, Levels 1-3: reworked into a simple forced payment --
+# choose an opponent now; how much they're bankrupt/paid-out is only ever
+# checked fresh at resolution (same shape as Far-Reaching Empire / Taxes).
+# Level 4 (summon Terminus) is unchanged, below.
+func _prepare_cult_of_terminus_pay(caster: Node2D, level: int) -> Callable:
+	var amount: int = SpellData.SPELLS["The Cult of Terminus"]["levels"][level].get("amount", 0)
 	var entries: Array = []
-	for space_index in _railroad_space_indices():
-		if board.spaces[space_index].owner_id == caster.player_id:
-			continue
-		var owner_id: int = board.spaces[space_index].owner_id
-		var owner_note: String = "bank" if owner_id == -1 else PLAYER_NAMES[owner_id]
-		var display_name: String = _property_name(space_index)
-		entries.append({"index": space_index, "name": "%s (%s)" % [display_name, owner_note], "color": Color.WHITE})
+	for i in players.size():
+		if i != caster.player_id and not players[i].is_bankrupt:
+			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
 	if entries.is_empty():
-		dice_label.text += "\nThere's no railroad left to buy."
+		dice_label.text += "\nThere's no opponent to target."
 		return Callable()
-
-	_pp_open("The Cult of Terminus: choose a railroad to buy for $%d." % price, entries)
-	var target_space_index: int = await _pp_result()
-	if target_space_index == -1:
+	_pp_open("The Cult of Terminus: choose an opponent.", entries)
+	var target_index: int = await _pp_result()
+	if target_index == -1:
 		return Callable()
-	_spell_target_property(target_space_index)
-	var target_owner_id: int = board.spaces[target_space_index].owner_id
-	return _resolve_cult_of_terminus_buy_railroad.bind(caster, target_space_index, target_owner_id, price)
+	_spell_target_player(target_index)
+	return _resolve_cult_of_terminus_pay.bind(caster, level, target_index, amount)
 
 
-func _resolve_cult_of_terminus_buy_railroad(caster: Node2D, target_space_index: int, target_owner_id: int, price: int) -> void:
-	var space: Node2D = board.spaces[target_space_index]
-	var display_name: String = _property_name(target_space_index)
-	if space.owner_id != target_owner_id or space.owner_id == caster.player_id:
-		dice_label.text = "%s's The Cult of Terminus (Level 3) fizzles -- %s is no longer available." % [_player_display_name(caster.player_id), display_name]
+func _resolve_cult_of_terminus_pay(caster: Node2D, level: int, target_index: int, amount: int) -> void:
+	var opponent: Node2D = players[target_index]
+	if opponent.is_bankrupt:
+		dice_label.text = "%s's The Cult of Terminus (Level %d) fizzles -- %s is already out of the game." % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index]]
 		return
-	# Resolves like a normal purchase -- Raise Money (mortgage / sell / trade)
-	# if the caster is short of the $200, with a Cancel that abandons the buy.
-	if not await _buy_property_via_spell(caster, target_space_index, price, target_owner_id):
-		dice_label.text = "%s's The Cult of Terminus (Level 3): %s wasn't bought." % [_player_display_name(caster.player_id), display_name]
-		return
-	if target_owner_id == -1:
-		dice_label.text = "%s's The Cult of Terminus (Level 3) resolves! Bought %s from the bank for $%d." % [_player_display_name(caster.player_id), display_name, price]
-	else:
-		dice_label.text = "%s's The Cult of Terminus (Level 3) resolves! Bought %s from %s for $%d." % [_player_display_name(caster.player_id), display_name, PLAYER_NAMES[target_owner_id], price]
+	var total: int = _apply_payment_reduction(opponent, amount)
+	var resolve_message: String = "%s's The Cult of Terminus (Level %d) resolves on %s for $%d!" % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], total]
+	var debt_message: String = "%s's The Cult of Terminus (Level %d) resolves on %s, who owes $%d!" % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], total]
+	await _charge_spell_payment(opponent, total, caster, resolve_message, debt_message)
 
 
 # The Cult of Terminus, Level 4: _spell_extra_validation() already gated
@@ -6166,7 +6128,6 @@ func _advance_to_next_active_player() -> void:
 		player.next_roll_multiplier = 1
 		player.haggling_discount_percent = 0
 		player.haggling_bank_bonus = false
-		player.free_railroad_purchase = false
 
 	for i in players.size():
 		current_player = (current_player + 1) % players.size()
@@ -6186,7 +6147,7 @@ func _player_display_name(index: int) -> String:
 	var player: Node2D = players[index]
 	if player.is_bankrupt:
 		return "%s (bankrupt)" % PLAYER_NAMES[index]
-	if player.is_placeholder_ai:
+	if player.is_disconnected:
 		return "%s (Disconnected)" % PLAYER_NAMES[index]
 	if not player.in_jail:
 		return PLAYER_NAMES[index]
@@ -6327,6 +6288,7 @@ func _build_snapshot() -> Dictionary:
 			"bankrupt": p.is_bankrupt,
 			"is_ai": p.is_ai,
 			"is_placeholder": p.is_placeholder_ai,
+			"is_disconnected": p.is_disconnected,
 			"visible": p.visible,
 			"owned": p.owned_property_indices.duplicate(),
 			"hand": p.spell_hand.duplicate(),
@@ -6427,6 +6389,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		p.is_bankrupt = ps.get("bankrupt", false)
 		p.is_ai = ps.get("is_ai", p.is_ai)
 		p.is_placeholder_ai = ps.get("is_placeholder", false)
+		p.is_disconnected = ps.get("is_disconnected", false)
 		p.visible = ps.get("visible", true)
 		p.owned_property_indices = _net_int_array(ps.get("owned", []))
 		p.spell_hand = _net_string_array(ps.get("hand", []))

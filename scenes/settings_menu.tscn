@@ -114,6 +114,12 @@ custom_minimum_size = Vector2(0, 52)
 theme_override_font_sizes/font_size = 24
 text = "Kick Player"
 
+[node name="TakePlayerTurnButton" type="Button" parent="VBox/HostTools"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 52)
+theme_override_font_sizes/font_size = 24
+text = "Take Player's Turn"
+
 [node name="UnpausePlayerButton" type="Button" parent="VBox/HostTools"]
 layout_mode = 2
 custom_minimum_size = Vector2(0, 52)

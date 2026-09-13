@@ -15,11 +15,17 @@ var consecutive_doubles: int = 0
 var owned_property_indices: Array[int] = []
 var is_bankrupt: bool = false
 var is_ai: bool = false
-# A disconnected human whose seat a stripped-down "Placeholder AI" is holding
-# until they reconnect (see main.gd's _on_peer_gone / Net reconnect flow).
-# Always implies is_ai; the Placeholder AI only rolls, buys what it lands on,
-# and pays what it owes -- it skips the regular AI's house / trade / mortgage
-# upkeep. Cleared when the player reconnects.
+# A disconnected human this seat belongs to hasn't reconnected -- the seat sits
+# idle (no one can act for it) until they come back, the host kicks them
+# (instant bankruptcy, see main.gd's _host_kick_player), or the host takes
+# their turn (see below). Display-only otherwise; never implies is_ai.
+var is_disconnected: bool = false
+# True only while the host's "Take Player's Turn" tool is actively driving
+# this seat's turn (main.gd's _host_take_player_turn / _on_peer_gone no longer
+# sets this on a plain disconnect). Always implies is_ai for that one turn;
+# a stripped-down AI that only rolls, buys what it lands on, and pays what it
+# owes -- it skips the regular AI's house / trade / mortgage upkeep. Cleared
+# the moment that single turn ends.
 var is_placeholder_ai: bool = false
 # Spell names held in hand, one entry per copy (duplicates allowed, no limit).
 var spell_hand: Array[String] = []
@@ -59,9 +65,6 @@ var haggling_bank_bonus: bool = false
 # into this player's hand at the end of the turn they were cast on (Sanity
 # Grinding, Step Forward). See _queue_spell_return_to_hand() in main.gd.
 var pending_return_spells: Dictionary = {}
-# The Cult of Terminus, Level 1: the next railroad this player buys this
-# turn (via the normal landing-purchase flow only) costs $0.
-var free_railroad_purchase: bool = false
 
 
 func setup(id: int, color: Color) -> void:

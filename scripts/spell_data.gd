@@ -213,7 +213,7 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Cards/5 3 Unstable Portal.png",
 		"levels": {
 			1: {"description": "Multiply your next roll this turn by 3.", "multiplier": 3, "timings": ["turn"], "requires_current_player": true, "requires_not_yet_rolled": true},
-			2: {"description": "Multiply your next roll this turn by 6.", "multiplier": 6, "timings": ["turn"], "requires_current_player": true, "requires_not_yet_rolled": true},
+			2: {"description": "Multiply your next roll this turn by 7.", "multiplier": 7, "timings": ["turn"], "requires_current_player": true, "requires_not_yet_rolled": true},
 			3: {"description": "Multiply your next roll this turn by 10.", "multiplier": 10, "timings": ["turn"], "requires_current_player": true, "requires_not_yet_rolled": true},
 		},
 	},
@@ -374,9 +374,9 @@ const SPELLS: Dictionary = {
 		"color": "black",
 		"icon": "res://Magopoly Assets/Cards/9 1 The Cult of Terminus.png",
 		"levels": {
-			1: {"description": "The next railroad you buy this turn costs $0.", "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "Increase your roll until you land on the nearest railroad.", "timings": ["roll_response"], "requires_current_player": true},
-			3: {"description": "Buy a railroad from a player or the bank.", "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "An opponent pays you $100.", "amount": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "An opponent pays you $200.", "amount": 200, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "An opponent pays you $300.", "amount": 300, "timings": ["turn", "roll_response", "spell_response"]},
 			4: {"description": "If you own all 4 railroads, gain Terminus.", "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
