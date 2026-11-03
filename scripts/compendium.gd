@@ -1,6 +1,6 @@
 extends Control
 
-# Every spell card in the game, opened from the Start Menu's "Compendium"
+# Every spell card in the game (minus the T1-T3 test spells), opened from the Start Menu's "Compendium"
 # button. Cards are listed in SpellData.SPELLS order; right-click one to see
 # it full size (the same spell_card popup used in-game). Back / Escape
 # returns to the Start Menu.
@@ -17,8 +17,12 @@ const CARD_SIZE: Vector2 = Vector2(200, 280)
 
 func _ready() -> void:
 	back_button.pressed.connect(_go_back)
+	# Skip the test spells ("T1 Burn Spell", "T2 …", "T3 …").
+	var test_card := RegEx.create_from_string("^T\\d+ ")
 	var count: int = 0
 	for spell_name in SpellData.SPELLS:
+		if test_card.search(spell_name):
+			continue
 		var icon_path: String = str(SpellData.SPELLS[spell_name].get("icon", ""))
 		if icon_path == "" or not ResourceLoader.exists(icon_path):
 			continue
