@@ -7,6 +7,7 @@ extends Control
 @onready var host_game_button: Button = $VBox/Buttons/HostGameButton
 @onready var join_game_button: Button = $VBox/Buttons/JoinGameButton
 @onready var tutorial_button: Button = $VBox/Buttons/TutorialButton
+@onready var compendium_button: Button = $VBox/Buttons/CompendiumButton
 @onready var settings_button: Button = $VBox/Buttons/SettingsButton
 @onready var quit_button: Button = $VBox/Buttons/QuitButton
 # Credits / Roadmap sit in a small stack in the bottom-right corner, not the
@@ -51,6 +52,7 @@ func _ready() -> void:
 	host_game_button.pressed.connect(func(): _go("res://scenes/host_lobby.tscn"))
 	join_game_button.pressed.connect(func(): _go("res://scenes/join_menu.tscn"))
 	tutorial_button.pressed.connect(func() -> void: _go("res://scenes/tutorial_menu.tscn"))
+	compendium_button.pressed.connect(func() -> void: _go("res://scenes/compendium.tscn"))
 	settings_button.pressed.connect(settings_menu.open)
 	credits_button.pressed.connect(func() -> void: info_panel.open("Credits", CREDITS_TEXT))
 	roadmap_button.pressed.connect(func() -> void: info_panel.open("Roadmap", ROADMAP_TEXT))
