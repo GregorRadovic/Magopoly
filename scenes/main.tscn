@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=17 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/dice_roller.gd" id="12"]
@@ -15,6 +15,7 @@
 [ext_resource type="PackedScene" path="res://scenes/spell_card.tscn" id="9"]
 [ext_resource type="PackedScene" path="res://scenes/card_picker.tscn" id="10"]
 [ext_resource type="Script" path="res://scripts/wizard_vision_line.gd" id="11"]
+[ext_resource type="PackedScene" path="res://scenes/spell_level_picker.tscn" id="16"]
 
 [sub_resource type="StyleBoxFlat" id="OpaquePanelStyle"]
 bg_color = Color(0.145, 0.145, 0.161, 1)
@@ -257,6 +258,8 @@ text = "(click anywhere to continue)"
 [node name="SpellCard" parent="UI" instance=ExtResource("9")]
 
 [node name="CardPicker" parent="UI" instance=ExtResource("10")]
+
+[node name="SpellLevelPicker" parent="UI" instance=ExtResource("16")]
 
 [node name="PlayersPanel" type="Panel" parent="UI"]
 theme_override_styles/panel = SubResource("OpaquePanelStyle")

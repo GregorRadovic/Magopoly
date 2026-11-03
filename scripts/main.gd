@@ -238,6 +238,7 @@ var dice_label: DiceSink = DiceSink.new()
 @onready var asset_card: PopupPanel = $UI/AssetCard
 @onready var player_picker: PopupPanel = $UI/PlayerPicker
 @onready var spell_card: PopupPanel = $UI/SpellCard
+@onready var spell_level_picker: PopupPanel = $UI/SpellLevelPicker
 @onready var card_picker: PopupPanel = $UI/CardPicker
 @onready var free_parking_label: Label = $UI/PlayersPanel/VBox/FreeParkingLabel
 @onready var player_list: VBoxContainer = $UI/PlayersPanel/VBox/PlayersScroll/PlayerList
@@ -4268,16 +4269,18 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 
 	var level_entries: Array = []
 	for level in levels.keys():
-		level_entries.append({"index": level, "name": "Level %d: %s" % [level, levels[level].get("description", "")], "color": Color.WHITE})
+		level_entries.append({"index": level, "name": "Level %d" % level, "color": Color.WHITE})
 	level_entries.sort_custom(func(a, b): return a["index"] < b["index"])
 	# Temporary Attunement to Utilities is never possible, by any means --
 	# so a Utility-colored spell (currently just Manastone) can't be burned
 	# for it at all; the option simply isn't offered.
 	if color_name != "utility":
-		level_entries.append({"index": BURN_FOR_ATTUNEMENT_INDEX, "name": "Burn for Attunement (+1 %s Attunement)" % color_name.capitalize(), "color": Color.WHITE})
+		level_entries.append({"index": BURN_FOR_ATTUNEMENT_INDEX, "name": "Burn for Attunement\n(+1 %s)" % color_name.capitalize(), "color": Color.WHITE})
 
-	_pp_open("Cast %s at what level?" % spell_name, level_entries)
-	var choice: int = await _pp_result()
+	# The full card with level buttons beside it; hovering a level
+	# highlights its effect on the card (spell_level_picker.gd).
+	_lp_open(spell_name, str(spell_info.get("icon", "")), level_entries)
+	var choice: int = await _lp_result()
 
 	# Only actually push a cast onto the stack -- and open/extend the
 	# response window for it -- once _casting_spell is released below, so
@@ -6496,6 +6499,23 @@ func _pp_result() -> int:
 	return int(await _net_await_reply())
 
 
+# --- spell_level_picker (cast level, shown on the card) ----------
+
+func _lp_open(spell_name: String, icon_path: String, entries: Array) -> void:
+	if _prompt_is_local():
+		spell_level_picker.open(spell_name, icon_path, entries, false, _tutorial_picker_gate())
+	else:
+		_net_open_remote("level", {
+			"spell": spell_name, "icon_path": icon_path, "entries": _net_pack_entries(entries),
+		})
+
+
+func _lp_result() -> int:
+	if _prompt_is_local():
+		return await spell_level_picker.level_chosen
+	return int(await _net_await_reply())
+
+
 # --- card_picker --------------------------------------------------
 
 func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2, large: bool = false) -> void:
@@ -6587,6 +6607,11 @@ func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
 				_net_unpack_entries(payload.get("entries", [])),
 				bool(payload.get("mandatory", false)), true)
 			return await player_picker.player_chosen
+		"level":
+			spell_level_picker.open(str(payload.get("spell", "")),
+				str(payload.get("icon_path", "")),
+				_net_unpack_entries(payload.get("entries", [])), true)
+			return await spell_level_picker.level_chosen
 		"card":
 			card_picker.open(str(payload.get("text", "")),
 				_net_unpack_card_entries(payload.get("entries", [])),
