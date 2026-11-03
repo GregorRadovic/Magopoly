@@ -30,6 +30,7 @@ const BLITZSTART_MAX_PLAYERS: int = 4
 
 var type_options: Array[OptionButton] = []
 var expansion_picker: ExpansionPicker
+var hero_mode_checkbox: CheckBox
 
 
 func _ready() -> void:
@@ -37,6 +38,8 @@ func _ready() -> void:
 		type_options.append(_build_player_row(i))
 	start_button.pressed.connect(_on_start_pressed)
 	back_button.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/start_menu.tscn"))
+	hero_mode_checkbox = _hero_mode_checkbox()
+	$VBox/OptionsRow.add_child(hero_mode_checkbox)
 	# Unlocked expansions, under the mode checkboxes.
 	expansion_picker = ExpansionPicker.new()
 	$VBox.add_child(expansion_picker)
@@ -96,4 +99,15 @@ func _on_start_pressed() -> void:
 	GameState.blitzstart_mode = blitzstart_checkbox.button_pressed
 	GameState.tutorial_mode = false
 	GameState.online = false
-	get_tree().change_scene_to_file("res://scenes/main.tscn")
+	GameState.hero_mode = hero_mode_checkbox.button_pressed
+	GameState.player_heroes = ["", "", "", "", "", "", "", ""] as Array[String]
+	# Hero Mode: everyone picks a hero first (hero_select starts the game).
+	get_tree().change_scene_to_file("res://scenes/hero_select.tscn" if GameState.hero_mode else "res://scenes/main.tscn")
+
+
+func _hero_mode_checkbox() -> CheckBox:
+	var box := CheckBox.new()
+	box.text = "Hero Mode"
+	box.tooltip_text = "Before the game starts, each player chooses a Hero with special effects."
+	box.add_theme_font_size_override("font_size", 24)
+	return box

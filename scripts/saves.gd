@@ -119,14 +119,14 @@ const NAME_MAX_LENGTH: int = 16
 
 # Features unlocked by level. Each entry:
 #   {"level": int, "id": String, "name": String, "description": String}
-# Expansions don't go here -- each one's unlock comes from its own entry in
-# expansions.gd (see all_unlocks()). Check any unlock with
+# Expansions and heroes don't go here -- each one's unlock comes from its
+# own entry in expansions.gd / heroes.gd (see all_unlocks()). Check any unlock with
 # Saves.is_unlocked("id"); the Player Profile lists them all and the
 # end-of-game popup announces any newly reached.
 const UNLOCKS: Array[Dictionary] = []
 
 
-# UNLOCKS plus one per expansion, sorted by level.
+# UNLOCKS plus one per expansion and per hero, sorted by level.
 func all_unlocks() -> Array[Dictionary]:
 	var out: Array[Dictionary] = UNLOCKS.duplicate()
 	for e in Expansions.LIST:
@@ -136,8 +136,19 @@ func all_unlocks() -> Array[Dictionary]:
 			"name": e["name"],
 			"description": "%d new cards you can add to the Spell Deck when starting a game." % Expansions.card_total(e["cards"]),
 		})
+	for h in Heroes.LIST:
+		out.append({
+			"level": int(h["unlock_level"]),
+			"id": Heroes.unlock_id(h["id"]),
+			"name": "Hero: %s" % h["name"],
+			"description": str(h["description"]),
+		})
 	out.sort_custom(func(a, b): return int(a["level"]) < int(b["level"]))
 	return out
+
+
+func is_hero_unlocked(hero_id: String) -> bool:
+	return is_unlocked(Heroes.unlock_id(hero_id))
 
 
 func is_expansion_unlocked(expansion_id: String) -> bool:

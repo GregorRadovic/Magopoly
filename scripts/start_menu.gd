@@ -43,7 +43,6 @@ Card layouts generated with Magic Set Editor (magicseteditor.boards.net).
 const ROADMAP_TEXT: String = """[b]Coming Soon...[/b]
 
 -Unlockable expansions
--Hero Mode
 -Improved enemy AI
 -Animations and Sounds"""
 
@@ -101,6 +100,12 @@ func _on_continue() -> void:
 	for id in cfg.get("expansions", []):
 		exp.append(str(id))
 	GameState.expansions = exp
+	GameState.hero_mode = bool(cfg.get("hero_mode", false))
+	var heroes: Array[String] = ["", "", "", "", "", "", "", ""]
+	var saved_heroes: Array = cfg.get("heroes", [])
+	for i in mini(saved_heroes.size(), heroes.size()):
+		heroes[i] = str(saved_heroes[i])
+	GameState.player_heroes = heroes
 	GameState.admin_mode = bool(cfg.get("admin", false))
 	GameState.quickstart_mode = bool(cfg.get("quick", false))
 	GameState.blitzstart_mode = bool(cfg.get("blitz", false))

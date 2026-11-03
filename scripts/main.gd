@@ -554,6 +554,11 @@ func _ready() -> void:
 		_restore_save(Saves.pending_load)
 		Saves.pending_load = {}
 	else:
+		if GameState.hero_mode:
+			for i in players.size():
+				var hero: Dictionary = Heroes.get_hero(GameState.player_heroes[i])
+				if not players[i].is_bankrupt and not hero.is_empty():
+					_log("%s plays as %s: %s" % [PLAYER_NAMES[i], hero["name"], hero["description"]], PLAYER_COLORS[i])
 		# The first turn -- every later one is logged from _advance_to_next_active_player.
 		_log_turn_start(current_player)
 		_autosave()
@@ -1192,6 +1197,11 @@ func _spawn_players() -> void:
 				_grant_starting_hand(player, 6, 4)
 			elif GameState.quickstart_mode:
 				_grant_starting_hand(player, 3, 2)
+			# Hero Mode: the seat's hero's start-of-game effects (on top of
+			# any starting hand). A resumed game overwrites all of this with
+			# the save, which already includes them.
+			if GameState.hero_mode and GameState.player_heroes[i] != "":
+				Heroes.apply_start_effects(player, GameState.player_heroes[i])
 
 
 # The base deck plus every expansion switched on for this game.
@@ -6094,7 +6104,10 @@ func _update_player_panels() -> void:
 		var pause_marker: String = " (Paused)" if _response_window_paused_by[i] else ""
 		# Small target symbol next to the name while a pending spell targets them.
 		var target_marker: String = " %s" % SPELL_TARGET_SYMBOL if _targeted_player_ids.has(i) else ""
-		player_header_labels[i].text = "%s%s%s -- $%d" % [_player_display_name(i), target_marker, pause_marker, players[i].money]
+		var hero_marker: String = ""
+		if GameState.hero_mode and GameState.player_heroes[i] != "":
+			hero_marker = " · %s" % Heroes.hero_name(GameState.player_heroes[i])
+		player_header_labels[i].text = "%s%s%s%s -- $%d" % [_player_display_name(i), hero_marker, target_marker, pause_marker, players[i].money]
 
 		var flow: HFlowContainer = player_properties_flows[i]
 		for child in flow.get_children():
@@ -6209,6 +6222,8 @@ func _build_save() -> Dictionary:
 			"blitz": GameState.blitzstart_mode,
 			"online": GameState.online,
 			"expansions": GameState.expansions.duplicate(),
+			"hero_mode": GameState.hero_mode,
+			"heroes": GameState.player_heroes.duplicate(),
 		},
 		"state": {
 			"players": snap["players"],
@@ -6315,6 +6330,8 @@ func _record_result(winner_id: int) -> void:
 		if t != GameState.PlayerType.DISABLED:
 			player_count += 1
 	var mode: String = "Online" if GameState.online else "Local"
+	if GameState.hero_mode:
+		mode += " · Hero Mode"
 	if GameState.blitzstart_mode:
 		mode += " · BlitzStart"
 	elif GameState.quickstart_mode:

@@ -53,6 +53,7 @@ var _ip_service_index: int = 0
 
 
 var expansion_picker: ExpansionPicker
+var hero_mode_checkbox: CheckBox
 
 
 func _ready() -> void:
@@ -68,6 +69,11 @@ func _ready() -> void:
 	_ip_request.request_completed.connect(_on_ip_request_completed)
 	add_child(_ip_request)
 
+	hero_mode_checkbox = CheckBox.new()
+	hero_mode_checkbox.text = "Hero Mode"
+	hero_mode_checkbox.tooltip_text = "Before the game starts, each player chooses a Hero with special effects."
+	hero_mode_checkbox.add_theme_font_size_override("font_size", 24)
+	$VBox/OptionsRow.add_child(hero_mode_checkbox)
 	expansion_picker = ExpansionPicker.new()
 	$VBox.add_child(expansion_picker)
 	$VBox.move_child(expansion_picker, $VBox/OptionsRow.get_index() + 1)
@@ -210,6 +216,11 @@ func _on_start_pressed() -> void:
 		return
 	# The host's unlocked expansions decide the deck for everyone.
 	GameState.expansions = expansion_picker.selected_ids()
+	if hero_mode_checkbox.button_pressed:
+		# Everyone picks a hero first; the hero screen starts the game.
+		Net.begin_hero_select(admin_checkbox.button_pressed, quickstart_checkbox.button_pressed,
+			blitzstart_checkbox.button_pressed)
+		return
 	Net.start_game(admin_checkbox.button_pressed, quickstart_checkbox.button_pressed,
 		blitzstart_checkbox.button_pressed)
 
