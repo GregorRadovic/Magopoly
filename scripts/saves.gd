@@ -117,11 +117,40 @@ const XP_LOSS: int = 1
 const XP_SHARED: int = 1
 const NAME_MAX_LENGTH: int = 16
 
-# Features unlocked by level, lowest first. Each entry:
+# Features unlocked by level. Each entry:
 #   {"level": int, "id": String, "name": String, "description": String}
-# Check one with Saves.is_unlocked("id"); the Player Profile lists them and
-# the end-of-game popup announces any newly reached.
+# Expansions don't go here -- each one's unlock comes from its own entry in
+# expansions.gd (see all_unlocks()). Check any unlock with
+# Saves.is_unlocked("id"); the Player Profile lists them all and the
+# end-of-game popup announces any newly reached.
 const UNLOCKS: Array[Dictionary] = []
+
+
+# UNLOCKS plus one per expansion, sorted by level.
+func all_unlocks() -> Array[Dictionary]:
+	var out: Array[Dictionary] = UNLOCKS.duplicate()
+	for e in Expansions.LIST:
+		out.append({
+			"level": int(e["unlock_level"]),
+			"id": Expansions.unlock_id(e["id"]),
+			"name": e["name"],
+			"description": "%d new cards you can add to the Spell Deck when starting a game." % Expansions.card_total(e["cards"]),
+		})
+	out.sort_custom(func(a, b): return int(a["level"]) < int(b["level"]))
+	return out
+
+
+func is_expansion_unlocked(expansion_id: String) -> bool:
+	return is_unlocked(Expansions.unlock_id(expansion_id))
+
+
+# The expansions this player can switch on, in release order.
+func unlocked_expansions() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for e in Expansions.LIST:
+		if is_expansion_unlocked(e["id"]):
+			out.append(e)
+	return out
 
 const STAT_KEYS: Array[String] = [
 	"games_played", "games_won", "games_lost", "spells_cast", "properties_bought",
@@ -156,7 +185,7 @@ static func level_progress(xp_halves: int) -> float:
 
 func is_unlocked(feature_id: String) -> bool:
 	var level: int = get_level()
-	for u in UNLOCKS:
+	for u in all_unlocks():
 		if u["id"] == feature_id:
 			return level >= int(u["level"])
 	return true
@@ -165,7 +194,7 @@ func is_unlocked(feature_id: String) -> bool:
 # The unlocks reached by going from one level to a higher one.
 func unlocks_between(old_level: int, new_level: int) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	for u in UNLOCKS:
+	for u in all_unlocks():
 		if int(u["level"]) > old_level and int(u["level"]) <= new_level:
 			out.append(u)
 	return out

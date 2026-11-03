@@ -29,6 +29,7 @@ func _start_casting_spells() -> void:
 	GameState.player_types = types
 	# The tutorial's script refers to "Player 1" / "Player 2".
 	GameState.player_names = GameState.default_player_names()
+	GameState.expansions = []  # the tutorial's script assumes the base deck
 	GameState.admin_mode = false
 	GameState.quickstart_mode = false
 	GameState.blitzstart_mode = false

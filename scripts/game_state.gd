@@ -56,6 +56,10 @@ static func names_with(overrides: Dictionary) -> Array[String]:
 	return out
 
 
+# Expansion ids (see expansions.gd) whose cards go into this game's Spell
+# Deck, on top of the base cards. Chosen on the setup screen.
+var expansions: Array[String] = []
+
 var quickstart_mode: bool = false
 
 # Like Quickstart but bigger: every active player starts with 6 random

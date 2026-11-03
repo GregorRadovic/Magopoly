@@ -74,6 +74,7 @@ var _started_admin: bool = false
 var _started_quick: bool = false
 var _started_blitz: bool = false
 var _started_names: Array = []
+var _started_expansions: Array = []
 
 
 func _ready() -> void:
@@ -212,7 +213,7 @@ func _try_reconnect(id: int, client_name: String, token: String) -> void:
 	if old_id > 1 and multiplayer.get_peers().has(old_id):
 		multiplayer.multiplayer_peer.disconnect_peer(old_id)
 	player_reconnected.emit(slot, id)
-	_recv_start.rpc_id(id, _started_types, GameState.slot_peer, _started_admin, _started_quick, _started_blitz, _started_names)
+	_recv_start.rpc_id(id, _started_types, GameState.slot_peer, _started_admin, _started_quick, _started_blitz, _started_names, _started_expansions)
 
 
 # Host: called just before deliberately kicking a seat, so that player can't
@@ -314,11 +315,11 @@ func start_game(admin_mode: bool, quickstart: bool, blitzstart: bool) -> void:
 		elif slots[i] == Slot.TAKEN:
 			overrides[i] = str(peer_names.get(slot_peer[i], ""))
 	var names: Array = GameState.names_with(overrides)
-	_recv_start.rpc(types, slot_peer, admin_mode, quickstart, blitzstart, names)
+	_recv_start.rpc(types, slot_peer, admin_mode, quickstart, blitzstart, names, GameState.expansions)
 
 
 @rpc("authority", "call_local", "reliable")
-func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bool, blitzstart: bool, names: Array = []) -> void:
+func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bool, blitzstart: bool, names: Array = [], expansions: Array = []) -> void:
 	var player_types: Array[GameState.PlayerType] = []
 	for t in types:
 		player_types.append(t)
@@ -334,6 +335,10 @@ func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bo
 	for i in mini(names.size(), player_names.size()):
 		player_names[i] = str(names[i])
 	GameState.player_names = player_names
+	var exp: Array[String] = []
+	for id in expansions:
+		exp.append(str(id))
+	GameState.expansions = exp
 	game_started = true
 	# Host keeps the config so a reconnecting client can be re-sent this same
 	# call (runs locally here too, so the host stashes it on start).
@@ -342,6 +347,7 @@ func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bo
 	_started_quick = quickstart
 	_started_blitz = blitzstart
 	_started_names = names.duplicate()
+	_started_expansions = expansions.duplicate()
 	# Client: remember how to get back in, even if the app is closed.
 	if not hosting:
 		Saves.save_session(last_join_address, reconnect_token)
@@ -365,6 +371,7 @@ func resume_hosting(save: Dictionary) -> bool:
 	_started_quick = bool(cfg.get("quick", false))
 	_started_blitz = bool(cfg.get("blitz", false))
 	_started_names = cfg.get("player_names", GameState.default_player_names()).duplicate()
+	_started_expansions = cfg.get("expansions", []).duplicate()
 	game_started = true
 	var peers: Array[int] = [1, 0, 0, 0, 0, 0, 0, 0]
 	GameState.online = true

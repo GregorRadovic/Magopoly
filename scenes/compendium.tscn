@@ -66,12 +66,10 @@ layout_mode = 2
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 
-[node name="CardContainer" type="HFlowContainer" parent="Margin/VBox/CardScroll"]
+[node name="Sections" type="VBoxContainer" parent="Margin/VBox/CardScroll"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/h_separation = 24
-theme_override_constants/v_separation = 24
-alignment = 1
+theme_override_constants/separation = 24
 
 [node name="SpellCard" parent="." instance=ExtResource("2")]
 visible = false

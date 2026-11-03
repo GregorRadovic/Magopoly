@@ -52,6 +52,9 @@ var _ip_request: HTTPRequest
 var _ip_service_index: int = 0
 
 
+var expansion_picker: ExpansionPicker
+
+
 func _ready() -> void:
 	Net.lobby_updated.connect(_refresh)
 
@@ -64,6 +67,10 @@ func _ready() -> void:
 	_ip_request.timeout = 8.0
 	_ip_request.request_completed.connect(_on_ip_request_completed)
 	add_child(_ip_request)
+
+	expansion_picker = ExpansionPicker.new()
+	$VBox.add_child(expansion_picker)
+	$VBox.move_child(expansion_picker, $VBox/OptionsRow.get_index() + 1)
 
 	for i in Net.SLOT_COUNT:
 		slot_widgets.append(_build_slot_row(i))
@@ -201,6 +208,8 @@ func _on_start_pressed() -> void:
 	if blitzstart_checkbox.button_pressed and Net.active_slot_count() > BLITZSTART_MAX_PLAYERS:
 		blitzstart_limit_dialog.popup_centered()
 		return
+	# The host's unlocked expansions decide the deck for everyone.
+	GameState.expansions = expansion_picker.selected_ids()
 	Net.start_game(admin_checkbox.button_pressed, quickstart_checkbox.button_pressed,
 		blitzstart_checkbox.button_pressed)
 

@@ -97,6 +97,10 @@ func _on_continue() -> void:
 	for i in mini(saved_names.size(), names.size()):
 		names[i] = str(saved_names[i])
 	GameState.player_names = names
+	var exp: Array[String] = []
+	for id in cfg.get("expansions", []):
+		exp.append(str(id))
+	GameState.expansions = exp
 	GameState.admin_mode = bool(cfg.get("admin", false))
 	GameState.quickstart_mode = bool(cfg.get("quick", false))
 	GameState.blitzstart_mode = bool(cfg.get("blitz", false))

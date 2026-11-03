@@ -29,6 +29,7 @@ const BLITZSTART_MAX_PLAYERS: int = 4
 @onready var blitzstart_limit_dialog: AcceptDialog = $BlitzStartLimitDialog
 
 var type_options: Array[OptionButton] = []
+var expansion_picker: ExpansionPicker
 
 
 func _ready() -> void:
@@ -36,6 +37,10 @@ func _ready() -> void:
 		type_options.append(_build_player_row(i))
 	start_button.pressed.connect(_on_start_pressed)
 	back_button.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/start_menu.tscn"))
+	# Unlocked expansions, under the mode checkboxes.
+	expansion_picker = ExpansionPicker.new()
+	$VBox.add_child(expansion_picker)
+	$VBox.move_child(expansion_picker, $VBox/OptionsRow.get_index() + 1)
 
 
 func _build_player_row(index: int) -> OptionButton:
@@ -78,6 +83,7 @@ func _on_start_pressed() -> void:
 		return
 
 	GameState.player_types = types
+	GameState.expansions = expansion_picker.selected_ids()
 	# The first human seat is this player; it takes their profile name.
 	var overrides: Dictionary = {}
 	for i in types.size():

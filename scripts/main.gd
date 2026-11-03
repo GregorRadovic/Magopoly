@@ -6,45 +6,9 @@ const MINI_CARD_SCENE: PackedScene = preload("res://scenes/mini_property_card.ts
 const MINI_SPELL_CARD_SCENE: PackedScene = preload("res://scenes/mini_spell_card.tscn")
 const CARDBACK_TEXTURE: Texture2D = preload("res://Magopoly Assets/Cardback.jpg")
 
-# The shared Spell Deck's starting contents -- T1/T2/T3 were placeholder
-# test cards and are no longer part of it; only real created cards belong
-# here now, 1 copy each. See _build_spell_deck().
-const SPELL_DECK_STARTING_COUNTS: Dictionary = {
-	"Counterfeit Currency": 1,
-	"Snatch Purse": 1,
-	"Hasty Exit": 1,
-	"Price Gouging": 1,
-	"Divination": 1,
-	"Migraine": 1,
-	"Counterbalance": 1,
-	"Impossible Architecture": 1,
-	"Promised Land": 1,
-	"Break Bread": 1,
-	"Smite": 1,
-	"Divine Protection": 1,
-	"Art of the Deal": 1,
-	"Escape Plan": 1,
-	"Offer You Can't Refuse": 1,
-	"Haggling": 1,
-	"Burn to the Ground": 1,
-	"Line of Fire": 1,
-	"Unstable Portal": 1,
-	"Threaten": 1,
-	"Royal Aid": 1,
-	"Taxes": 1,
-	"Far-Reaching Empire": 1,
-	"Annexation": 1,
-	"Adrenaline": 1,
-	"Overflowing Bounty": 1,
-	"Sinkhole": 1,
-	"Reclaimed by Nature": 1,
-	"Sanity Grinding": 1,
-	"Spell Mastery": 1,
-	"Tax Haven": 1,
-	"Step Forward": 1,
-	"Manastone": 4,
-	"The Cult of Terminus": 4,
-}
+# The base Spell Deck (defined in expansions.gd, alongside the expansions a
+# game can add on top -- see GameState.expansions and _build_spell_deck()).
+const SPELL_DECK_STARTING_COUNTS: Dictionary = Expansions.BASE_CARDS
 # Sentinel "level" for the level-picker's extra "Burn for Attunement" entry --
 # safe from colliding with a real spell level. Real levels are almost always
 # >= 1, but Manastone has a real Level 0, so this has to sit well outside
@@ -1230,10 +1194,12 @@ func _spawn_players() -> void:
 				_grant_starting_hand(player, 3, 2)
 
 
+# The base deck plus every expansion switched on for this game.
 func _build_spell_deck() -> void:
 	_spell_deck.clear()
-	for spell_name in SPELL_DECK_STARTING_COUNTS:
-		for i in SPELL_DECK_STARTING_COUNTS[spell_name]:
+	var counts: Dictionary = Expansions.deck_counts(GameState.expansions)
+	for spell_name in counts:
+		for i in counts[spell_name]:
 			_spell_deck.append(spell_name)
 	_spell_deck.shuffle()
 
@@ -1757,9 +1723,8 @@ func _admin_assign_property(index: int) -> void:
 	_refresh_action_buttons()
 
 
-# Admin Spells: shows every distinct spell in the game (one entry per name in
-# SPELL_DECK_STARTING_COUNTS -- real, currently-in-play spells only, not the
-# vestigial T1/T2/T3 test cards) as clickable card art, same picker Magic
+# Admin Spells: shows every distinct spell this game's deck can contain (the
+# base cards plus any expansions switched on for it) as clickable card art, same picker Magic
 # Forest/Spell Shop use. Picking one adds a free copy straight to the current
 # player's hand -- doesn't touch the shared deck at all, same as Admin
 # Properties assigns ownership without a real purchase, so it can't throw off
@@ -1774,7 +1739,8 @@ func _on_admin_spells_pressed() -> void:
 	declare_bankruptcy_button.disabled = true
 	trade_button.disabled = true
 
-	var spell_names: Array = SPELL_DECK_STARTING_COUNTS.keys()
+	# Every spell this game's deck can contain (base + its expansions).
+	var spell_names: Array = Expansions.deck_counts(GameState.expansions).keys()
 	var entries: Array = []
 	for i in spell_names.size():
 		var spell_info: Dictionary = SpellData.SPELLS.get(spell_names[i], {})
@@ -6242,6 +6208,7 @@ func _build_save() -> Dictionary:
 			"quick": GameState.quickstart_mode,
 			"blitz": GameState.blitzstart_mode,
 			"online": GameState.online,
+			"expansions": GameState.expansions.duplicate(),
 		},
 		"state": {
 			"players": snap["players"],

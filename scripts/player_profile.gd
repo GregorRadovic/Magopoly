@@ -68,10 +68,11 @@ func _save_name() -> void:
 
 
 func _unlocks_text(level: int) -> String:
-	if Saves.UNLOCKS.is_empty():
+	var unlocks: Array[Dictionary] = Saves.all_unlocks()
+	if unlocks.is_empty():
 		return "[color=#8c93a8]New features unlock as you level up. Coming soon![/color]"
 	var lines: Array[String] = []
-	for u in Saves.UNLOCKS:
+	for u in unlocks:
 		var need: int = int(u["level"])
 		if level >= need:
 			lines.append("[color=#5fd068]•[/color] [b]%s[/b] -- %s" % [u["name"], u.get("description", "")])
