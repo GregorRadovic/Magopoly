@@ -73,6 +73,7 @@ var _started_types: Array = []
 var _started_admin: bool = false
 var _started_quick: bool = false
 var _started_blitz: bool = false
+var _started_names: Array = []
 
 
 func _ready() -> void:
@@ -155,6 +156,9 @@ func _register_client(client_name: String, token: String = "") -> void:
 	if not hosting:
 		return
 	var id := multiplayer.get_remote_sender_id()
+	# Same rules as Saves.set_player_name -- don't trust the client to have
+	# applied them (names go into the BBCode game log).
+	client_name = client_name.replace("[", "").replace("]", "").strip_edges().left(Saves.NAME_MAX_LENGTH)
 	if game_started:
 		_try_reconnect(id, client_name, token)
 		return
@@ -208,7 +212,7 @@ func _try_reconnect(id: int, client_name: String, token: String) -> void:
 	if old_id > 1 and multiplayer.get_peers().has(old_id):
 		multiplayer.multiplayer_peer.disconnect_peer(old_id)
 	player_reconnected.emit(slot, id)
-	_recv_start.rpc_id(id, _started_types, GameState.slot_peer, _started_admin, _started_quick, _started_blitz)
+	_recv_start.rpc_id(id, _started_types, GameState.slot_peer, _started_admin, _started_quick, _started_blitz, _started_names)
 
 
 # Host: called just before deliberately kicking a seat, so that player can't
@@ -242,7 +246,7 @@ func active_slot_count() -> int:
 # --- Client: receiving lobby state ------------------------------------
 
 func _on_connected_to_server() -> void:
-	_register_client.rpc_id(1, my_name, reconnect_token)
+	_register_client.rpc_id(1, profile_name(), reconnect_token)
 	join_succeeded.emit()
 
 
@@ -302,11 +306,19 @@ func start_game(admin_mode: bool, quickstart: bool, blitzstart: bool) -> void:
 	for i in SLOT_COUNT:
 		if slot_peer[i] > 1 and peer_token.has(slot_peer[i]) and peer_token[slot_peer[i]] != "":
 			token_slot[peer_token[slot_peer[i]]] = i
-	_recv_start.rpc(types, slot_peer, admin_mode, quickstart, blitzstart)
+	# Each human seat is named after its player's profile name.
+	var overrides: Dictionary = {}
+	for i in SLOT_COUNT:
+		if slots[i] == Slot.HOST:
+			overrides[i] = profile_name()
+		elif slots[i] == Slot.TAKEN:
+			overrides[i] = str(peer_names.get(slot_peer[i], ""))
+	var names: Array = GameState.names_with(overrides)
+	_recv_start.rpc(types, slot_peer, admin_mode, quickstart, blitzstart, names)
 
 
 @rpc("authority", "call_local", "reliable")
-func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bool, blitzstart: bool) -> void:
+func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bool, blitzstart: bool, names: Array = []) -> void:
 	var player_types: Array[GameState.PlayerType] = []
 	for t in types:
 		player_types.append(t)
@@ -318,6 +330,10 @@ func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bo
 	GameState.online = true
 	GameState.slot_peer = _to_int_array(peer_map)
 	GameState.local_peer_id = multiplayer.get_unique_id()
+	var player_names: Array[String] = GameState.default_player_names()
+	for i in mini(names.size(), player_names.size()):
+		player_names[i] = str(names[i])
+	GameState.player_names = player_names
 	game_started = true
 	# Host keeps the config so a reconnecting client can be re-sent this same
 	# call (runs locally here too, so the host stashes it on start).
@@ -325,6 +341,7 @@ func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bo
 	_started_admin = admin_mode
 	_started_quick = quickstart
 	_started_blitz = blitzstart
+	_started_names = names.duplicate()
 	# Client: remember how to get back in, even if the app is closed.
 	if not hosting:
 		Saves.save_session(last_join_address, reconnect_token)
@@ -347,6 +364,7 @@ func resume_hosting(save: Dictionary) -> bool:
 	_started_admin = bool(cfg.get("admin", false))
 	_started_quick = bool(cfg.get("quick", false))
 	_started_blitz = bool(cfg.get("blitz", false))
+	_started_names = cfg.get("player_names", GameState.default_player_names()).duplicate()
 	game_started = true
 	var peers: Array[int] = [1, 0, 0, 0, 0, 0, 0, 0]
 	GameState.online = true
@@ -356,6 +374,12 @@ func resume_hosting(save: Dictionary) -> bool:
 
 
 # --- Helpers ----------------------------------------------------------
+
+# This player's name from their Player Profile ("" if they haven't set one;
+# the seat then stays "Player N").
+func profile_name() -> String:
+	return Saves.get_player_name()
+
 
 # Arrays that arrive over RPC come back untyped; the game code expects
 # Array[int].

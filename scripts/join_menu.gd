@@ -43,7 +43,6 @@ func _on_join_pressed() -> void:
 	if addr == "":
 		status_label.text = "Enter the host's IP address."
 		return
-	Net.my_name = "Player"
 	status_label.text = "Connecting to %s…" % addr
 	if not Net.join_game(addr, Net.DEFAULT_PORT):
 		status_label.text = "Couldn't start the client."

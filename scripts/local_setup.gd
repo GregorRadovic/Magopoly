@@ -78,6 +78,13 @@ func _on_start_pressed() -> void:
 		return
 
 	GameState.player_types = types
+	# The first human seat is this player; it takes their profile name.
+	var overrides: Dictionary = {}
+	for i in types.size():
+		if types[i] == GameState.PlayerType.HUMAN:
+			overrides[i] = Saves.get_player_name()
+			break
+	GameState.player_names = GameState.names_with(overrides)
 	GameState.admin_mode = admin_checkbox.button_pressed
 	GameState.quickstart_mode = quickstart_checkbox.button_pressed
 	GameState.blitzstart_mode = blitzstart_checkbox.button_pressed

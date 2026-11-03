@@ -73,10 +73,9 @@ const PLAYER_COLORS: Array[Color] = [
 	Color(0.15, 0.75, 0.8),   # cyan
 	Color(0.95, 0.45, 0.65),  # pink
 ]
-const PLAYER_NAMES: Array[String] = [
-	"Player 1", "Player 2", "Player 3", "Player 4",
-	"Player 5", "Player 6", "Player 7", "Player 8",
-]
+# Seat names for this game (profile names where set -- see
+# GameState.player_names). Upper-case because it was a constant once.
+var PLAYER_NAMES: Array[String] = GameState.player_names.duplicate()
 # Where each player's marker sits within its board space (screen-space offset
 # from the space centre). A 4x2 grid, tight enough for the narrow edge tiles.
 const MARKER_OFFSETS: Array[Vector2] = [
@@ -3781,9 +3780,21 @@ func _end_game(winner_id: int) -> void:
 	Saves.clear_session()
 	if GameState.online:
 		Net.leave()
-	info_prompt.open("%s wins! Returning to the menu." % PLAYER_NAMES[winner_id])
-	await info_prompt.closed
-	get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
+	if _xp_award.is_empty():
+		info_prompt.open("%s wins! Returning to the menu." % PLAYER_NAMES[winner_id])
+		await info_prompt.closed
+	else:
+		# The winner, plus this player's experience bar filling up.
+		var layer := CanvasLayer.new()
+		layer.layer = 100
+		add_child(layer)
+		var popup: Control = XP_AWARD_SCENE.instantiate()
+		layer.add_child(popup)
+		popup.show_award("%s wins!" % PLAYER_NAMES[winner_id], _xp_award["won"],
+			_xp_award["xp_before"], _xp_award["xp_after"])
+		await popup.closed
+	if is_inside_tree():
+		get_tree().change_scene_to_file("res://scenes/start_menu.tscn")
 
 
 func _on_declare_bankruptcy_pressed() -> void:
@@ -6196,6 +6207,10 @@ var _turn_number: int = 1
 var _seat_spells_cast: Array[int] = [0, 0, 0, 0, 0, 0, 0, 0]
 var _seat_props_bought: Array[int] = [0, 0, 0, 0, 0, 0, 0, 0]
 var _result_recorded: bool = false
+# What _record_result() earned this machine's player: {"won", "xp_before",
+# "xp_after"} -- shown as the filling experience bar when the game ends.
+var _xp_award: Dictionary = {}
+const XP_AWARD_SCENE: PackedScene = preload("res://scenes/xp_award.tscn")
 
 
 func _autosave() -> void:
@@ -6222,6 +6237,7 @@ func _build_save() -> Dictionary:
 	var save: Dictionary = {
 		"config": {
 			"player_types": types,
+			"player_names": PLAYER_NAMES.duplicate(),
 			"admin": GameState.admin_mode,
 			"quick": GameState.quickstart_mode,
 			"blitz": GameState.blitzstart_mode,
@@ -6341,7 +6357,7 @@ func _record_result(winner_id: int) -> void:
 	var won: Variant = null
 	if seats.size() == 1:
 		won = winner_id == seats[0]
-	Saves.record_game({
+	_xp_award = Saves.record_game({
 		"won": won,
 		"mode": mode,
 		"players": player_count,
@@ -6350,6 +6366,7 @@ func _record_result(winner_id: int) -> void:
 		"spells_cast": spells,
 		"properties_bought": props,
 	})
+	_xp_award["won"] = won
 
 
 # ============================================================================

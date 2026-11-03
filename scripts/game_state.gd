@@ -26,6 +26,36 @@ var player_types: Array[PlayerType] = [
 # If true, every active player starts with 3 random properties and 2 random
 # spells instead of the normal empty-handed, property-less start. Set by the
 # Start Menu's Quickstart Mode checkbox.
+# Seat names for the current game -- "Player N" unless that seat's player set
+# a name in their Player Profile. Built by local_setup / Net.start_game, sent
+# to clients with the start, and kept in the autosave.
+var player_names: Array[String] = default_player_names()
+
+
+static func default_player_names() -> Array[String]:
+	var out: Array[String] = []
+	for i in MAX_PLAYERS:
+		out.append("Player %d" % (i + 1))
+	return out
+
+
+# Defaults with the given seat -> name overrides; a blank or duplicate name
+# keeps that seat's "Player N" so the log never has two identical names.
+static func names_with(overrides: Dictionary) -> Array[String]:
+	var out: Array[String] = default_player_names()
+	var used: Dictionary = {}
+	for n in out:
+		used[n.to_lower()] = true
+	for slot in overrides:
+		var n: String = str(overrides[slot]).strip_edges()
+		if n == "" or used.has(n.to_lower()) or int(slot) < 0 or int(slot) >= MAX_PLAYERS:
+			continue
+		used.erase(out[int(slot)].to_lower())
+		out[int(slot)] = n
+		used[n.to_lower()] = true
+	return out
+
+
 var quickstart_mode: bool = false
 
 # Like Quickstart but bigger: every active player starts with 6 random

@@ -27,6 +27,8 @@ func _start_casting_spells() -> void:
 	while types.size() < GameState.MAX_PLAYERS:
 		types.append(GameState.PlayerType.DISABLED)
 	GameState.player_types = types
+	# The tutorial's script refers to "Player 1" / "Player 2".
+	GameState.player_names = GameState.default_player_names()
 	GameState.admin_mode = false
 	GameState.quickstart_mode = false
 	GameState.blitzstart_mode = false

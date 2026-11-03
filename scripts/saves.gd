@@ -9,7 +9,8 @@ extends Node
 #   session.save  -- an online client's way back into a game: the host
 #                    address and the reconnect token the host knows its seat
 #                    by. "Rejoin Game" on the Start Menu uses it.
-#   profile.save  -- player progression: lifetime stats and recent matches.
+#   profile.save  -- the player profile: name, level / experience, lifetime
+#                    stats and recent matches.
 #
 # Files are written with FileAccess.store_var and read back with objects
 # disabled, so types survive exactly (ints stay ints) and a tampered file
@@ -107,6 +108,21 @@ func clear_session() -> void:
 
 # --- profile / progression ---------------------------------------------
 
+# Experience is kept in half-levels (an int, so it never drifts): a win is
+# worth a full level (2), a loss half a level (1). Level = half-levels / 2.
+const XP_WIN: int = 2
+const XP_LOSS: int = 1
+# A hotseat game with several humans on this machine has no single winner
+# to credit; it's worth the same as a loss (still a finished game).
+const XP_SHARED: int = 1
+const NAME_MAX_LENGTH: int = 16
+
+# Features unlocked by level, lowest first. Each entry:
+#   {"level": int, "id": String, "name": String, "description": String}
+# Check one with Saves.is_unlocked("id"); the Player Profile lists them and
+# the end-of-game popup announces any newly reached.
+const UNLOCKS: Array[Dictionary] = []
+
 const STAT_KEYS: Array[String] = [
 	"games_played", "games_won", "games_lost", "spells_cast", "properties_bought",
 ]
@@ -120,13 +136,61 @@ func load_profile() -> Dictionary:
 	data["stats"] = stats
 	if not (data.get("history", null) is Array):
 		data["history"] = []
+	data["xp"] = maxi(0, int(data.get("xp", 0)))
+	data["name"] = str(data.get("name", ""))
 	return data
+
+
+func get_level() -> int:
+	return level_of(load_profile()["xp"])
+
+
+static func level_of(xp_halves: int) -> int:
+	return xp_halves / 2
+
+
+# 0.0 .. <1.0: how far into the current level.
+static func level_progress(xp_halves: int) -> float:
+	return (xp_halves % 2) / 2.0
+
+
+func is_unlocked(feature_id: String) -> bool:
+	var level: int = get_level()
+	for u in UNLOCKS:
+		if u["id"] == feature_id:
+			return level >= int(u["level"])
+	return true
+
+
+# The unlocks reached by going from one level to a higher one.
+func unlocks_between(old_level: int, new_level: int) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for u in UNLOCKS:
+		if int(u["level"]) > old_level and int(u["level"]) <= new_level:
+			out.append(u)
+	return out
+
+
+# The name typed in the profile, or "" if none was set.
+func get_player_name() -> String:
+	return load_profile()["name"]
+
+
+func set_player_name(new_name: String) -> String:
+	# No [ ] -- names go into the BBCode game log.
+	var clean: String = new_name.replace("[", "").replace("]", "").strip_edges().left(NAME_MAX_LENGTH)
+	var profile: Dictionary = load_profile()
+	profile["name"] = clean
+	_write(PROFILE_PATH, profile)
+	return clean
 
 
 # entry: {"won": bool or null (null = several local players, no single
 # result), "mode": String, "players": int, "winner": String, "turns": int,
 # "spells_cast": int, "properties_bought": int}. "date" is filled in here.
-func record_game(entry: Dictionary) -> void:
+# Returns the experience change, for the end-of-game bar:
+# {"xp_before": int, "xp_after": int} (both in half-levels).
+func record_game(entry: Dictionary) -> Dictionary:
 	var profile: Dictionary = load_profile()
 	var stats: Dictionary = profile["stats"]
 	stats["games_played"] += 1
@@ -136,9 +200,18 @@ func record_game(entry: Dictionary) -> void:
 		stats["games_lost"] += 1
 	stats["spells_cast"] += int(entry.get("spells_cast", 0))
 	stats["properties_bought"] += int(entry.get("properties_bought", 0))
+	var xp_before: int = profile["xp"]
+	var gained: int = XP_SHARED
+	if entry.get("won") == true:
+		gained = XP_WIN
+	elif entry.get("won") == false:
+		gained = XP_LOSS
+	profile["xp"] = xp_before + gained
+	entry["xp_gained"] = gained
 	entry["date"] = int(Time.get_unix_time_from_system())
 	var history: Array = profile["history"]
 	history.push_front(entry)
 	while history.size() > HISTORY_LIMIT:
 		history.pop_back()
 	_write(PROFILE_PATH, profile)
+	return {"xp_before": xp_before, "xp_after": profile["xp"]}

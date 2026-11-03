@@ -68,7 +68,6 @@ func _ready() -> void:
 	for i in Net.SLOT_COUNT:
 		slot_widgets.append(_build_slot_row(i))
 
-	Net.my_name = "Host"
 	_host_ok = Net.host_game(Net.DEFAULT_PORT)
 	if not _host_ok:
 		status_label.text = "Couldn't start a server on port %d." % Net.DEFAULT_PORT
@@ -169,7 +168,7 @@ func _refresh() -> void:
 		return
 	for i in slot_widgets.size():
 		var kind: int = Net.slots[i]
-		(slot_widgets[i]["status"] as Label).text = _slot_status_text(kind)
+		(slot_widgets[i]["status"] as Label).text = _slot_status_text(kind, i)
 		if i == 0:
 			continue
 		var opt: OptionButton = slot_widgets[i]["option"]
@@ -214,12 +213,14 @@ func _on_copy_pressed() -> void:
 		copy_button.text = "Copy"
 
 
-func _slot_status_text(kind: int) -> String:
+func _slot_status_text(kind: int, slot: int) -> String:
 	match kind:
 		Net.Slot.HOST:
-			return "You (host)"
+			var me: String = Net.profile_name()
+			return "You (host)" if me == "" else "%s (you, host)" % me
 		Net.Slot.TAKEN:
-			return "Joined"
+			var who: String = str(Net.peer_names.get(Net.slot_peer[slot], ""))
+			return "Joined" if who == "" else "Joined — %s" % who
 		Net.Slot.OPEN:
 			return "Open — waiting for a player"
 		Net.Slot.COMPUTER:
