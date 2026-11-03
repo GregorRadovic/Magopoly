@@ -1,93 +1,103 @@
 extends PopupPanel
 
-# The "Cast <spell> at what level?" prompt: level buttons on the left, the
-# full card on the right. Hovering (or keyboard-focusing) a level highlights
-# the words on the card that make up that level's effect -- the text before
-# the levels, that level's own line, and any text after the levels -- using
+# The "cast at what level?" prompt: a column of level-number buttons to the
+# left of the full card, with Burn for Attunement under the card. Hovering
+# (or keyboard-focusing) a level button highlights the words on the card that
+# make up that level's effect -- the text before the levels, that level's own
+# line (its circled number included), and any text after the levels -- using
 # the rects in SpellTextRegions (generated from the card images by
 # tools/gen_spell_text_regions.py).
 #
-# Behaves like player_picker.gd otherwise (same entries format, same
-# mandatory / sticky / tutorial-gate semantics, deferred open), so main.gd
-# routes it the same way, locally or over the network.
+# Otherwise behaves like player_picker.gd (deferred open; sticky / tutorial
+# gate reopen on stray dismissal), so main.gd routes it the same way, locally
+# or over the network. The × in the corner is Cancel.
 
-# -1 means nothing was chosen (Cancel, or dismissed some other way).
+# The chosen level, the burn entry's index, or -1 for cancel / dismissal.
 signal level_chosen(index: int)
 
 const HIGHLIGHT_COLOR: Color = Color(1.0, 0.82, 0.0, 0.40)
 # Native card art size (all cards are 375 x 523).
 const CARD_ASPECT: float = 375.0 / 523.0
-const LEFT_WIDTH: float = 380.0
-const MARGIN: float = 28.0
+const LEVEL_BUTTON_SIZE: float = 84.0
+# Must match spell_level_picker.tscn's Margin / HBox / CardColumn settings.
+const MARGIN_LEFT: float = 28.0
+const MARGIN_RIGHT: float = 64.0  # room for the × button
+const MARGIN_V: float = 28.0
 const GAP: float = 28.0
+const BURN_ROW_H: float = 60.0 + 14.0
 
-@onready var title_label: Label = $Margin/HBox/Left/TitleLabel
-@onready var hint_label: Label = $Margin/HBox/Left/HintLabel
-@onready var button_container: VBoxContainer = $Margin/HBox/Left/ButtonContainer
-@onready var cancel_button: Button = $Margin/HBox/Left/CancelButton
-@onready var card_rect: TextureRect = $Margin/HBox/Card
-@onready var overlay: Control = $Margin/HBox/Card/Overlay
+@onready var levels_box: VBoxContainer = $Root/Margin/HBox/Levels
+@onready var card_rect: TextureRect = $Root/Margin/HBox/CardColumn/Card
+@onready var overlay: Control = $Root/Margin/HBox/CardColumn/Card/Overlay
+@onready var burn_button: Button = $Root/Margin/HBox/CardColumn/BurnButton
+@onready var close_button: Button = $Root/CloseButton
 
 var _answered_box: Array = [false]
 var _sticky: bool = false
 var _gate: Callable = Callable()
 var _regions: Dictionary = {}
 var _hovered: int = -999
-var _popup_size: Vector2i = Vector2i(1100, 900)
+var _burn_index: int = -1
+var _popup_size: Vector2i = Vector2i(900, 900)
 
 
 func _ready() -> void:
-	cancel_button.pressed.connect(_on_cancel)
+	close_button.pressed.connect(_on_cancel)
+	burn_button.pressed.connect(func() -> void: _on_pick(_burn_index, _answered_box))
 	overlay.draw.connect(_draw_highlights)
 	set_process(false)
 
 
-# entries: Array of {"index": int, "name": String, "color": Color} -- level
-# entries use the level number as their index; anything else (e.g. Burn for
-# Attunement) just has no highlight.
-# sticky: keep Cancel, but reopen on any non-button dismissal (network use).
+# levels: the spell's level numbers, in order (one button each).
+# burn: {"index": int, "name": String} for the Burn for Attunement button
+#   under the card, or {} when the spell can't be burned (Manastone).
+# sticky: keep the × but reopen on any non-button dismissal (network use).
 # gate: optional tutorial validator, same as player_picker's.
-func open(spell_name: String, icon_path: String, entries: Array, sticky: bool = false, gate: Callable = Callable()) -> void:
-	call_deferred("_do_open", spell_name, icon_path, entries, sticky, gate)
+func open(icon_path: String, levels: Array, burn: Dictionary, sticky: bool = false, gate: Callable = Callable()) -> void:
+	call_deferred("_do_open", icon_path, levels, burn, sticky, gate)
 
 
-func _do_open(spell_name: String, icon_path: String, entries: Array, sticky: bool, gate: Callable) -> void:
+func _do_open(icon_path: String, levels: Array, burn: Dictionary, sticky: bool, gate: Callable) -> void:
 	_sticky = sticky
 	_gate = gate
-	cancel_button.visible = not gate.is_valid()
-	title_label.text = "Cast %s" % spell_name
+	close_button.visible = not gate.is_valid()
 	card_rect.texture = load(icon_path) if icon_path != "" and ResourceLoader.exists(icon_path) else null
 	_regions = SpellTextRegions.REGIONS.get(icon_path, {})
 	_set_hovered(-999)
 
 	var answered_box: Array = [false]
 	_answered_box = answered_box
-	for child in button_container.get_children():
+	for child in levels_box.get_children():
 		child.queue_free()
-	for entry in entries:
+	for level in levels:
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(0, 64)
-		btn.text = entry["name"]
-		btn.add_theme_font_size_override("font_size", 26)
-		btn.add_theme_color_override("font_color", entry.get("color", Color.WHITE))
-		var index: int = entry["index"]
-		btn.mouse_entered.connect(_set_hovered.bind(index))
-		btn.focus_entered.connect(_set_hovered.bind(index))
-		btn.mouse_exited.connect(_on_button_exited.bind(index))
-		btn.pressed.connect(_on_pick.bind(index, answered_box))
-		button_container.add_child(btn)
+		btn.custom_minimum_size = Vector2(LEVEL_BUTTON_SIZE, LEVEL_BUTTON_SIZE)
+		btn.text = str(level)
+		btn.add_theme_font_size_override("font_size", 40)
+		btn.mouse_entered.connect(_set_hovered.bind(int(level)))
+		btn.focus_entered.connect(_set_hovered.bind(int(level)))
+		btn.mouse_exited.connect(_on_button_exited.bind(int(level)))
+		btn.pressed.connect(_on_pick.bind(int(level), answered_box))
+		levels_box.add_child(btn)
 
-	# The card as tall as comfortably fits; the popup wraps it plus the
-	# button column.
+	_burn_index = int(burn.get("index", -1))
+	burn_button.visible = not burn.is_empty()
+	burn_button.text = str(burn.get("name", ""))
+
+	# The card as tall as comfortably fits; the popup wraps the level column,
+	# the card and the burn row.
 	var vp: Vector2 = Vector2(get_tree().root.get_visible_rect().size)
-	var card_h: float = minf(900.0, vp.y * 0.84 - MARGIN * 2.0)
+	var extra_h: float = BURN_ROW_H if burn_button.visible else 0.0
+	var card_h: float = minf(860.0, vp.y * 0.86 - MARGIN_V * 2.0 - extra_h)
 	if _gate.is_valid():
 		# Tutorial: fit between the toast strip at the top and the
 		# instruction bubble at the bottom (see _show_popup).
-		card_h = minf(card_h, vp.y * 0.76 - MARGIN * 2.0)
+		card_h = minf(card_h, vp.y * 0.76 - MARGIN_V * 2.0 - extra_h)
 	var card_w: float = card_h * CARD_ASPECT
 	card_rect.custom_minimum_size = Vector2(card_w, card_h)
-	_popup_size = Vector2i(roundi(LEFT_WIDTH + GAP + card_w + MARGIN * 2.0), roundi(card_h + MARGIN * 2.0))
+	_popup_size = Vector2i(
+		roundi(MARGIN_LEFT + LEVEL_BUTTON_SIZE + GAP + card_w + MARGIN_RIGHT),
+		roundi(MARGIN_V * 2.0 + card_h + extra_h))
 	_show_popup()
 	set_process(_sticky or _gate.is_valid())
 	popup_hide.connect(_on_popup_hide.bind(answered_box), CONNECT_ONE_SHOT)
@@ -130,6 +140,8 @@ func _draw_highlights() -> void:
 
 
 func _on_pick(index: int, answered_box: Array) -> void:
+	if answered_box != _answered_box:
+		return
 	if _gate.is_valid() and not _gate.call(index):
 		return
 	answered_box[0] = true

@@ -7,8 +7,8 @@ every card used in scripts/spell_data.gd (tesseract word boxes) and splits
 the text box into segments:
 
   pre    -- text before the first level line ("The opponent who ... pays you:")
-  levels -- one entry per level line, in card order, minus the circled level
-            badge and its colon ("$200.")
+  levels -- one entry per level line, in card order, including its circled
+            level badge ("(2): $200.")
   post   -- text after the last level that isn't a wrapped continuation of
             it (Tax Haven's "(You no longer pay ...)")
 
@@ -106,32 +106,32 @@ def trim_trailing_punct(word, crop):
     return new
 
 
-def split_after_badge(word, crop):
-    """For a badge OCR'd together with its text ("2:7."), return a word for
-    just the part after the colon: skip the badge cluster, the colon cluster,
-    and start at the next one."""
-    l, t, w, h = word["px"]
-    cols = [any(crop.getpixel((x, y)) < 110 for y in range(t, t + h)) for x in range(l, l + w)]
-    clusters = []
-    x = 0
-    while x < len(cols):
-        if cols[x]:
-            start = x
-            while x < len(cols) and cols[x]:
-                x += 1
-            clusters.append((start, x))
-        x += 1
-    # badge digit(s), then the narrow colon, then the text.
-    for i, (a, b) in enumerate(clusters):
-        if i > 0 and b - a <= 0.3 * h and i + 1 < len(clusters):
-            start = clusters[i + 1][0]
-            new = dict(word)
-            new["text"] = word["text"].split(":", 1)[1]
-            new["px"] = (l + start, t, w - start, h)
-            new["x"] = word["x"] + start / SCALE
-            new["w"] = (w - start) / SCALE
-            return new
-    return None
+def badge_box(ws, crop):
+    """A pseudo-word covering the whole circled badge at the start of a level
+    line -- the OCR box only covers the digit, not the grey circle around it."""
+    first = ws[0]
+    l, t, w, h = first["px"]
+    x_lo = max(0, int((34 - X0) * SCALE))      # stay clear of the text box frame
+    # About one circle-width: the badge can be OCR'd merged with the text
+    # after it ("2:7."), and that text mustn't count as badge.
+    x_hi = min(crop.width, l + min(w, h))
+    y_lo = max(0, t - 4 * SCALE)
+    y_hi = min(crop.height, t + h + 4 * SCALE)
+    xs, ys = [], []
+    for y in range(y_lo, y_hi):
+        for x in range(x_lo, x_hi):
+            if crop.getpixel((x, y)) <= 232:
+                xs.append(x)
+                ys.append(y)
+    if len(xs) < 20:
+        return None
+    xs.sort()
+    ys.sort()
+    # Trim a couple of stray texture pixels off each end.
+    k = max(1, len(xs) // 200)
+    x0, x1, y0, y1 = xs[k], xs[-k - 1], ys[k], ys[-k - 1]
+    return {"text": "", "line": first["line"], "x": X0 + x0 / SCALE, "y": Y0 + y0 / SCALE,
+            "w": (x1 - x0 + 1) / SCALE, "h": (y1 - y0 + 1) / SCALE}
 
 
 def line_rects(words):
@@ -143,7 +143,7 @@ def line_rects(words):
     for ws in by_line.values():
         x0 = min(w["x"] for w in ws) - PAD
         y0 = min(w["y"] for w in ws) - PAD
-        x1 = max(w["x"] + w["w"] for w in ws) + PAD
+        x1 = max(w["x"] + w["w"] for w in ws) + PAD / 2  # tight: periods sit close
         y1 = max(w["y"] + w["h"] for w in ws) + PAD
         rects.append((x0, y0, x1 - x0, y1 - y0))
     return sorted(rects, key=lambda r: r[1])
@@ -158,16 +158,11 @@ def segment(lines, crop):
         sentence_done = prev_text.rstrip().endswith((".", ")"))
         prev_text = ws[-1]["text"]
         if ws[0]["x"] >= LEVEL_LINE_MIN_X:
-            # Badge ("1", "1:", "2):", "D:" ...) then its colon: drop up to the
-            # first token with a ':' in the first two tokens.
-            rest = list(ws)
-            for i in range(min(2, len(rest))):
-                if ":" in rest[i]["text"]:
-                    tail = rest[i]["text"].split(":", 1)[1]
-                    after = split_after_badge(rest[i], crop) if tail.strip() else None
-                    rest = ([after] if after else []) + rest[i + 1:]
-                    break
-            levels.append([rest])
+            # Keep the whole line, badge included, and widen it to the badge's
+            # full circle (badge_box goes first so trimming still hits the
+            # line's real last word).
+            badge = badge_box(ws, crop)
+            levels.append([([badge] if badge else []) + list(ws)])
         elif levels and not post and not sentence_done:
             levels[-1].append(ws)
         elif levels:
@@ -202,7 +197,7 @@ def main():
         "#",
         "# Card icon path -> where its rules text sits on the image, as Rect2s",
         "# normalized to the card size (0-1): \"pre\" (text before the levels),",
-        "# \"levels\" (level key -> that level's text, badge excluded) and \"post\"",
+        "# \"levels\" (level key -> that level's text, badge included) and \"post\"",
         "# (text after the levels). Highlighting pre + one level + post spells out",
         "# that level's full effect.",
         "const REGIONS: Dictionary = {",

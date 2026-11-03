@@ -4267,19 +4267,19 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 	_prompt_slot = player_index
 	_refresh_action_buttons()
 
-	var level_entries: Array = []
-	for level in levels.keys():
-		level_entries.append({"index": level, "name": "Level %d" % level, "color": Color.WHITE})
-	level_entries.sort_custom(func(a, b): return a["index"] < b["index"])
+	var level_numbers: Array = levels.keys()
+	level_numbers.sort()
 	# Temporary Attunement to Utilities is never possible, by any means --
 	# so a Utility-colored spell (currently just Manastone) can't be burned
 	# for it at all; the option simply isn't offered.
+	var burn_entry: Dictionary = {}
 	if color_name != "utility":
-		level_entries.append({"index": BURN_FOR_ATTUNEMENT_INDEX, "name": "Burn for Attunement\n(+1 %s)" % color_name.capitalize(), "color": Color.WHITE})
+		burn_entry = {"index": BURN_FOR_ATTUNEMENT_INDEX, "name": "Burn for Attunement (+1 %s)" % color_name.capitalize()}
 
-	# The full card with level buttons beside it; hovering a level
-	# highlights its effect on the card (spell_level_picker.gd).
-	_lp_open(spell_name, str(spell_info.get("icon", "")), level_entries)
+	# The full card with a level-number button per level beside it (hovering
+	# one highlights that effect on the card) and Burn under it
+	# (spell_level_picker.gd).
+	_lp_open(str(spell_info.get("icon", "")), level_numbers, burn_entry)
 	var choice: int = await _lp_result()
 
 	# Only actually push a cast onto the stack -- and open/extend the
@@ -6501,12 +6501,12 @@ func _pp_result() -> int:
 
 # --- spell_level_picker (cast level, shown on the card) ----------
 
-func _lp_open(spell_name: String, icon_path: String, entries: Array) -> void:
+func _lp_open(icon_path: String, level_numbers: Array, burn_entry: Dictionary) -> void:
 	if _prompt_is_local():
-		spell_level_picker.open(spell_name, icon_path, entries, false, _tutorial_picker_gate())
+		spell_level_picker.open(icon_path, level_numbers, burn_entry, false, _tutorial_picker_gate())
 	else:
 		_net_open_remote("level", {
-			"spell": spell_name, "icon_path": icon_path, "entries": _net_pack_entries(entries),
+			"icon_path": icon_path, "levels": level_numbers, "burn": burn_entry,
 		})
 
 
@@ -6608,9 +6608,11 @@ func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
 				bool(payload.get("mandatory", false)), true)
 			return await player_picker.player_chosen
 		"level":
-			spell_level_picker.open(str(payload.get("spell", "")),
-				str(payload.get("icon_path", "")),
-				_net_unpack_entries(payload.get("entries", [])), true)
+			var burn: Dictionary = payload.get("burn", {})
+			spell_level_picker.open(str(payload.get("icon_path", "")),
+				_net_int_array(payload.get("levels", [])),
+				{"index": int(burn["index"]), "name": str(burn.get("name", ""))} if burn.has("index") else {},
+				true)
 			return await spell_level_picker.level_chosen
 		"card":
 			card_picker.open(str(payload.get("text", "")),
