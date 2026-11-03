@@ -585,8 +585,15 @@ func _ready() -> void:
 	if GameState.online and not GameState.is_authority():
 		_net_request_initial_snapshot()
 		return
-	# The first turn -- every later one is logged from _advance_to_next_active_player.
-	_log_turn_start(current_player)
+	if not Saves.pending_load.is_empty():
+		# Continue: put the saved game back exactly as it was at the start
+		# of the saved turn (replaces the fresh setup above).
+		_restore_save(Saves.pending_load)
+		Saves.pending_load = {}
+	else:
+		# The first turn -- every later one is logged from _advance_to_next_active_player.
+		_log_turn_start(current_player)
+		_autosave()
 	if GameState.tutorial_mode:
 		_start_tutorial()
 	if GameState.is_authority() and players[current_player].is_ai:
@@ -2708,6 +2715,7 @@ func _move_player(player: Node2D, roll: int) -> bool:
 				dice_label.text += "\nBought %s for $%d!" % [property_name, final_price]
 				_log("%s bought %s for $%d." % [PLAYER_NAMES[player.player_id], property_name, final_price])
 				_note_ownership(player.current_space)
+				_seat_props_bought[player.player_id] += 1
 			else:
 				dice_label.text += "\nDeclined to buy %s." % property_name
 		elif space.owner_id != player.player_id and space.is_mortgaged:
@@ -3766,6 +3774,11 @@ func _end_game(winner_id: int) -> void:
 	if _returning_to_menu:
 		return
 	_returning_to_menu = true
+	_record_result(winner_id)
+	# The game is over: nothing to Continue, and nothing to Rejoin.
+	if GameState.is_authority():
+		Saves.delete_autosave()
+	Saves.clear_session()
 	if GameState.online:
 		Net.leave()
 	info_prompt.open("%s wins! Returning to the menu." % PLAYER_NAMES[winner_id])
@@ -3899,6 +3912,7 @@ func _buy_property_via_spell(buyer: Node2D, space_index: int, price: int, seller
 	space.owner_id = buyer.player_id
 	buyer.owned_property_indices.append(space_index)
 	_sort_owned_properties(buyer)
+	_seat_props_bought[buyer.player_id] += 1
 	_update_player_panels()
 	return true
 
@@ -4519,6 +4533,7 @@ func _prepare_spell_cast(caster: Node2D, hand_index: int, spell_name: String, le
 # re-arms) the response window for it -- see _ensure_response_window().
 func _finish_cast(caster: Node2D, spell_name: String, level: int, resolve: Callable) -> void:
 	_spell_remove_first(caster, spell_name)
+	_seat_spells_cast[caster.player_id] += 1
 	var stack_id: int = _next_stack_id
 	_next_stack_id += 1
 	var display_name: String = "%s (Level %d)" % [spell_name, level]
@@ -6062,7 +6077,9 @@ func _advance_to_next_active_player() -> void:
 			# Temporary Attunement (from burning spells) only lasts until the
 			# start of the turn it was gained on.
 			players[current_player].temp_attunement.clear()
+			_turn_number += 1
 			_log_turn_start(current_player)
+			_autosave()
 			return
 
 
@@ -6160,6 +6177,179 @@ func _update_player_panels() -> void:
 		_populate_trade_spell_flow(trader2_flow, _trader2, _trade2_spells_offered)
 
 	_update_spell_stack_display()
+
+
+# ============================================================================
+# Saving, resuming and progression -- see saves.gd for the files themselves.
+#
+# The machine running the game (a local game, or the online host) autosaves
+# at the start of every turn. A turn start is the one moment nothing is in
+# flight -- no spell stack, response window, prompt, trade or debt -- and
+# every "this turn" buff has just been wiped, so what's left (board, money,
+# hands, deck, Temporary Attunement, Free Parking, whose turn) is the whole
+# game. Continue rebuilds exactly that.
+# ============================================================================
+
+var _turn_number: int = 1
+# Per seat, for progression stats. Counted on the authority and mirrored to
+# clients through the snapshot, so each machine can record its own seat.
+var _seat_spells_cast: Array[int] = [0, 0, 0, 0, 0, 0, 0, 0]
+var _seat_props_bought: Array[int] = [0, 0, 0, 0, 0, 0, 0, 0]
+var _result_recorded: bool = false
+
+
+func _autosave() -> void:
+	if not GameState.is_authority() or GameState.tutorial_mode or _returning_to_menu:
+		return
+	var alive: int = 0
+	for p in players:
+		if not p.is_bankrupt:
+			alive += 1
+	if alive <= 1:
+		return
+	Saves.write_autosave(_build_save())
+
+
+func _build_save() -> Dictionary:
+	var snap: Dictionary = _build_snapshot()
+	var types: Array = []
+	for t in GameState.player_types:
+		types.append(int(t))
+	var humans: int = 0
+	for i in types.size():
+		if types[i] == GameState.PlayerType.HUMAN and not players[i].is_bankrupt:
+			humans += 1
+	var save: Dictionary = {
+		"config": {
+			"player_types": types,
+			"admin": GameState.admin_mode,
+			"quick": GameState.quickstart_mode,
+			"blitz": GameState.blitzstart_mode,
+			"online": GameState.online,
+		},
+		"state": {
+			"players": snap["players"],
+			"spaces": snap["spaces"],
+			"current_player": current_player,
+			"free_parking": free_parking_amount,
+			"turn_number": _turn_number,
+			"deck": _spell_deck.duplicate(),
+			"log": _log_buffer,
+			"seat_spells": _seat_spells_cast.duplicate(),
+			"seat_props": _seat_props_bought.duplicate(),
+		},
+		# Shown on the Start Menu's Continue button.
+		"summary": {"turn": _turn_number, "current": PLAYER_NAMES[current_player], "humans": humans},
+	}
+	if GameState.online:
+		# Which reconnect token owns which seat, so players can reclaim
+		# their seats after the host resumes.
+		save["online"] = {"token_slot": Net.token_slot.duplicate()}
+	return save
+
+
+# Continue: overwrite the freshly set-up game with the saved one. Config
+# (player types, modes, online seat map) was already applied by the Start
+# Menu before this scene loaded; this restores the game state itself.
+func _restore_save(save: Dictionary) -> void:
+	var st: Dictionary = save.get("state", {})
+	var player_states: Array = st.get("players", [])
+	for i in mini(player_states.size(), players.size()):
+		var ps: Dictionary = player_states[i]
+		var p: Node2D = players[i]
+		var type: int = GameState.player_types[i]
+		p.money = int(ps.get("money", p.money))
+		p.current_space = int(ps.get("space", 0))
+		p.in_jail = bool(ps.get("in_jail", false))
+		p.jail_turns_left = int(ps.get("jail_turns", 0))
+		p.consecutive_doubles = int(ps.get("doubles", 0))
+		p.is_bankrupt = bool(ps.get("bankrupt", false))
+		p.visible = bool(ps.get("visible", true))
+		p.owned_property_indices = _net_int_array(ps.get("owned", []))
+		p.spell_hand = _net_string_array(ps.get("hand", []))
+		p.temp_attunement = (ps.get("attunement", {}) as Dictionary).duplicate()
+		p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
+		# Seat control comes from the config, not from whatever stand-in was
+		# driving it when the save was made (the host's "Take Player's Turn").
+		p.is_ai = type == GameState.PlayerType.COMPUTER
+		p.is_placeholder_ai = false
+		# Online: every remote human starts out disconnected until they
+		# Rejoin (net.gd's reconnect path clears it).
+		p.is_disconnected = GameState.online and type == GameState.PlayerType.HUMAN \
+			and not p.is_bankrupt and not GameState.is_slot_local(i)
+
+	var space_states: Array = st.get("spaces", [])
+	for i in mini(space_states.size(), board.spaces.size()):
+		var ss: Dictionary = space_states[i]
+		var sp: Node2D = board.spaces[i]
+		sp.owner_id = int(ss.get("owner", -1))
+		sp.house_count = int(ss.get("houses", 0))
+		sp.is_mortgaged = bool(ss.get("mortgaged", false))
+
+	current_player = int(st.get("current_player", current_player))
+	free_parking_amount = int(st.get("free_parking", 0))
+	_turn_number = int(st.get("turn_number", 1))
+	_spell_deck = _net_string_array(st.get("deck", []))
+	_seat_spells_cast = _net_int_array(st.get("seat_spells", _seat_spells_cast))
+	_seat_props_bought = _net_int_array(st.get("seat_props", _seat_props_bought))
+
+	_log_buffer = str(st.get("log", ""))
+	game_log.clear()
+	game_log.append_text(_log_buffer)
+	# Re-baseline ownership logging so the restored board isn't logged as a
+	# burst of brand-new purchases.
+	_logged_owners.clear()
+	_log("Game resumed.")
+	_log_turn_start(current_player)
+	_update_turn_label()
+	_update_player_panels()
+	_refresh_action_buttons()
+
+
+# Writes this machine's result to the player profile, once per game. Called
+# with the winner when the game ends, or with -1 when an online player's own
+# seat is eliminated (so leaving early still counts as a loss).
+func _record_result(winner_id: int) -> void:
+	if _result_recorded or GameState.tutorial_mode:
+		return
+	var seats: Array[int] = []
+	if GameState.online:
+		seats = GameState.local_slots()
+	else:
+		for i in players.size():
+			if GameState.player_types[i] == GameState.PlayerType.HUMAN:
+				seats.append(i)
+	if seats.is_empty():
+		return
+	_result_recorded = true
+	var spells: int = 0
+	var props: int = 0
+	for seat in seats:
+		spells += _seat_spells_cast[seat]
+		props += _seat_props_bought[seat]
+	var player_count: int = 0
+	for t in GameState.player_types:
+		if t != GameState.PlayerType.DISABLED:
+			player_count += 1
+	var mode: String = "Online" if GameState.online else "Local"
+	if GameState.blitzstart_mode:
+		mode += " · BlitzStart"
+	elif GameState.quickstart_mode:
+		mode += " · Quickstart"
+	# One local seat: a clear win or loss. Several humans sharing this
+	# screen (hotseat): the match is recorded, but not as anyone's win.
+	var won: Variant = null
+	if seats.size() == 1:
+		won = winner_id == seats[0]
+	Saves.record_game({
+		"won": won,
+		"mode": mode,
+		"players": player_count,
+		"winner": PLAYER_NAMES[winner_id] if winner_id >= 0 else "",
+		"turns": _turn_number,
+		"spells_cast": spells,
+		"properties_bought": props,
+	})
 
 
 # ============================================================================
@@ -6265,6 +6455,9 @@ func _build_snapshot() -> Dictionary:
 		"trade1_money": trader1_money_edit.text,
 		"trade2_money": trader2_money_edit.text,
 		"trade_can_accept": _trade_can_accept,
+		"turn_number": _turn_number,
+		"seat_spells": _seat_spells_cast.duplicate(),
+		"seat_props": _seat_props_bought.duplicate(),
 	}
 
 
@@ -6357,6 +6550,15 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_trade2_spells_offered = _net_int_array(snap.get("trade2_spells", []))
 	_trade_can_accept = snap.get("trade_can_accept", false)
 	_trade_proposer = snap.get("trade_proposer", -1)
+	_turn_number = snap.get("turn_number", _turn_number)
+	if snap.has("seat_spells"):
+		_seat_spells_cast = _net_int_array(snap["seat_spells"])
+		_seat_props_bought = _net_int_array(snap.get("seat_props", []))
+	# Our own seat just went bankrupt while the game carries on: record the
+	# loss now, in case this player leaves before the game ends.
+	for slot in GameState.local_slots():
+		if slot < players.size() and players[slot].is_bankrupt and GameState.player_types[slot] != GameState.PlayerType.DISABLED:
+			_record_result(-1)
 
 	turn_label.text = snap.get("turn_text", "")
 

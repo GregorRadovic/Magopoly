@@ -24,6 +24,9 @@ const DEFAULT_PORT: int = 27015
 # GameState.MAX_PLAYERS).
 const MAX_CLIENTS: int = 7
 const SLOT_COUNT: int = 8
+# Sent to a client whose reconnect token the host doesn't know -- i.e. the
+# game they're trying to get back into no longer exists.
+const NO_SUCH_GAME: String = "This game is already in progress."
 
 # What a lobby slot is currently set to. HOST is always slot 0. TAKEN means a
 # remote peer has claimed a slot that was OPEN. The host can freely retype
@@ -96,6 +99,11 @@ func host_game(port: int = DEFAULT_PORT) -> bool:
 
 
 func join_game(address: String, port: int = DEFAULT_PORT) -> bool:
+	# Heading back to the host of an unfinished game (even after the app was
+	# closed): present the same token, so the host hands back our old seat.
+	var session: Dictionary = Saves.load_session()
+	if not session.is_empty() and str(session["address"]) == address:
+		reconnect_token = str(session["token"])
 	_ensure_token()
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_client(address, port)
@@ -188,7 +196,7 @@ func _on_peer_disconnected(id: int) -> void:
 # hand them back into main.tscn; main.gd clears their inactive state.
 func _try_reconnect(id: int, client_name: String, token: String) -> void:
 	if token == "" or not token_slot.has(token):
-		_kick.rpc_id(id, "This game is already in progress.")
+		_kick.rpc_id(id, NO_SUCH_GAME)
 		return
 	var slot: int = token_slot[token]
 	var old_id: int = GameState.slot_peer[slot] if slot < GameState.slot_peer.size() else 0
@@ -254,6 +262,10 @@ func _on_server_disconnected() -> void:
 
 @rpc("authority", "reliable")
 func _kick(reason: String) -> void:
+	# The host has no seat for our token: that game is gone, so stop
+	# offering to rejoin it.
+	if reason == NO_SUCH_GAME:
+		Saves.clear_session()
 	kicked.emit(reason)
 	leave()
 
@@ -313,7 +325,34 @@ func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bo
 	_started_admin = admin_mode
 	_started_quick = quickstart
 	_started_blitz = blitzstart
+	# Client: remember how to get back in, even if the app is closed.
+	if not hosting:
+		Saves.save_session(last_join_address, reconnect_token)
 	get_tree().change_scene_to_file("res://scenes/main.tscn")
+
+
+# --- Resuming a saved online game --------------------------------------
+
+# Host, from the Start Menu's Continue: reopen the server for a saved game
+# and go straight to "in progress" -- no lobby. Every remote seat starts out
+# empty; its player reclaims it by connecting with the same reconnect token
+# (_register_client -> _try_reconnect), exactly like a mid-game reconnect.
+func resume_hosting(save: Dictionary) -> bool:
+	if not host_game():
+		return false
+	var cfg: Dictionary = save.get("config", {})
+	var types: Array = cfg.get("player_types", [])
+	token_slot = (save.get("online", {}) as Dictionary).get("token_slot", {}).duplicate()
+	_started_types = types.duplicate()
+	_started_admin = bool(cfg.get("admin", false))
+	_started_quick = bool(cfg.get("quick", false))
+	_started_blitz = bool(cfg.get("blitz", false))
+	game_started = true
+	var peers: Array[int] = [1, 0, 0, 0, 0, 0, 0, 0]
+	GameState.online = true
+	GameState.slot_peer = peers
+	GameState.local_peer_id = 1
+	return true
 
 
 # --- Helpers ----------------------------------------------------------

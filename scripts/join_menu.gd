@@ -25,6 +25,18 @@ func _ready() -> void:
 		address_edit.text = Net.last_join_address
 		status_label.text = "Reconnecting to a game in progress? Just press Join."
 
+	# Start Menu -> Rejoin Game: the game we were in before the app closed.
+	# Connect right away with the saved address (net.gd picks up the saved
+	# reconnect token for it).
+	if Saves.auto_rejoin:
+		Saves.auto_rejoin = false
+		var session: Dictionary = Saves.load_session()
+		if not session.is_empty():
+			address_edit.text = str(session["address"])
+			_on_join_pressed()
+			if join_button.disabled:
+				status_label.text = "Rejoining your game at %s…" % session["address"]
+
 
 func _on_join_pressed() -> void:
 	var addr: String = address_edit.text.strip_edges()
@@ -45,6 +57,8 @@ func _on_join_succeeded() -> void:
 
 func _on_join_failed(reason: String) -> void:
 	status_label.text = reason
+	if not Saves.load_session().is_empty():
+		status_label.text += " If you're rejoining, the host may not have resumed the game yet -- try again in a moment."
 	_set_busy(false)
 
 
