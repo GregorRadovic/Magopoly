@@ -551,7 +551,6 @@ func _ready() -> void:
 	trader1_money_edit.text_changed.connect(_on_trade_money_changed)
 	trader2_money_edit.text_changed.connect(_on_trade_money_changed)
 	card_picker.zoom_requested.connect(spell_card.show_card)
-	spell_card.reveal_pressed.connect(_on_zoom_reveal_pressed)
 	_seat_pause_option.resize(players.size())
 	_seat_pause_option.fill(PAUSE_MANUAL)
 	_pause_option = pause_settings_menu.pause_option
@@ -2221,7 +2220,7 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 	# window -> resolve one spell -> (maybe) another window -> ... until the
 	# stack is empty and there's nothing left to react to.
 	while true:
-		# _casting_spell also holds the window open: Reveal and
+		# _casting_spell also holds the window open: casting and
 		# Burn-for-Attunement are pickable straight off a spell card without
 		# pausing first, so without this the countdown could expire and the
 		# roll resolve while _begin_spell_cast is still suspended in its own
@@ -2543,7 +2542,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# Belt-and-suspenders: _prompt_slot is only ever meant to be set mid
 	# _begin_spell_cast (routing that caster's own level/target pickers).
 	# The rest of this turn -- move, landing, buy decision -- must prompt
-	# whoever's turn it is, so make sure a spell someone cast/revealed during
+	# whoever's turn it is, so make sure a spell someone cast during
 	# the response window can't leave it pointing elsewhere.
 	_prompt_slot = -1
 
@@ -3224,7 +3223,7 @@ func _start_trade(p1_index: int, p2_index: int) -> void:
 	trade_hseparator.visible = true
 	trade_display.visible = true
 
-	dice_label.text += "\n%s is trading with %s. Click properties or spells to offer them; houses can't be traded." % [PLAYER_NAMES[p1_index], PLAYER_NAMES[p2_index]]
+	dice_label.text += "\n%s is trading with %s. Click properties or your own spells to offer them; houses can't be traded." % [PLAYER_NAMES[p1_index], PLAYER_NAMES[p2_index]]
 	_update_trade_action_button()
 	_update_player_panels()
 	_refresh_action_buttons()
@@ -3286,8 +3285,14 @@ func _apply_trade_spell_click(hand_index: int, player_index: int) -> void:
 		return
 	var offered: Array[int] = _trade1_spells_offered if player_index == _trader1 else _trade2_spells_offered
 	if offered.has(hand_index):
+		# Taking a spell back out is always fine -- it's already been shown.
 		offered.erase(hand_index)
 	else:
+		# Only the owner can put a spell into the offer: picking from the
+		# other trader's hand would let you see their cards for free.
+		if player_index != _trade_proposer:
+			_toast("You can only offer your own spells -- %s has to offer theirs." % PLAYER_NAMES[player_index])
+			return
 		offered.append(hand_index)
 	_mark_trade_modified()
 	_update_player_panels()
@@ -3626,17 +3631,25 @@ func _hand_face_up(player_id: int) -> bool:
 
 
 # Whether one specific spell card shows face-up here: the owner's default
-# visibility, or an explicit reveal to one of this machine's seats.
+# visibility, or -- while it's offered in the current trade -- to either
+# trader's seat (so the other side can see what they'd be getting). Other
+# players watching the trade still see a cardback.
 func _spell_face_up(owner_id: int, hand_index: int) -> bool:
 	if _hand_face_up(owner_id):
 		return true
-	var owner: Node2D = players[owner_id]
-	if hand_index < 0 or hand_index >= owner.spell_revealed_to.size():
+	if not _trading or not _spell_offered_in_trade(owner_id, hand_index):
 		return false
-	var revealed: Array = owner.spell_revealed_to[hand_index]
 	for viewer in _local_viewer_ids():
-		if revealed.has(viewer):
+		if viewer == _trader1 or viewer == _trader2:
 			return true
+	return false
+
+
+func _spell_offered_in_trade(owner_id: int, hand_index: int) -> bool:
+	if owner_id == _trader1:
+		return _trade1_spells_offered.has(hand_index)
+	if owner_id == _trader2:
+		return _trade2_spells_offered.has(hand_index)
 	return false
 
 
@@ -3652,17 +3665,15 @@ func _local_viewer_ids() -> Array:
 	return out
 
 
-# --- spell_hand mutations (keep spell_revealed_to in lockstep) ----------
+# --- spell_hand mutations ---------------------------------------------
 
 func _spell_add(player: Node2D, spell_name: String) -> void:
 	player.spell_hand.append(spell_name)
-	player.spell_revealed_to.append([])
 
 
 func _spell_remove_at(player: Node2D, index: int) -> void:
-	player.spell_hand.remove_at(index)
-	if index >= 0 and index < player.spell_revealed_to.size():
-		player.spell_revealed_to.remove_at(index)
+	if index >= 0 and index < player.spell_hand.size():
+		player.spell_hand.remove_at(index)
 
 
 func _spell_remove_first(player: Node2D, spell_name: String) -> void:
@@ -3699,11 +3710,10 @@ func _bankrupt_player(player: Node2D, creditor: Node2D) -> void:
 			space.is_mortgaged = false
 
 	# Every spell still in the eliminated player's hand goes back to the deck
-	# (not to the creditor) -- revealed status is dropped with it.
+	# (not to the creditor).
 	for spell_name in player.spell_hand:
 		_return_spell_to_deck(spell_name)
 	player.spell_hand.clear()
-	player.spell_revealed_to.clear()
 
 	player.money = 0
 	player.owned_property_indices.clear()
@@ -4177,16 +4187,7 @@ func _on_spell_right_clicked(hand_index: int, player_index: int) -> void:
 		return
 	var spell_name: String = players[player_index].spell_hand[hand_index]
 	var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
-	# A "Reveal / Hide…" button rides on the zoom for one of your own cards
-	# (online: your local seat; hotseat: any human's, where it's a harmless
-	# no-op since every human hand is already visible) -- not mid-trade or
-	# mid-tutorial, which have their own spell-card semantics.
-	var can_reveal: bool = GameState.is_slot_local(player_index) and not players[player_index].is_ai \
-		and not _trading and not _tutorial_active
-	if can_reveal:
-		spell_card.show_card(load(spell_info.get("icon", "")), player_index, hand_index)
-	else:
-		spell_card.show_card(load(spell_info.get("icon", "")))
+	spell_card.show_card(load(spell_info.get("icon", "")))
 	if _tutorial_active:
 		var want: String = _tutorial_right_click_spell()
 		if want != "" and _tutorial_hand_spell_is(player_index, hand_index, want):
@@ -4306,83 +4307,6 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 
 	if post_cast.is_valid():
 		await post_cast.call()
-
-
-# True while a _reveal_spell() picker loop is running for the local player, so
-# a second right-click / button press can't stack another one on top.
-var _reveal_in_progress: bool = false
-
-
-# The "Reveal / Hide…" button on the zoomed-in card was pressed. Runs the
-# reveal picker for `owner_id`'s card `hand_index` -- locally on the host / in
-# a hotseat game, or forwarded to the host by a client.
-func _on_zoom_reveal_pressed(owner_id: int, hand_index: int) -> void:
-	if owner_id < 0 or owner_id >= players.size():
-		return
-	if not GameState.is_slot_local(owner_id) or players[owner_id].is_ai:
-		return
-	if _reveal_in_progress or _casting_spell or _trading:
-		return
-	if GameState.online and not GameState.is_authority():
-		_net_reveal_intent.rpc_id(1, hand_index, owner_id)
-		return
-	await _run_reveal(owner_id, hand_index)
-
-
-# A remote player pressed the reveal button on one of their own cards.
-@rpc("any_peer", "call_remote", "reliable")
-func _net_reveal_intent(hand_index: int, slot: int) -> void:
-	if not GameState.is_authority():
-		return
-	if _peer_for_slot(slot) != multiplayer.get_remote_sender_id():
-		return
-	if _reveal_in_progress or _casting_spell or _trading:
-		return
-	await _run_reveal(slot, hand_index)
-
-
-func _run_reveal(owner_id: int, hand_index: int) -> void:
-	_reveal_in_progress = true
-	_prompt_slot = owner_id
-	await _reveal_spell(players[owner_id], hand_index)
-	_prompt_slot = -1
-	_reveal_in_progress = false
-
-
-# Reveal / hide a spell in `owner`'s hand, one player at a time. A player the
-# card is already revealed to is shown with "(hide)" -- picking them un-reveals
-# it. Loops until the owner cancels, so several can be toggled in one go. The
-# card stays revealed only as long as it's in this hand. The public game log
-# never names the spell (that would defeat a selective reveal).
-func _reveal_spell(owner: Node2D, hand_index: int) -> void:
-	if hand_index < 0 or hand_index >= owner.spell_hand.size():
-		return
-	var spell_name: String = owner.spell_hand[hand_index]
-	while true:
-		if hand_index >= owner.spell_revealed_to.size():
-			return
-		var revealed: Array = owner.spell_revealed_to[hand_index]
-		var entries: Array = []
-		for i in players.size():
-			if i == owner.player_id or players[i].is_bankrupt or players[i].is_ai:
-				continue
-			var suffix: String = " (hide)" if revealed.has(i) else ""
-			entries.append({"index": i, "name": PLAYER_NAMES[i] + suffix, "color": PLAYER_COLORS[i]})
-		if entries.is_empty():
-			_toast("There's no one to reveal it to.")
-			return
-		_pp_open("%s: reveal to / hide from a player (Cancel when done)." % spell_name, entries)
-		var target: int = await _pp_result()
-		if target < 0 or hand_index >= owner.spell_revealed_to.size():
-			return
-		revealed = owner.spell_revealed_to[hand_index]
-		if revealed.has(target):
-			revealed.erase(target)
-			_log("%s hid a spell from %s." % [PLAYER_NAMES[owner.player_id], PLAYER_NAMES[target]])
-		else:
-			revealed.append(target)
-			_log("%s revealed a spell to %s." % [PLAYER_NAMES[owner.player_id], PLAYER_NAMES[target]])
-		_update_player_panels()
 
 
 # Discards a spell without its effect in exchange for +1 Temporary
@@ -6292,7 +6216,6 @@ func _build_snapshot() -> Dictionary:
 			"visible": p.visible,
 			"owned": p.owned_property_indices.duplicate(),
 			"hand": p.spell_hand.duplicate(),
-			"revealed": p.spell_revealed_to.duplicate(true),
 			"attunement": p.temp_attunement.duplicate(),
 		})
 	var space_states: Array = []
@@ -6393,7 +6316,6 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		p.visible = ps.get("visible", true)
 		p.owned_property_indices = _net_int_array(ps.get("owned", []))
 		p.spell_hand = _net_string_array(ps.get("hand", []))
-		p.spell_revealed_to = _net_revealed(ps.get("revealed", []))
 		p.temp_attunement = (ps.get("attunement", {}) as Dictionary).duplicate()
 		p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
 
@@ -6489,14 +6411,6 @@ func _net_string_array(a) -> Array[String]:
 	var out: Array[String] = []
 	for v in a:
 		out.append(str(v))
-	return out
-
-
-# spell_revealed_to: an untyped Array of Array[int] (one per card in hand).
-func _net_revealed(a) -> Array:
-	var out: Array = []
-	for entry in a:
-		out.append(_net_int_array(entry))
 	return out
 
 
