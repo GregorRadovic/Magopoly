@@ -1586,14 +1586,6 @@ func _run_ai_turn_body() -> void:
 			return
 		_refresh_action_buttons()
 		await get_tree().create_timer(0.6).timeout
-		# A spell sent the AI to Jail before it rolled (e.g. in response to
-		# its opening cast) -- that ends its turn, same as for a human.
-		if _awaiting_end_turn:
-			await _ai_run_end_of_turn_checks(players[ai_index])
-			if current_player != ai_index or players[ai_index].is_bankrupt:
-				return
-			_end_turn()
-			return
 		var die1: int = randi_range(1, 6)
 		var die2: int = randi_range(1, 6)
 		await _perform_roll(die1, die2)
@@ -6261,10 +6253,11 @@ func _release_from_jail(player: Node2D) -> void:
 
 # A spell sending `player` to jail (Bribe the Guards L2, Cramped Cell,
 # Knockout Punch). Someone already in jail stays put -- their sentence isn't
-# restarted, and nothing else happens. Jailing whoever's turn it is ends
-# their turn like landing on Go To Jail would: mid-roll, the roll is
-# cancelled (see _roll_cancelled in _perform_roll()); otherwise they're left
-# on End Turn rather than getting to roll (or roll again for doubles).
+# restarted, and nothing else happens. Going to jail never ends anyone's
+# turn: jailing whoever's roll is in flight only cancels that roll (see
+# _roll_cancelled in _perform_roll()), and they carry on with the rest of
+# their turn from Jail. Jailed before rolling, they still roll -- as a jail
+# roll.
 func _spell_send_to_jail(player: Node2D, source: String) -> void:
 	if player.is_bankrupt:
 		return
@@ -6272,12 +6265,9 @@ func _spell_send_to_jail(player: Node2D, source: String) -> void:
 		_log("%s is already in Jail, so %s doesn't move them." % [PLAYER_NAMES[player.player_id], source])
 		return
 	_send_to_jail(player)
-	if player.player_id == current_player:
-		if _roll_in_flight:
-			_roll_cancelled = true
-			_log("%s's roll is cancelled." % PLAYER_NAMES[player.player_id])
-		else:
-			_awaiting_end_turn = true
+	if player.player_id == current_player and _roll_in_flight:
+		_roll_cancelled = true
+		_log("%s's roll is cancelled." % PLAYER_NAMES[player.player_id])
 	_update_player_panels()
 
 

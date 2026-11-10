@@ -60,8 +60,8 @@ const LIST: Array[Dictionary] = [
 			"T3 Escape Spell": 3,
 		},
 	},
-	# The two halves of the "AB" card set. Each doubles one card that feeds
-	# its theme and one that pays it off.
+	# The two halves of the "AB" card set: one copy of each of its 8 cards,
+	# plus an extra Manastone and The Cult of Terminus from the base deck.
 	{
 		"id": "free_parking",
 		"name": "Expansion A: Free Parking",
@@ -69,13 +69,15 @@ const LIST: Array[Dictionary] = [
 		"description": "Spells that pay into, take from, and play around the Free Parking pot.",
 		"cards": {
 			"Misplaced Payment": 1,
-			"Steal From the Future": 2,
-			"Gemstone Mine": 2,
+			"Steal From the Future": 1,
+			"Gemstone Mine": 1,
 			"Market Manipulation": 1,
 			"Rocket Boost": 1,
 			"King's Escape Tunnel": 1,
 			"Unclaimed Wilderness": 1,
 			"Spiteful Destruction": 1,
+			"Manastone": 1,
+			"The Cult of Terminus": 1,
 		},
 	},
 	{
@@ -86,12 +88,14 @@ const LIST: Array[Dictionary] = [
 		"cards": {
 			"Bribe the Guards": 1,
 			"Cramped Cell": 1,
-			"Penance": 2,
+			"Penance": 1,
 			"Deny Rights": 1,
 			"Bomb Shelter": 1,
 			"Escape Into Custody": 1,
-			"Knockout Punch": 2,
+			"Knockout Punch": 1,
 			"Siren's Song": 1,
+			"Manastone": 1,
+			"The Cult of Terminus": 1,
 		},
 	},
 ]
