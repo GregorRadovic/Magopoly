@@ -28,13 +28,15 @@ func _ready() -> void:
 		var locked: bool = not Saves.is_expansion_unlocked(e["id"])
 		var note: String = "%d cards" % Expansions.card_total(e["cards"])
 		note += "  ·  Unlocks at level %d" % e["unlock_level"] if locked else "  ·  Unlocked"
-		total += _add_section(e["name"], note, e["cards"], locked)
+		total += _add_section(e["name"], note, e["cards"], locked, e.get("tokens", {}))
 	count_label.text = "%d cards  ·  Right-click a card to zoom in" % total
 
 
-# A heading plus a grid of the set's cards (one per distinct spell). Returns
-# how many distinct cards it showed.
-func _add_section(title: String, note: String, cards: Dictionary, locked: bool) -> int:
+# A heading plus a grid of the set's cards (one per distinct spell), then any
+# tokens it creates. In an expansion, a card from the base deck is captioned
+# as an extra copy. Returns how many new distinct cards it showed.
+func _add_section(title: String, note: String, cards: Dictionary, locked: bool, tokens: Dictionary = {}) -> int:
+	var is_expansion: bool = cards != Expansions.BASE_CARDS
 	var heading := HBoxContainer.new()
 	heading.add_theme_constant_override("separation", 20)
 	var title_label := Label.new()
@@ -59,6 +61,7 @@ func _add_section(title: String, note: String, cards: Dictionary, locked: bool) 
 	sections.add_child(grid)
 
 	var shown: int = 0
+	var distinct: int = 0
 	for spell_name in cards:
 		var icon_path: String = str(SpellData.SPELLS.get(spell_name, {}).get("icon", ""))
 		if icon_path == "" or not ResourceLoader.exists(icon_path):
@@ -75,15 +78,42 @@ func _add_section(title: String, note: String, cards: Dictionary, locked: bool) 
 		mini.setup(shown, icon)
 		mini.card_right_clicked.connect(func(_i: int) -> void: spell_card.show_card(icon))
 		var copies: int = int(cards[spell_name])
-		if copies > 1:
-			var caption := Label.new()
-			caption.text = "×%d" % copies
-			caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			caption.add_theme_font_size_override("font_size", 20)
-			caption.add_theme_color_override("font_color", MUTED)
-			box.add_child(caption)
+		var caption_text: String = "×%d" % copies if copies > 1 else ""
+		var is_base_extra: bool = is_expansion and Expansions.BASE_CARDS.has(spell_name)
+		if is_base_extra:
+			caption_text = "+%d extra base card" % copies if copies == 1 else "+%d extra base cards" % copies
+		if caption_text != "":
+			box.add_child(_caption(caption_text))
 		shown += 1
-	return shown
+		# The header's total counts distinct cards, so an extra copy of a base
+		# card isn't counted again.
+		if not is_base_extra:
+			distinct += 1
+	for token_name in tokens:
+		var token_path: String = str(tokens[token_name])
+		if not ResourceLoader.exists(token_path):
+			continue
+		var token_icon: Texture2D = load(token_path)
+		var token_box := VBoxContainer.new()
+		token_box.add_theme_constant_override("separation", 4)
+		grid.add_child(token_box)
+		var token_mini: Control = MINI_CARD_SCENE.instantiate()
+		token_mini.custom_minimum_size = CARD_SIZE
+		token_mini.tooltip_text = "%s (token)" % token_name
+		token_box.add_child(token_mini)
+		token_mini.setup(shown, token_icon)
+		token_mini.card_right_clicked.connect(func(_i: int) -> void: spell_card.show_card(token_icon))
+		token_box.add_child(_caption("Token -- not in the deck"))
+	return distinct
+
+
+func _caption(text: String) -> Label:
+	var caption := Label.new()
+	caption.text = text
+	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	caption.add_theme_font_size_override("font_size", 20)
+	caption.add_theme_color_override("font_color", MUTED)
+	return caption
 
 
 func _separator() -> Control:
