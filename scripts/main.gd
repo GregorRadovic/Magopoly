@@ -356,13 +356,62 @@ func _update_wizard_vision() -> void:
 	var roller: Node2D = players[current_player]
 	# Where the roll will really end up, after any Ensnaring Roots / Stabilized
 	# Portal on the way (predicted only -- nothing is used up here).
-	var landing_index: int = (roller.current_space + _apply_pre_move_landmarks(roller, _current_roll, true)) % board.TOTAL_SPACES
+	var steps: int = _apply_pre_move_landmarks(roller, _current_roll, true)
+	var landing_index: int = (roller.current_space + steps) % board.TOTAL_SPACES
 	var col: Color = PLAYER_COLORS[current_player]
-	wizard_vision_line.show_line(roller.position, board.get_space_center(landing_index), col)
+	if steps > 0:
+		wizard_vision_line.show_path(_wizard_vision_path(roller, steps), col)
+	else:
+		wizard_vision_line.hide_line()
 	if landing_index != _wv_landing_index:
 		_clear_wv_landing_highlight()
 		board.spaces[landing_index].set_landing_highlight(true, col)
 		_wv_landing_index = landing_index
+
+
+# How far each extra lap of a Wizard Vision route is pulled in toward the
+# board's centre, so a route that goes all the way round never overlaps itself.
+const WV_LAP_OFFSET: float = 14.0
+
+
+# The route a token takes moving `steps` spaces forward from where it is: its
+# own spot on each tile (the tile centre plus that player's marker offset),
+# with a point at every corner it turns and at its landing tile. Laps after
+# the first are inset by WV_LAP_OFFSET each.
+func _wizard_vision_path(player: Node2D, steps: int) -> PackedVector2Array:
+	var start: int = player.current_space
+	var marker: Vector2 = MARKER_OFFSETS[player.player_id]
+	var route := PackedVector2Array([player.position])
+	for s in range(1, steps + 1):
+		var index: int = (start + s) % board.TOTAL_SPACES
+		var lap: int = (s - 1) / board.TOTAL_SPACES
+		var spot: Vector2 = board.get_space_center(index) + marker
+		if index % 10 == 0 or s == steps or s % board.TOTAL_SPACES == 0:
+			route.append(spot + _wv_inward(index) * WV_LAP_OFFSET * lap)
+		# Back where it started with more to go: step straight inward to the
+		# next lap's lane before carrying on.
+		if s % board.TOTAL_SPACES == 0 and s < steps:
+			route.append(spot + _wv_inward(index) * WV_LAP_OFFSET * (lap + 1))
+	return route
+
+
+# Unit-ish vector pointing into the board from tile `index`: perpendicular to
+# its side, or the sum of both sides' vectors on a corner.
+func _wv_inward(index: int) -> Vector2:
+	var side_in: Array[Vector2] = []
+	var middle: Vector2 = (board.get_space_center(0) + board.get_space_center(20)) * 0.5
+	for k in 4:
+		var a: Vector2 = board.get_space_center(k * 10)
+		var b: Vector2 = board.get_space_center(((k + 1) * 10) % board.TOTAL_SPACES)
+		var along: Vector2 = (b - a).normalized()
+		var perp: Vector2 = Vector2(-along.y, along.x)
+		if perp.dot(middle - (a + b) * 0.5) < 0.0:
+			perp = -perp
+		side_in.append(perp)
+	var side: int = index / 10
+	if index % 10 == 0:
+		return side_in[side % 4] + side_in[(side + 3) % 4]
+	return side_in[side]
 
 
 func _clear_wv_landing_highlight() -> void:
