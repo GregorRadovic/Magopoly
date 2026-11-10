@@ -701,7 +701,8 @@ const SPELLS: Dictionary = {
 	},
 
 	# --- Expansion: Landmarks (D) --------------------------------------------
-	# "kind": "landmark" -- placed on a property space when it resolves and
+	# "kind": "landmark" -- always Slow (turn timing only). Placed on a
+	# property space when it resolves and
 	# stays there (out of the deck) until discarded. Buried Treasure, which
 	# Treasure Map creates, is a token rather than a card -- see main.gd.
 	"Landmine": {
@@ -709,8 +710,8 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 1 1 Landmine.png",
 		"kind": "landmark",
 		"levels": {
-			1: {"description": "When an opponent lands on this property, discard this card and they pay you $200.", "amount": 200, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "When an opponent lands on this property, discard this card and they pay you $400.", "amount": 400, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "When an opponent lands on this property, discard this card and they pay you $200.", "amount": 200},
+			2: {"description": "When an opponent lands on this property, discard this card and they pay you $400.", "amount": 400},
 		},
 	},
 	"Power Sink": {
@@ -718,9 +719,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 2 1 Power Sink.png",
 		"kind": "landmark",
 		"levels": {
-			1: {"description": "If this property is owned by an opponent, it provides no Attunement for them. You have +1 Attunement to this property's color. When an opponent lands on this property, discard this card.", "amount": 1, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "If this property is owned by an opponent, it provides no Attunement for them. You have +2 Attunement to this property's color. When an opponent lands on this property, discard this card.", "amount": 2, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "If this property is owned by an opponent, it provides no Attunement for them. You have +3 Attunement to this property's color. When an opponent lands on this property, discard this card.", "amount": 3, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "If this property is owned by an opponent, it provides no Attunement for them. You have +1 Attunement to this property's color. When an opponent lands on this property, discard this card.", "amount": 1},
+			2: {"description": "If this property is owned by an opponent, it provides no Attunement for them. You have +2 Attunement to this property's color. When an opponent lands on this property, discard this card.", "amount": 2},
+			3: {"description": "If this property is owned by an opponent, it provides no Attunement for them. You have +3 Attunement to this property's color. When an opponent lands on this property, discard this card.", "amount": 3},
 		},
 	},
 	"Outland Settlements": {
@@ -728,9 +729,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 3 1 Outland Settlements.png",
 		"kind": "landmark",
 		"levels": {
-			1: {"description": "You may buy a house on this property regardless of housing rules. When you do, move this landmark to the property you own with the fewest houses. Triggers 3 times.", "triggers": 3, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "You may buy a house on this property regardless of housing rules. When you do, move this landmark to the property you own with the fewest houses. Triggers 6 times.", "triggers": 6, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "You may buy a house on this property regardless of housing rules. When you do, move this landmark to the property you own with the fewest houses. Triggers 10 times.", "triggers": 10, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "You may buy a house on this property regardless of housing rules. When you do, move this landmark to the property you own with the fewest houses. Triggers 3 times.", "triggers": 3},
+			2: {"description": "You may buy a house on this property regardless of housing rules. When you do, move this landmark to the property you own with the fewest houses. Triggers 6 times.", "triggers": 6},
+			3: {"description": "You may buy a house on this property regardless of housing rules. When you do, move this landmark to the property you own with the fewest houses. Triggers 10 times.", "triggers": 10},
 		},
 	},
 	"Treasure Map": {
@@ -747,9 +748,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 5 1 Contested Battlefield.png",
 		"kind": "landmark",
 		"levels": {
-			1: {"description": "Play this on a property without houses owned by an opponent. When played, gain that property. When this card is discarded, return it to its original owner. Discard this card after opponents land on this property 1 time.", "triggers": 1, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "Play this on a property without houses owned by an opponent. When played, gain that property. When this card is discarded, return it to its original owner. Discard this card after opponents land on this property 2 times.", "triggers": 2, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "Play this on a property without houses owned by an opponent. When played, gain that property. When this card is discarded, return it to its original owner. Discard this card after opponents land on this property 3 times.", "triggers": 3, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "Play this on a property without houses owned by an opponent. When played, gain that property. When this card is discarded, return it to its original owner. Discard this card after opponents land on this property 1 time.", "triggers": 1},
+			2: {"description": "Play this on a property without houses owned by an opponent. When played, gain that property. When this card is discarded, return it to its original owner. Discard this card after opponents land on this property 2 times.", "triggers": 2},
+			3: {"description": "Play this on a property without houses owned by an opponent. When played, gain that property. When this card is discarded, return it to its original owner. Discard this card after opponents land on this property 3 times.", "triggers": 3},
 		},
 	},
 	"Toll Road": {
@@ -757,9 +758,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 6 1 Toll Road.png",
 		"kind": "landmark",
 		"levels": {
-			1: {"description": "When an opponent passes this space, they pay you $20. Triggers 10 times.", "amount": 20, "triggers": 10, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "When an opponent passes this space, they pay you $20. Triggers 20 times.", "amount": 20, "triggers": 20, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "When an opponent passes this space, they pay you $20. Triggers 30 times.", "amount": 20, "triggers": 30, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "When an opponent passes this space, they pay you $20. Triggers 10 times.", "amount": 20, "triggers": 10},
+			2: {"description": "When an opponent passes this space, they pay you $20. Triggers 20 times.", "amount": 20, "triggers": 20},
+			3: {"description": "When an opponent passes this space, they pay you $20. Triggers 30 times.", "amount": 20, "triggers": 30},
 		},
 	},
 	"Ensnaring Roots": {
@@ -767,9 +768,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 7 1 Ensnaring Roots.png",
 		"kind": "landmark",
 		"levels": {
-			1: {"description": "When an opponent passes this space, discard this card and subtract 2 from their roll.", "roll_penalty": 2, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "When an opponent passes this space, discard this card and subtract 4 from their roll.", "roll_penalty": 4, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "When an opponent passes this space, discard this card and subtract 6 from their roll.", "roll_penalty": 6, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "When an opponent passes this space, discard this card and subtract 2 from their roll.", "roll_penalty": 2},
+			2: {"description": "When an opponent passes this space, discard this card and subtract 4 from their roll.", "roll_penalty": 4},
+			3: {"description": "When an opponent passes this space, discard this card and subtract 6 from their roll.", "roll_penalty": 6},
 		},
 	},
 	"Stabilized Portal": {
@@ -777,8 +778,8 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 8 1 Stabilized Portal.png",
 		"kind": "landmark",
 		"levels": {
-			1: {"description": "When played, name a property. When an opponent would land on this property, increase their roll so that they land on the named property instead. Triggers once.", "triggers": 1, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "When played, name a property. When an opponent would land on this property, increase their roll so that they land on the named property instead. Triggers three times.", "triggers": 3, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "When played, name a property. When an opponent would land on this property, increase their roll so that they land on the named property instead. Triggers once.", "triggers": 1},
+			2: {"description": "When played, name a property. When an opponent would land on this property, increase their roll so that they land on the named property instead. Triggers three times.", "triggers": 3},
 		},
 	},
 }

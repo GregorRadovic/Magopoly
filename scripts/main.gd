@@ -354,7 +354,9 @@ func _update_wizard_vision() -> void:
 		_clear_wv_landing_highlight()
 		return
 	var roller: Node2D = players[current_player]
-	var landing_index: int = (roller.current_space + _current_roll) % board.TOTAL_SPACES
+	# Where the roll will really end up, after any Ensnaring Roots / Stabilized
+	# Portal on the way (predicted only -- nothing is used up here).
+	var landing_index: int = (roller.current_space + _apply_pre_move_landmarks(roller, _current_roll, true)) % board.TOTAL_SPACES
 	var col: Color = PLAYER_COLORS[current_player]
 	wizard_vision_line.show_line(roller.position, board.get_space_center(landing_index), col)
 	if landing_index != _wv_landing_index:
@@ -7205,15 +7207,17 @@ func _landmark_label(lm: Dictionary) -> String:
 # which may then stop short of the next), then Stabilized Portals (each
 # redirects the landing forward to its named property; a chain is followed,
 # but no portal fires twice in one move). Returns the adjusted roll.
-func _apply_pre_move_landmarks(player: Node2D, roll: int) -> int:
+# `simulate`: just predict it (Wizard Vision) -- no logging, nothing used up.
+func _apply_pre_move_landmarks(player: Node2D, roll: int, simulate: bool = false) -> int:
 	if _landmarks.is_empty() or roll <= 0:
 		return roll
 	var start: int = player.current_space
+	var sprung: Array[int] = []
 	for _guard in 40:
 		var hit: Dictionary = {}
 		var hit_dist: int = 1 << 30
 		for lm in _landmarks:
-			if lm["spell"] != "Ensnaring Roots" or int(lm["owner"]) == player.player_id:
+			if lm["spell"] != "Ensnaring Roots" or int(lm["owner"]) == player.player_id or sprung.has(int(lm["id"])):
 				continue
 			var d: int = posmod(int(lm["space"]) - start, board.TOTAL_SPACES)
 			if d == 0:
@@ -7225,6 +7229,11 @@ func _apply_pre_move_landmarks(player: Node2D, roll: int) -> int:
 			break
 		var penalty: int = int(_lvl("Ensnaring Roots", int(hit["level"]), "roll_penalty", 0))
 		roll = maxi(0, roll - penalty)
+		sprung.append(int(hit["id"]))
+		if simulate:
+			if roll <= 0:
+				return roll
+			continue
 		_log("%s's Ensnaring Roots on %s catch %s: their roll is reduced by %d (now %d)." % [PLAYER_NAMES[int(hit["owner"])], _property_name(int(hit["space"])), PLAYER_NAMES[player.player_id], penalty, roll])
 		_remove_landmark(hit, "it was triggered")
 		if roll <= 0:
@@ -7243,6 +7252,8 @@ func _apply_pre_move_landmarks(player: Node2D, roll: int) -> int:
 		var destination: int = int(portal["data"].get("destination", landing))
 		var extra: int = posmod(destination - landing, board.TOTAL_SPACES)
 		roll += extra
+		if simulate:
+			continue
 		_log("%s's Stabilized Portal on %s sends %s on to %s (roll +%d, now %d)." % [PLAYER_NAMES[int(portal["owner"])], _property_name(landing), PLAYER_NAMES[player.player_id], _property_name(destination), extra, roll])
 		portal["triggers"] = int(portal["triggers"]) - 1
 		if int(portal["triggers"]) <= 0:
