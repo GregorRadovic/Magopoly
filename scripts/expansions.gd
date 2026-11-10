@@ -60,6 +60,40 @@ const LIST: Array[Dictionary] = [
 			"T3 Escape Spell": 3,
 		},
 	},
+	# The two halves of the "AB" card set. Each doubles one card that feeds
+	# its theme and one that pays it off.
+	{
+		"id": "free_parking",
+		"name": "Expansion A: Free Parking",
+		"unlock_level": 2,
+		"description": "Spells that pay into, take from, and play around the Free Parking pot.",
+		"cards": {
+			"Misplaced Payment": 1,
+			"Steal From the Future": 2,
+			"Gemstone Mine": 2,
+			"Market Manipulation": 1,
+			"Rocket Boost": 1,
+			"King's Escape Tunnel": 1,
+			"Unclaimed Wilderness": 1,
+			"Spiteful Destruction": 1,
+		},
+	},
+	{
+		"id": "jail",
+		"name": "Expansion B: Jail",
+		"unlock_level": 3,
+		"description": "Spells that send players to Jail, free them, and punish them while they're inside.",
+		"cards": {
+			"Bribe the Guards": 1,
+			"Cramped Cell": 1,
+			"Penance": 2,
+			"Deny Rights": 1,
+			"Bomb Shelter": 1,
+			"Escape Into Custody": 1,
+			"Knockout Punch": 2,
+			"Siren's Song": 1,
+		},
+	},
 ]
 
 

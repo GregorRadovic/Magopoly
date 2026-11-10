@@ -57,6 +57,23 @@ var haggling_discount_percent: int = 0
 # Haggling, Level 3: the purchase is already free (100% discount); on top of
 # that, the bank also pays out the property/house's full undiscounted price.
 var haggling_bank_bonus: bool = false
+# Misplaced Payment: the next payment this player would make to an opponent
+# this turn goes to Free Parking instead, scaled to this percent of the
+# amount (100 = all of it, 50 = half); 0 = no redirect active. Consumed the
+# moment it's used.
+var misplaced_payment_percent: int = 0
+# Siren's Song: this player's next roll this turn is increased until it
+# lands on the opponent's property with the highest rent. Consumed by that
+# roll.
+var siren_song_active: bool = false
+
+# Cramped Cell -- NOT a "this turn" buff: lasts for as long as this player
+# stays in jail. One entry per resolved cast: {"creditor": player id,
+# "amount": int}, charged at the start of each of this player's turns while
+# in_jail, and cleared whenever they leave jail (see main.gd's
+# _release_from_jail() / _send_to_jail()).
+var cramped_cell_debts: Array = []
+
 # Spell name -> number of copies to pull back out of the shared deck and
 # into this player's hand at the end of the turn they were cast on (Sanity
 # Grinding, Step Forward). See _queue_spell_return_to_hand() in main.gd.

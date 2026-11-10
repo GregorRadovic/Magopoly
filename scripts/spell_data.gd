@@ -380,4 +380,165 @@ const SPELLS: Dictionary = {
 			4: {"description": "If you own all 4 railroads, gain Terminus.", "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
+
+	# --- Expansion A: Free Parking ---------------------------------------
+	# "Slow" on a card's type line = turn timing only (the default when
+	# "timings" is omitted); every other card is Instant-speed unless it
+	# modifies a roll.
+	"Misplaced Payment": {
+		"color": "brown",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 1 Misplaced Payment.png",
+		"levels": {
+			1: {"description": "The next time you would pay an opponent this turn: pay that money to Free Parking instead.", "percent": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "The next time you would pay an opponent this turn: pay half that money to Free Parking instead.", "percent": 50, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	"Steal From the Future": {
+		"color": "sky_blue",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 2 Steal From the Future.png",
+		"levels": {
+			1: {"description": "Take $100 from Free Parking.", "amount": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "Take $200 from Free Parking.", "amount": 200, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "Take $300 from Free Parking.", "amount": 300, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	"Gemstone Mine": {
+		"color": "pink",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 3 Gemstone Mine.png",
+		"levels": {
+			1: {"description": "Gain $100 and add $100 to Free Parking.", "amount": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "Gain $200 and add $200 to Free Parking.", "amount": 200, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "Gain $300 and add $300 to Free Parking.", "amount": 300, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	# Slow. "Value" = the property's printed price.
+	"Market Manipulation": {
+		"color": "orange",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 4 Market Manipulation.png",
+		"levels": {
+			1: {"description": "Take a property without houses from an opponent. Play this only if Free Parking holds at least 3 times the value of that property.", "multiple": 3},
+			2: {"description": "Take a property without houses from an opponent. Play this only if Free Parking holds at least 2 times the value of that property.", "multiple": 2},
+			3: {"description": "Take a property without houses from an opponent. Play this only if Free Parking holds at least the value of that property.", "multiple": 1},
+		},
+	},
+	"Rocket Boost": {
+		"color": "red",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 5 Rocket Boost.png",
+		"levels": {
+			1: {"description": "As an additional cost, pay $100 to Free Parking. Increase your roll by 4.", "roll_bonus": 4, "extra_cost": 100, "timings": ["roll_response"], "requires_current_player": true},
+			2: {"description": "As an additional cost, pay $100 to Free Parking. Increase your roll by 5.", "roll_bonus": 5, "extra_cost": 100, "timings": ["roll_response"], "requires_current_player": true},
+			3: {"description": "As an additional cost, pay $100 to Free Parking. Increase your roll by 6.", "roll_bonus": 6, "extra_cost": 100, "timings": ["roll_response"], "requires_current_player": true},
+		},
+	},
+	# The level gates which kind of space the roll must currently be heading
+	# for -- see _kings_escape_tunnel_condition_met() in main.gd.
+	"King's Escape Tunnel": {
+		"color": "yellow",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 6 Kings Escape Tunnel.png",
+		"levels": {
+			1: {"description": "Increase your roll until you land on Free Parking. Play this only if you would land on an unowned property.", "timings": ["roll_response"], "requires_current_player": true},
+			2: {"description": "Increase your roll until you land on Free Parking. Play this only if you would land on a property you own.", "timings": ["roll_response"], "requires_current_player": true},
+			3: {"description": "Increase your roll until you land on Free Parking. Play this only if you would land on a property owned by an opponent.", "timings": ["roll_response"], "requires_current_player": true},
+		},
+	},
+	# "Before Roll" on the type line: your own turn, before rolling.
+	"Unclaimed Wilderness": {
+		"color": "green",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 7 Unclaimed Wilderness.png",
+		"levels": {
+			1: {"description": "Reveal 1 random unowned property. You may buy it; the money goes to Free Parking.", "count": 1, "requires_current_player": true, "requires_not_yet_rolled": true},
+			2: {"description": "Reveal 2 random unowned properties. You may buy any of them; the money goes to Free Parking.", "count": 2, "requires_current_player": true, "requires_not_yet_rolled": true},
+			3: {"description": "Reveal 3 random unowned properties. You may buy any of them; the money goes to Free Parking.", "count": 3, "requires_current_player": true, "requires_not_yet_rolled": true},
+		},
+	},
+	"Spiteful Destruction": {
+		"color": "ocean_blue",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 8 Spiteful Destruction.png",
+		"levels": {
+			1: {"description": "As an additional cost, pay $100 to Free Parking. An opponent pays $300 to Free Parking.", "amount": 300, "extra_cost": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "As an additional cost, pay $100 to Free Parking. An opponent pays $500 to Free Parking.", "amount": 500, "extra_cost": 100, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+
+	# --- Expansion B: Jail -------------------------------------------------
+	"Bribe the Guards": {
+		"color": "brown",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 1 Bribe the Guards.png",
+		"levels": {
+			1: {"description": "Remove a player from jail.", "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "Send a player to jail. If this happens in the middle of their roll, cancel the roll.", "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	# Slow. The payment is charged at the start of each of the jailed
+	# player's own turns -- see _charge_cramped_cell() in main.gd.
+	"Cramped Cell": {
+		"color": "sky_blue",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 2 Cramped Cell.png",
+		"levels": {
+			1: {"description": "Send an opponent to jail. For as long as they are in jail, at the start of each of their turns, they pay you $30.", "amount": 30},
+			2: {"description": "Send an opponent to jail. For as long as they are in jail, at the start of each of their turns, they pay you $60.", "amount": 60},
+			3: {"description": "Send an opponent to jail. For as long as they are in jail, at the start of each of their turns, they pay you $100.", "amount": 100},
+		},
+	},
+	"Penance": {
+		"color": "pink",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 3 Penance.png",
+		"levels": {
+			1: {"description": "All opponents in jail pay you $100.", "amount": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "All opponents in jail pay you $200.", "amount": 200, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "All opponents in jail pay you $300.", "amount": 300, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	# "free_cast": castable at any level regardless of Attunement when the
+	# condition on the card holds -- see _spell_free_cast_allowed() in main.gd.
+	"Deny Rights": {
+		"color": "orange",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 4 Deny Rights.png",
+		"free_cast": true,
+		"levels": {
+			1: {"description": "Counter a spell being cast at Level 1. Free if it targets a spell cast by a player in jail.", "timings": ["spell_response"]},
+			2: {"description": "Counter a spell being cast at Level 2. Free if it targets a spell cast by a player in jail.", "timings": ["spell_response"]},
+			3: {"description": "Counter a spell being cast at Level 3. Free if it targets a spell cast by a player in jail.", "timings": ["spell_response"]},
+		},
+	},
+	# Slow.
+	"Bomb Shelter": {
+		"color": "red",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 5 Bomb Shelter.png",
+		"levels": {
+			1: {"description": "All players not currently in jail (including you) pay $100 to Free Parking.", "amount": 100},
+			2: {"description": "All players not currently in jail (including you) pay $200 to Free Parking.", "amount": 200},
+			3: {"description": "All players not currently in jail (including you) pay $300 to Free Parking.", "amount": 300},
+		},
+	},
+	"Escape Into Custody": {
+		"color": "yellow",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 6 Escape Into Custody.png",
+		"free_cast": true,
+		"levels": {
+			1: {"description": "Subtract 1 from your roll. Free if it would cause you to land on Go To Jail.", "roll_penalty": 1, "timings": ["roll_response"], "requires_current_player": true},
+			2: {"description": "Subtract 2 from your roll. Free if it would cause you to land on Go To Jail.", "roll_penalty": 2, "timings": ["roll_response"], "requires_current_player": true},
+			3: {"description": "Subtract 3 from your roll. Free if it would cause you to land on Go To Jail.", "roll_penalty": 3, "timings": ["roll_response"], "requires_current_player": true},
+		},
+	},
+	"Knockout Punch": {
+		"color": "green",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 7 Knockout Punch.png",
+		"levels": {
+			1: {"description": "An opponent pays you $100. Send that opponent to jail. If this happens in the middle of their roll, cancel the roll.", "amount": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "An opponent pays you $200. Send that opponent to jail. If this happens in the middle of their roll, cancel the roll.", "amount": 200, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "An opponent pays you $300. Send that opponent to jail. If this happens in the middle of their roll, cancel the roll.", "amount": 300, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	# Slow, and only before rolling. The money is gained on resolution; the
+	# roll redirect is applied to the caster's next roll this turn -- see
+	# _apply_siren_song() in main.gd.
+	"Siren's Song": {
+		"color": "ocean_blue",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 8 Sirens Song.png",
+		"levels": {
+			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property with the highest rent. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
+			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property with the highest rent. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
+		},
+	},
 }

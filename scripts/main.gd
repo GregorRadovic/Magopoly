@@ -318,6 +318,13 @@ var _current_roll: int = 0:
 var _die1: int = 0
 var _die2: int = 0
 var _roll_seq: int = 0
+# Set when a spell jails whoever's roll is in flight (Bribe the Guards L2,
+# Knockout Punch): once the response window closes, _perform_roll() cancels
+# the move entirely. Reset at the start of every roll.
+var _roll_cancelled: bool = false
+# Set when Bribe the Guards L1 frees whoever's jail roll is in flight: they
+# move with that roll normally, but doubles don't earn an extra turn.
+var _jail_released_mid_roll: bool = false
 
 
 # Wizard Vision: while a roll is in flight (the response window right after
@@ -1538,10 +1545,11 @@ func _advance_turn() -> void:
 	dice_roller.clear_dice()
 	_advance_to_next_active_player()
 	_update_turn_label()
-	# In the tutorial the opponent never actually takes a turn -- the script
-	# ends (back to the Main Menu) right after the player's first End Turn.
-	if GameState.is_authority() and players[current_player].is_ai and not _tutorial_active:
-		_run_ai_turn()
+	# Start-of-turn effects (Cramped Cell), then an AI seat's turn. In the
+	# tutorial the opponent never actually takes a turn -- the script ends
+	# (back to the Main Menu) right after the player's first End Turn.
+	if GameState.is_authority():
+		_begin_turn()
 
 
 # Drives a Computer player's entire turn automatically: roll, decline any
@@ -1578,6 +1586,14 @@ func _run_ai_turn_body() -> void:
 			return
 		_refresh_action_buttons()
 		await get_tree().create_timer(0.6).timeout
+		# A spell sent the AI to Jail before it rolled (e.g. in response to
+		# its opening cast) -- that ends its turn, same as for a human.
+		if _awaiting_end_turn:
+			await _ai_run_end_of_turn_checks(players[ai_index])
+			if current_player != ai_index or players[ai_index].is_bankrupt:
+				return
+			_end_turn()
+			return
 		var die1: int = randi_range(1, 6)
 		var die2: int = randi_range(1, 6)
 		await _perform_roll(die1, die2)
@@ -2502,7 +2518,22 @@ func _perform_roll(die1: int, die2: int) -> void:
 		dice_label.text += "\nHasty Exit adds %d (now %d)." % [player.next_roll_bonus, roll]
 		_log("%s's roll is modified by %+d (now %d)." % [PLAYER_NAMES[current_player], player.next_roll_bonus, roll])
 		player.next_roll_bonus = 0
+	# Siren's Song: applied last, so it accounts for every "before rolling"
+	# change above. Anything cast during the response window can still move
+	# the roll afterwards.
+	if player.siren_song_active:
+		player.siren_song_active = false
+		var extra: int = _siren_song_extra_steps(player, roll)
+		if extra > 0:
+			roll += extra
+			_log("Siren's Song draws %s's roll up by %d (now %d), toward %s." % [PLAYER_NAMES[current_player], extra, roll, _property_name((player.current_space + roll) % board.TOTAL_SPACES)])
+		elif extra == 0:
+			_log("Siren's Song: %s's roll already lands on %s." % [PLAYER_NAMES[current_player], _property_name((player.current_space + roll) % board.TOTAL_SPACES)])
+		else:
+			_log("Siren's Song finds no opponent property to draw %s to." % PLAYER_NAMES[current_player])
 
+	_roll_cancelled = false
+	_jail_released_mid_roll = false
 	_current_roll = roll
 	_roll_in_flight = true
 	# Tutorial: the "roll" step becomes "Quick! Press Space Bar!" as the window
@@ -2531,9 +2562,15 @@ func _perform_roll(die1: int, die2: int) -> void:
 
 	var grants_extra_turn: bool = is_double
 
-	if player.in_jail:
+	if _roll_cancelled:
+		# A spell sent them to Jail mid-roll: no move, no jail countdown, no
+		# extra turn.
+		_roll_cancelled = false
+		grants_extra_turn = false
+		dice_label.text += "\nThe roll was cancelled."
+	elif player.in_jail:
 		if is_double:
-			player.in_jail = false
+			_release_from_jail(player)
 			player.consecutive_doubles = 0
 			dice_label.text += "\nRolled doubles! Released from Jail."
 			_log("%s left Jail (rolled doubles)." % PLAYER_NAMES[current_player])
@@ -2544,12 +2581,19 @@ func _perform_roll(die1: int, die2: int) -> void:
 			if player.jail_turns_left <= 0:
 				player.money -= 50
 				free_parking_amount += 50
-				player.in_jail = false
+				_release_from_jail(player)
 				dice_label.text += "\nSentence served, paid $50 to Free Parking."
 				_log_payment(current_player, 50, "Free Parking")
 				_log("%s left Jail." % PLAYER_NAMES[current_player])
 			else:
 				dice_label.text += "\nStill in Jail. %d turn(s) left." % player.jail_turns_left
+	elif _jail_released_mid_roll:
+		# Freed from Jail (Bribe the Guards) during this very roll: move with
+		# it as normal, but doubles don't count toward an extra turn.
+		_jail_released_mid_roll = false
+		grants_extra_turn = false
+		player.consecutive_doubles = 0
+		await _move_player(player, roll)
 	else:
 		player.consecutive_doubles = (player.consecutive_doubles + 1) if is_double else 0
 
@@ -2559,6 +2603,11 @@ func _perform_roll(die1: int, die2: int) -> void:
 			grants_extra_turn = false
 		elif await _move_player(player, roll):
 			grants_extra_turn = false
+
+	# However they ended up there (a spell during a debt screen, say), a
+	# player in Jail never gets a doubles extra turn.
+	if player.in_jail:
+		grants_extra_turn = false
 
 	if grants_extra_turn:
 		dice_label.text += "\nExtra turn!"
@@ -2610,14 +2659,11 @@ func _move_player(player: Node2D, roll: int) -> bool:
 		var terminus_owner: Node2D = players[board.spaces[0].owner_id]
 		var owned_railroads: int = _unmortgaged_railroad_count(board.spaces[0].owner_id)
 		var rent_amount: int = _apply_payment_reduction(player, _railroad_rent(owned_railroads, TERMINUS_RAILROAD_RENTS))
-		if rent_amount > player.money:
-			dice_label.text += "\nTerminus (owned by %s)! Owes $%d rent." % [PLAYER_NAMES[board.spaces[0].owner_id], rent_amount]
-			await _collect_debt(player, rent_amount, terminus_owner)
+		var terminus_owner_name: String = PLAYER_NAMES[board.spaces[0].owner_id]
+		if await _pay_landing_charge(player, rent_amount, terminus_owner,
+				"\nTerminus (owned by " + terminus_owner_name + ")! Owes ${amount} rent.",
+				"\nTerminus (owned by " + terminus_owner_name + ")! Paid ${amount} rent (" + str(owned_railroads) + " railroads owned)."):
 			return player.is_bankrupt
-		player.money -= rent_amount
-		terminus_owner.money += rent_amount
-		dice_label.text += "\nTerminus (owned by %s)! Paid $%d rent (%d railroads owned)." % [PLAYER_NAMES[board.spaces[0].owner_id], rent_amount, owned_railroads]
-		_log_payment(player.player_id, rent_amount, PLAYER_NAMES[board.spaces[0].owner_id])
 
 	var landed_info: Dictionary = board.get_space_info(player.current_space)
 	if landed_info.get("type", "") == "tax":
@@ -2630,14 +2676,9 @@ func _move_player(player: Node2D, roll: int) -> bool:
 			# owner instead of Free Parking.
 			var owner: Node2D = players[tax_space.owner_id]
 			var owed: int = _apply_payment_reduction(player, tax_value)
-			if owed > player.money:
-				dice_label.text += "\nLanded on %s (owned by %s)! Owes $%d." % [landed_info.get("name", ""), PLAYER_NAMES[tax_space.owner_id], owed]
-				await _collect_debt(player, owed, owner)
+			var tax_text: String = "\nLanded on " + str(landed_info.get("name", "")) + " (owned by " + PLAYER_NAMES[tax_space.owner_id] + ")!"
+			if await _pay_landing_charge(player, owed, owner, tax_text + " Owes ${amount}.", tax_text + " Paid ${amount}."):
 				return player.is_bankrupt
-			player.money -= owed
-			owner.money += owed
-			dice_label.text += "\nLanded on %s (owned by %s)! Paid $%d." % [landed_info.get("name", ""), PLAYER_NAMES[tax_space.owner_id], owed]
-			_log_payment(player.player_id, owed, PLAYER_NAMES[tax_space.owner_id])
 		else:
 			if tax_value > player.money:
 				dice_label.text += "\nLanded on %s! Owes $%d." % [landed_info.get("name", ""), tax_value]
@@ -2737,14 +2778,9 @@ func _move_player(player: Node2D, roll: int) -> bool:
 			if charged:
 				rent_amount = _apply_payment_reduction(player, rent_amount)
 				var owner: Node2D = players[space.owner_id]
-				if rent_amount > player.money:
-					dice_label.text += "\nLanded on %s (owned by %s)! Owes $%d rent." % [property_name, PLAYER_NAMES[space.owner_id], rent_amount]
-					await _collect_debt(player, rent_amount, owner)
+				var rent_text: String = "\nLanded on " + property_name + " (owned by " + PLAYER_NAMES[space.owner_id] + ")!"
+				if await _pay_landing_charge(player, rent_amount, owner, rent_text + " Owes ${amount} rent.", rent_text + " Paid ${amount} rent" + note + "."):
 					return player.is_bankrupt
-				player.money -= rent_amount
-				owner.money += rent_amount
-				dice_label.text += "\nLanded on %s (owned by %s)! Paid $%d rent%s." % [property_name, PLAYER_NAMES[space.owner_id], rent_amount, note]
-				_log_payment(player.player_id, rent_amount, PLAYER_NAMES[space.owner_id])
 
 	return false
 
@@ -2779,6 +2815,13 @@ func _apply_payment_reduction(payer: Node2D, amount: int) -> int:
 # only the very last payment would ever be visible, even though every
 # payment still actually happened.
 func _charge_spell_payment(payer: Node2D, amount: int, creditor: Node2D, resolve_message: String, debt_message: String, append: bool = false) -> void:
+	# Misplaced Payment only redirects payments to an opponent, not ones
+	# already headed for Free Parking.
+	if creditor != null:
+		var redirect: Dictionary = _misplaced_payment_redirect(payer, amount)
+		if redirect["redirected"]:
+			amount = redirect["amount"]
+			creditor = null
 	if amount > payer.money:
 		if append:
 			dice_label.text += "\n" + debt_message
@@ -2789,6 +2832,8 @@ func _charge_spell_payment(payer: Node2D, amount: int, creditor: Node2D, resolve
 	payer.money -= amount
 	if creditor:
 		creditor.money += amount
+	else:
+		free_parking_amount += amount
 	_log_payment(payer.player_id, amount, PLAYER_NAMES[creditor.player_id] if creditor else "Free Parking")
 	if append:
 		dice_label.text += "\n" + resolve_message
@@ -4298,11 +4343,14 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 			_toast(extra_rejection)
 		else:
 			var attunement: int = _color_attunement(caster, color_name)
-			if attunement < choice:
+			var free_cast: bool = attunement < choice and _spell_free_cast_allowed(caster, spell_name, choice)
+			if attunement < choice and not free_cast:
 				_toast("%s doesn't have enough %s Attunement to cast %s at Level %d (has %d, needs %d)." % [_player_display_name(caster.player_id), color_name.capitalize(), spell_name, choice, attunement, choice])
 			else:
 				var resolve: Callable = await _prepare_spell_cast(caster, hand_index, spell_name, choice)
 				if resolve.is_valid():
+					if free_cast:
+						_log("%s casts %s for free -- its condition is met." % [PLAYER_NAMES[caster.player_id], spell_name])
 					post_cast = _finish_cast.bind(caster, spell_name, choice, resolve)
 
 	_casting_spell = false
@@ -4412,7 +4460,64 @@ func _spell_extra_validation(caster: Node2D, spell_name: String, level: int) -> 
 			return "Terminus has already been summoned."
 		if _owned_railroad_count(caster.player_id) < 4:
 			return "%s doesn't own all 4 railroads." % _player_display_name(caster.player_id)
+	var who: String = _player_display_name(caster.player_id)
+	match spell_name:
+		"Steal From the Future":
+			if free_parking_amount <= 0:
+				return "Free Parking is empty -- there's nothing to take."
+		"Market Manipulation":
+			if _market_manipulation_targets(caster, level).is_empty():
+				var multiple: int = SpellData.SPELLS[spell_name]["levels"][level].get("multiple", 1)
+				return "Free Parking ($%d) isn't at least %dx the value of any opponent's property without houses." % [free_parking_amount, multiple]
+		"Rocket Boost", "Spiteful Destruction":
+			var extra_cost: int = SpellData.SPELLS[spell_name]["levels"][level].get("extra_cost", 0)
+			if caster.money < extra_cost:
+				return "%s can't pay the additional $%d cost for %s." % [who, extra_cost, spell_name]
+		"King's Escape Tunnel":
+			if not _kings_escape_tunnel_condition_met(caster, level):
+				var wanted: Array[String] = ["", "an unowned property", "a property they own", "a property owned by an opponent"]
+				return "%s's current roll wouldn't land them on %s." % [who, wanted[level]]
+		"Unclaimed Wilderness":
+			if _unowned_property_indices().is_empty():
+				return "There are no unowned properties left."
+		"Bribe the Guards":
+			var any_eligible: bool = false
+			for p in players:
+				if not p.is_bankrupt and p.in_jail == (level == 1):
+					any_eligible = true
+					break
+			if not any_eligible:
+				return "Nobody is in jail." if level == 1 else "Everyone is already in jail."
+		"Penance":
+			if _jailed_opponent_ids(caster).is_empty():
+				return "None of %s's opponents are in jail." % who
+		"Siren's Song":
+			if _siren_song_candidates(caster).is_empty():
+				return "No opponent owns an unmortgaged property for %s to be drawn to." % who
 	return ""
+
+
+# Deny Rights / Escape Into Custody ("free_cast" in SpellData): castable at
+# any level without the Attunement, when the condition printed on the card
+# currently holds. Timing is still enforced separately, as normal.
+func _spell_free_cast_allowed(caster: Node2D, spell_name: String, level: int) -> bool:
+	if not SpellData.SPELLS.get(spell_name, {}).get("free_cast", false):
+		return false
+	match spell_name:
+		"Deny Rights":
+			# Only if there's a spell at this level, cast by a jailed player,
+			# to counter -- _prepare_deny_rights() then limits the picker to
+			# exactly those.
+			for entry in _spell_stack:
+				if int(entry["level"]) == level and players[int(entry["caster_id"])].in_jail:
+					return true
+		"Escape Into Custody":
+			if not _roll_in_flight or caster.player_id != current_player:
+				return false
+			var penalty: int = SpellData.SPELLS[spell_name]["levels"][level].get("roll_penalty", 0)
+			var landing: int = (caster.current_space + maxi(0, _current_roll - penalty)) % board.TOTAL_SPACES
+			return board.get_space_info(landing).get("type", "") == "go_to_jail"
+	return false
 
 
 # Gathers whatever targets `spell_name` at `level` needs (which may fail or
@@ -4509,6 +4614,40 @@ func _prepare_spell_cast(caster: Node2D, hand_index: int, spell_name: String, le
 					return await _prepare_cult_of_terminus_pay(caster, level)
 				4:
 					return _prepare_cult_of_terminus_summon_terminus(caster)
+		# Expansion A: Free Parking
+		"Misplaced Payment":
+			return _prepare_misplaced_payment(caster, level)
+		"Steal From the Future":
+			return _prepare_steal_from_the_future(caster, level)
+		"Gemstone Mine":
+			return _prepare_gemstone_mine(caster, level)
+		"Market Manipulation":
+			return await _prepare_market_manipulation(caster, level)
+		"Rocket Boost":
+			return _prepare_rocket_boost(caster, level)
+		"King's Escape Tunnel":
+			return _prepare_kings_escape_tunnel(caster, level)
+		"Unclaimed Wilderness":
+			return _prepare_unclaimed_wilderness(caster, level)
+		"Spiteful Destruction":
+			return await _prepare_spiteful_destruction(caster, level)
+		# Expansion B: Jail
+		"Bribe the Guards":
+			return await _prepare_bribe_the_guards(caster, level)
+		"Cramped Cell":
+			return await _prepare_cramped_cell(caster, level)
+		"Penance":
+			return _prepare_penance(caster, level)
+		"Deny Rights":
+			return await _prepare_deny_rights(caster, level)
+		"Bomb Shelter":
+			return _prepare_bomb_shelter(caster, level)
+		"Escape Into Custody":
+			return _prepare_escape_into_custody(caster, level)
+		"Knockout Punch":
+			return await _prepare_knockout_punch(caster, level)
+		"Siren's Song":
+			return _prepare_sirens_song(caster, level)
 	return Callable()
 
 
@@ -6028,12 +6167,607 @@ func _resolve_cult_of_terminus_summon_terminus(caster: Node2D) -> void:
 	_update_player_panels()
 
 
+# ============================================================================
+# Shared helpers for the AB expansions
+# ============================================================================
+
+# Picker over every non-bankrupt opponent of `caster`. Returns the chosen
+# player id, or -1 if there's nobody to pick or the caster backed out.
+func _pick_opponent_for_spell(caster: Node2D, prompt: String) -> int:
+	var entries: Array = []
+	for i in players.size():
+		if i != caster.player_id and not players[i].is_bankrupt:
+			entries.append({"index": i, "name": PLAYER_NAMES[i], "color": PLAYER_COLORS[i]})
+	if entries.is_empty():
+		_toast("There's no opponent to target.")
+		return -1
+	_pp_open(prompt, entries)
+	return await _pp_result()
+
+
+# "As an additional cost, pay $X to Free Parking" (Rocket Boost, Spiteful
+# Destruction): paid in prepare, once the cast is otherwise committed --
+# like Art of the Deal's giveaway, it isn't refunded if the spell is later
+# countered. Returns false (cast abandoned) if the caster can no longer
+# cover it; _spell_extra_validation() normally rules that out up front.
+func _pay_spell_extra_cost(caster: Node2D, spell_name: String, level: int) -> bool:
+	var cost: int = SpellData.SPELLS[spell_name]["levels"][level].get("extra_cost", 0)
+	if cost <= 0:
+		return true
+	if caster.money < cost:
+		_toast("%s can't pay the additional $%d cost for %s." % [_player_display_name(caster.player_id), cost, spell_name])
+		return false
+	caster.money -= cost
+	free_parking_amount += cost
+	_log_payment(caster.player_id, cost, "Free Parking")
+	_update_player_panels()
+	return true
+
+
+# Misplaced Payment: if `payer` has one active, consumes it and returns the
+# part of `amount` that goes to Free Parking instead of the opponent
+# ({"redirected": true, "amount": int}). A $0 payment (e.g. already wiped out
+# by Counterfeit Currency) isn't really paying anyone, so it doesn't use the
+# redirect up. Called at every "pay an opponent" site, after any Counterfeit
+# Currency reduction and before the can-they-afford-it check.
+func _misplaced_payment_redirect(payer: Node2D, amount: int) -> Dictionary:
+	if payer.misplaced_payment_percent <= 0 or amount <= 0:
+		return {"redirected": false, "amount": amount}
+	var redirected: int = amount * payer.misplaced_payment_percent / 100
+	payer.misplaced_payment_percent = 0
+	_log("%s's Misplaced Payment sends $%d to Free Parking instead of paying $%d to an opponent." % [PLAYER_NAMES[payer.player_id], redirected, amount])
+	return {"redirected": true, "amount": redirected}
+
+
+# Rent (and other landing charges) owed to an opponent while moving: applies
+# Misplaced Payment, then either pays it or opens debt collection. `owes_text`
+# / `paid_text` get "{amount}" replaced with the final figure. Returns true if
+# debt collection ran -- _move_player() then returns player.is_bankrupt, as
+# it always has for an unaffordable charge.
+func _pay_landing_charge(player: Node2D, amount: int, owner: Node2D, owes_text: String, paid_text: String) -> bool:
+	var creditor: Node2D = owner
+	var redirect: Dictionary = _misplaced_payment_redirect(player, amount)
+	if redirect["redirected"]:
+		amount = redirect["amount"]
+		creditor = null
+	if amount > player.money:
+		dice_label.text += owes_text.replace("{amount}", str(amount))
+		await _collect_debt(player, amount, creditor)
+		return true
+	player.money -= amount
+	if creditor:
+		creditor.money += amount
+	else:
+		free_parking_amount += amount
+	dice_label.text += paid_text.replace("{amount}", str(amount))
+	_log_payment(player.player_id, amount, PLAYER_NAMES[creditor.player_id] if creditor else "Free Parking")
+	return false
+
+
+func _free_parking_index() -> int:
+	for i in board.TOTAL_SPACES:
+		if board.get_space_info(i).get("type", "") == "free_parking":
+			return i
+	return 20
+
+
+# Takes `player` out of jail by any means (rolled doubles, served the
+# sentence, Bribe the Guards) -- which also ends every Cramped Cell on them.
+func _release_from_jail(player: Node2D) -> void:
+	player.in_jail = false
+	player.jail_turns_left = 0
+	player.cramped_cell_debts.clear()
+
+
+# A spell sending `player` to jail (Bribe the Guards L2, Cramped Cell,
+# Knockout Punch). Someone already in jail stays put -- their sentence isn't
+# restarted, and nothing else happens. Jailing whoever's turn it is ends
+# their turn like landing on Go To Jail would: mid-roll, the roll is
+# cancelled (see _roll_cancelled in _perform_roll()); otherwise they're left
+# on End Turn rather than getting to roll (or roll again for doubles).
+func _spell_send_to_jail(player: Node2D, source: String) -> void:
+	if player.is_bankrupt:
+		return
+	if player.in_jail:
+		_log("%s is already in Jail, so %s doesn't move them." % [PLAYER_NAMES[player.player_id], source])
+		return
+	_send_to_jail(player)
+	if player.player_id == current_player:
+		if _roll_in_flight:
+			_roll_cancelled = true
+			_log("%s's roll is cancelled." % PLAYER_NAMES[player.player_id])
+		else:
+			_awaiting_end_turn = true
+	_update_player_panels()
+
+
+# Cramped Cell: charged at the start of each of the jailed player's turns,
+# one payment per cast, for as long as they stay in jail. Payments to a
+# player who's since gone bankrupt are dropped.
+func _charge_cramped_cell(player: Node2D) -> void:
+	for entry in player.cramped_cell_debts.duplicate():
+		if player.is_bankrupt or not player.in_jail:
+			return
+		var creditor_id: int = int(entry.get("creditor", -1))
+		if creditor_id < 0 or creditor_id >= players.size() or players[creditor_id].is_bankrupt:
+			player.cramped_cell_debts.erase(entry)
+			continue
+		var amount: int = int(entry.get("amount", 0))
+		_log("Cramped Cell: %s pays %s $%d for another turn in Jail." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[creditor_id], amount])
+		var resolve_message: String = "Cramped Cell: %s pays %s $%d." % [_player_display_name(player.player_id), PLAYER_NAMES[creditor_id], amount]
+		var debt_message: String = "Cramped Cell: %s owes %s $%d." % [_player_display_name(player.player_id), PLAYER_NAMES[creditor_id], amount]
+		await _charge_spell_payment(player, amount, players[creditor_id], resolve_message, debt_message, true)
+
+
+# Start-of-turn effects for whoever's turn just began (host / local only),
+# then hand an AI seat its turn. A player bankrupted by a start-of-turn
+# charge simply passes the turn on.
+func _begin_turn() -> void:
+	var player: Node2D = players[current_player]
+	if not _tutorial_active and player.in_jail and not player.cramped_cell_debts.is_empty():
+		await _charge_cramped_cell(player)
+		_update_player_panels()
+		_refresh_action_buttons()
+		if _returning_to_menu or not is_inside_tree():
+			return
+		if player.is_bankrupt:
+			_advance_turn()
+			_update_player_panels()
+			_refresh_action_buttons()
+			return
+	if players[current_player].is_ai and not _tutorial_active:
+		_run_ai_turn()
+
+
+# ============================================================================
+# Expansion A: Free Parking
+# ============================================================================
+
+# Misplaced Payment: sets up the redirect _misplaced_payment_redirect()
+# reads. Recasting before it triggers just overwrites it.
+func _prepare_misplaced_payment(caster: Node2D, level: int) -> Callable:
+	var percent: int = SpellData.SPELLS["Misplaced Payment"]["levels"][level].get("percent", 100)
+	return _resolve_misplaced_payment.bind(caster, level, percent)
+
+
+func _resolve_misplaced_payment(caster: Node2D, level: int, percent: int) -> void:
+	caster.misplaced_payment_percent = percent
+	var portion: String = "all of it" if percent >= 100 else "%d%% of it" % percent
+	_log("%s's Misplaced Payment (Level %d): their next payment to an opponent this turn goes to Free Parking instead (%s)." % [PLAYER_NAMES[caster.player_id], level, portion])
+	_update_player_panels()
+
+
+func _prepare_steal_from_the_future(caster: Node2D, level: int) -> Callable:
+	var amount: int = SpellData.SPELLS["Steal From the Future"]["levels"][level].get("amount", 0)
+	return _resolve_steal_from_the_future.bind(caster, level, amount)
+
+
+# Takes whatever's there, up to the amount -- Free Parking may have been
+# emptied while this sat on the stack.
+func _resolve_steal_from_the_future(caster: Node2D, level: int, amount: int) -> void:
+	var taken: int = mini(amount, free_parking_amount)
+	free_parking_amount -= taken
+	caster.money += taken
+	_log("%s's Steal From the Future (Level %d) takes $%d from Free Parking." % [PLAYER_NAMES[caster.player_id], level, taken])
+	_update_player_panels()
+
+
+func _prepare_gemstone_mine(caster: Node2D, level: int) -> Callable:
+	var amount: int = SpellData.SPELLS["Gemstone Mine"]["levels"][level].get("amount", 0)
+	return _resolve_gemstone_mine.bind(caster, level, amount)
+
+
+# Both halves come from the bank.
+func _resolve_gemstone_mine(caster: Node2D, level: int, amount: int) -> void:
+	caster.money += amount
+	free_parking_amount += amount
+	_log("%s's Gemstone Mine (Level %d): they gain $%d, and $%d is added to Free Parking." % [PLAYER_NAMES[caster.player_id], level, amount, amount])
+	_update_player_panels()
+
+
+# Every opponent's property (color sets, railroads, utilities) without
+# houses whose printed price Free Parking currently covers `multiple` times.
+func _market_manipulation_targets(caster: Node2D, level: int) -> Array[int]:
+	var multiple: int = SpellData.SPELLS["Market Manipulation"]["levels"][level].get("multiple", 1)
+	var result: Array[int] = []
+	for i in board.TOTAL_SPACES:
+		var info: Dictionary = board.get_space_info(i)
+		if info.get("type", "") != "property":
+			continue
+		var space: Node2D = board.spaces[i]
+		if space.owner_id == -1 or space.owner_id == caster.player_id or space.house_count > 0:
+			continue
+		if free_parking_amount >= int(info.get("price", 0)) * multiple:
+			result.append(i)
+	return result
+
+
+# Market Manipulation (Slow): Free Parking isn't spent -- it only has to be
+# big enough. The property changes hands for free, mortgaged or not.
+func _prepare_market_manipulation(caster: Node2D, level: int) -> Callable:
+	var entries: Array = []
+	for i in _market_manipulation_targets(caster, level):
+		var owner_id: int = board.spaces[i].owner_id
+		entries.append({"index": i, "name": "%s (%s, $%d)" % [_property_name(i), PLAYER_NAMES[owner_id], int(board.get_space_info(i).get("price", 0))], "color": PLAYER_COLORS[owner_id]})
+	if entries.is_empty():
+		return Callable()
+	_pp_open("Market Manipulation: choose an opponent's property to take.", entries)
+	var space_index: int = await _pp_result()
+	if space_index == -1:
+		return Callable()
+	_spell_target_property(space_index)
+	return _resolve_market_manipulation.bind(caster, level, space_index, board.spaces[space_index].owner_id)
+
+
+# Re-checks everything at resolution -- the owner, the houses, and Free
+# Parking's total may all have changed while it sat on the stack.
+func _resolve_market_manipulation(caster: Node2D, level: int, space_index: int, owner_id: int) -> void:
+	var space: Node2D = board.spaces[space_index]
+	if space.owner_id != owner_id or owner_id == caster.player_id or not _market_manipulation_targets(caster, level).has(space_index):
+		_log("%s's Market Manipulation (Level %d) fizzles -- %s is no longer eligible." % [PLAYER_NAMES[caster.player_id], level, _property_name(space_index)])
+		return
+	players[owner_id].owned_property_indices.erase(space_index)
+	caster.owned_property_indices.append(space_index)
+	space.owner_id = caster.player_id
+	_sort_owned_properties(caster)
+	_note_ownership(space_index)
+	_log("%s's Market Manipulation (Level %d) takes %s from %s." % [PLAYER_NAMES[caster.player_id], level, _property_name(space_index), PLAYER_NAMES[owner_id]])
+	_update_player_panels()
+
+
+# Rocket Boost: no target; the $100 additional cost is paid right away.
+func _prepare_rocket_boost(caster: Node2D, level: int) -> Callable:
+	if not _pay_spell_extra_cost(caster, "Rocket Boost", level):
+		return Callable()
+	var bonus: int = SpellData.SPELLS["Rocket Boost"]["levels"][level].get("roll_bonus", 0)
+	return _resolve_rocket_boost.bind(caster, level, bonus)
+
+
+func _resolve_rocket_boost(caster: Node2D, level: int, bonus: int) -> void:
+	_current_roll += bonus
+	_log("%s's Rocket Boost (Level %d) increases the roll by %d (now %d)." % [PLAYER_NAMES[caster.player_id], level, bonus, _current_roll])
+	_update_player_panels()
+
+
+# King's Escape Tunnel's castability gate: where the roll in flight would
+# currently land the caster -- L1 an unowned property, L2 one they own, L3
+# one an opponent owns. Railroads and utilities count as properties.
+func _kings_escape_tunnel_condition_met(caster: Node2D, level: int) -> bool:
+	if not _roll_in_flight:
+		return false
+	var landing: int = (caster.current_space + _current_roll) % board.TOTAL_SPACES
+	if board.get_space_info(landing).get("type", "") != "property":
+		return false
+	var owner_id: int = board.spaces[landing].owner_id
+	match level:
+		1:
+			return owner_id == -1
+		2:
+			return owner_id == caster.player_id
+		3:
+			return owner_id != -1 and owner_id != caster.player_id
+	return false
+
+
+func _prepare_kings_escape_tunnel(caster: Node2D, level: int) -> Callable:
+	_spell_target_property(_free_parking_index())
+	return _resolve_kings_escape_tunnel.bind(caster, level)
+
+
+# The distance to Free Parking is measured at resolution, so it still lands
+# there even if other roll changes resolved first.
+func _resolve_kings_escape_tunnel(caster: Node2D, level: int) -> void:
+	var landing: int = (caster.current_space + _current_roll) % board.TOTAL_SPACES
+	var steps: int = posmod(_free_parking_index() - landing, board.TOTAL_SPACES)
+	_current_roll += steps
+	_log("%s's King's Escape Tunnel (Level %d) increases the roll by %d to land on Free Parking (now %d)." % [PLAYER_NAMES[caster.player_id], level, steps, _current_roll])
+	_update_player_panels()
+
+
+func _prepare_unclaimed_wilderness(caster: Node2D, level: int) -> Callable:
+	var count: int = SpellData.SPELLS["Unclaimed Wilderness"]["levels"][level].get("count", 1)
+	return _resolve_unclaimed_wilderness.bind(caster, level, count)
+
+
+# Reveals at resolution (so it reflects the board as it is then), then
+# offers each revealed property in turn. A purchase works like Promised
+# Land's -- Raise Money if short, with a Cancel -- except the price goes into
+# Free Parking rather than to the bank.
+func _resolve_unclaimed_wilderness(caster: Node2D, level: int, count: int) -> void:
+	var pool: Array[int] = _unowned_property_indices()
+	pool.shuffle()
+	var revealed: Array[int] = []
+	for i in mini(count, pool.size()):
+		revealed.append(pool[i])
+	if revealed.is_empty():
+		_log("%s's Unclaimed Wilderness (Level %d) fizzles -- there are no unowned properties left." % [PLAYER_NAMES[caster.player_id], level])
+		return
+	var names: Array[String] = []
+	for i in revealed:
+		names.append(_property_name(i))
+	_log("%s's Unclaimed Wilderness (Level %d) reveals %s." % [PLAYER_NAMES[caster.player_id], level, ", ".join(names)])
+	for space_index in revealed:
+		if caster.is_bankrupt or _returning_to_menu:
+			return
+		if board.spaces[space_index].owner_id != -1:
+			continue
+		var price: int = int(board.get_space_info(space_index).get("price", 0))
+		_prompt_slot = caster.player_id
+		_cf_open("Unclaimed Wilderness: buy %s for $%d? (The money goes to Free Parking.)" % [_property_name(space_index), price])
+		var yes: bool = await _cf_result()
+		_prompt_slot = -1
+		if not yes:
+			_log("%s passes on %s." % [PLAYER_NAMES[caster.player_id], _property_name(space_index)])
+			continue
+		if await _buy_property_via_spell(caster, space_index, price, -1):
+			free_parking_amount += price
+			_note_ownership(space_index)
+			_log("%s bought %s for $%d, paid into Free Parking." % [PLAYER_NAMES[caster.player_id], _property_name(space_index), price])
+			_update_player_panels()
+
+
+func _prepare_spiteful_destruction(caster: Node2D, level: int) -> Callable:
+	var target_index: int = await _pick_opponent_for_spell(caster, "Spiteful Destruction: choose an opponent to pay Free Parking.")
+	if target_index == -1:
+		return Callable()
+	if not _pay_spell_extra_cost(caster, "Spiteful Destruction", level):
+		return Callable()
+	_spell_target_player(target_index)
+	var amount: int = SpellData.SPELLS["Spiteful Destruction"]["levels"][level].get("amount", 0)
+	return _resolve_spiteful_destruction.bind(caster, level, target_index, amount)
+
+
+# Paid to Free Parking, not to the caster -- so neither Counterfeit Currency
+# nor Misplaced Payment (both "pay an opponent" effects) touch it.
+func _resolve_spiteful_destruction(caster: Node2D, level: int, target_index: int, amount: int) -> void:
+	var target: Node2D = players[target_index]
+	if target.is_bankrupt:
+		_log("%s's Spiteful Destruction (Level %d) fizzles -- %s is already out of the game." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index]])
+		return
+	var resolve_message: String = "%s's Spiteful Destruction (Level %d): %s pays $%d to Free Parking." % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], amount]
+	var debt_message: String = "%s's Spiteful Destruction (Level %d): %s owes $%d to Free Parking." % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], amount]
+	await _charge_spell_payment(target, amount, null, resolve_message, debt_message)
+
+
+# ============================================================================
+# Expansion B: Jail
+# ============================================================================
+
+func _jailed_opponent_ids(caster: Node2D) -> Array[int]:
+	var result: Array[int] = []
+	for i in players.size():
+		if i != caster.player_id and not players[i].is_bankrupt and players[i].in_jail:
+			result.append(i)
+	return result
+
+
+# Bribe the Guards: L1 frees any jailed player, L2 jails anyone who isn't --
+# the caster included, either way ("a player", not "an opponent").
+func _prepare_bribe_the_guards(caster: Node2D, level: int) -> Callable:
+	var want_jailed: bool = level == 1
+	var entries: Array = []
+	for i in players.size():
+		var p: Node2D = players[i]
+		if p.is_bankrupt or p.in_jail != want_jailed:
+			continue
+		var label: String = PLAYER_NAMES[i] + (" (you)" if i == caster.player_id else "")
+		entries.append({"index": i, "name": label, "color": PLAYER_COLORS[i]})
+	if entries.is_empty():
+		return Callable()
+	var prompt: String = "Bribe the Guards: choose a player to free from Jail." if want_jailed else "Bribe the Guards: choose a player to send to Jail."
+	_pp_open(prompt, entries)
+	var target_index: int = await _pp_result()
+	if target_index == -1:
+		return Callable()
+	_spell_target_player(target_index)
+	return _resolve_bribe_the_guards.bind(caster, level, target_index)
+
+
+# L1 mid-roll on the freed player's own jail roll: they move with that roll
+# as normal (no doubles extra turn) -- see _jail_released_mid_roll.
+func _resolve_bribe_the_guards(caster: Node2D, level: int, target_index: int) -> void:
+	var target: Node2D = players[target_index]
+	if target.is_bankrupt:
+		_log("%s's Bribe the Guards (Level %d) fizzles -- %s is out of the game." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index]])
+		return
+	if level == 1:
+		if not target.in_jail:
+			_log("%s's Bribe the Guards (Level 1) fizzles -- %s is no longer in Jail." % [PLAYER_NAMES[caster.player_id], PLAYER_NAMES[target_index]])
+			return
+		_release_from_jail(target)
+		if target_index == current_player and _roll_in_flight:
+			_jail_released_mid_roll = true
+		_log("%s's Bribe the Guards frees %s from Jail." % [PLAYER_NAMES[caster.player_id], PLAYER_NAMES[target_index]])
+	else:
+		_log("%s's Bribe the Guards sends %s to Jail." % [PLAYER_NAMES[caster.player_id], PLAYER_NAMES[target_index]])
+		_spell_send_to_jail(target, "Bribe the Guards")
+	_update_player_panels()
+
+
+# Cramped Cell (Slow): jails an opponent and attaches a per-turn payment to
+# their stay -- see _charge_cramped_cell() / _begin_turn(). Casting it on
+# someone already in jail just attaches the payment.
+func _prepare_cramped_cell(caster: Node2D, level: int) -> Callable:
+	var target_index: int = await _pick_opponent_for_spell(caster, "Cramped Cell: choose an opponent to send to Jail.")
+	if target_index == -1:
+		return Callable()
+	_spell_target_player(target_index)
+	var amount: int = SpellData.SPELLS["Cramped Cell"]["levels"][level].get("amount", 0)
+	return _resolve_cramped_cell.bind(caster, level, target_index, amount)
+
+
+func _resolve_cramped_cell(caster: Node2D, level: int, target_index: int, amount: int) -> void:
+	var target: Node2D = players[target_index]
+	if target.is_bankrupt:
+		_log("%s's Cramped Cell (Level %d) fizzles -- %s is out of the game." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index]])
+		return
+	if not target.in_jail:
+		_spell_send_to_jail(target, "Cramped Cell")
+	target.cramped_cell_debts.append({"creditor": caster.player_id, "amount": amount})
+	_log("%s's Cramped Cell (Level %d): %s pays them $%d at the start of each turn while in Jail." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index], amount])
+	_update_player_panels()
+
+
+func _prepare_penance(caster: Node2D, level: int) -> Callable:
+	var amount: int = SpellData.SPELLS["Penance"]["levels"][level].get("amount", 0)
+	return _resolve_penance.bind(caster, level, amount)
+
+
+# Whoever is in jail when it resolves pays -- one at a time, like Sinkhole,
+# so one opponent's debt screen doesn't block charging the rest.
+func _resolve_penance(caster: Node2D, level: int, amount: int) -> void:
+	var jailed: Array[int] = _jailed_opponent_ids(caster)
+	if jailed.is_empty():
+		_log("%s's Penance (Level %d) resolves, but no opponents are in Jail." % [PLAYER_NAMES[caster.player_id], level])
+		return
+	dice_label.text = "%s's Penance (Level %d) resolves!" % [_player_display_name(caster.player_id), level]
+	for i in jailed:
+		if players[i].is_bankrupt:
+			continue
+		var owed: int = _apply_payment_reduction(players[i], amount)
+		var resolve_message: String = "%s's Penance (Level %d) collects $%d from %s!" % [_player_display_name(caster.player_id), level, owed, PLAYER_NAMES[i]]
+		var debt_message: String = "%s's Penance (Level %d) charges %s $%d, who owes it!" % [_player_display_name(caster.player_id), level, PLAYER_NAMES[i], owed]
+		await _charge_spell_payment(players[i], owed, caster, resolve_message, debt_message, true)
+
+
+# Deny Rights: Counterbalance with a jail clause. Cast without the
+# Attunement (the free cast _spell_free_cast_allowed() permitted), it may
+# only target a spell whose caster is in jail.
+func _prepare_deny_rights(caster: Node2D, level: int) -> Callable:
+	var color_name: String = SpellData.SPELLS["Deny Rights"]["color"]
+	var free_only: bool = _color_attunement(caster, color_name) < level
+	var entries: Array = _counter_target_entries(func(entry): return int(entry["level"]) == level and (not free_only or players[int(entry["caster_id"])].in_jail))
+	if entries.is_empty():
+		_toast("There's no Level %d spell on the stack to counter." % level)
+		return Callable()
+	var prompt: String = "Deny Rights: choose a Level %d spell to counter." % level
+	if free_only:
+		prompt = "Deny Rights (free): choose a Level %d spell cast by a player in Jail." % level
+	_pp_open(prompt, entries)
+	var target_id: int = await _pp_result()
+	if target_id == -1:
+		return Callable()
+	_spell_target_spell(target_id)
+	return _resolve_counter_spell.bind(caster, "Deny Rights (Level %d)" % level, target_id)
+
+
+func _prepare_bomb_shelter(caster: Node2D, level: int) -> Callable:
+	var amount: int = SpellData.SPELLS["Bomb Shelter"]["levels"][level].get("amount", 0)
+	return _resolve_bomb_shelter.bind(caster, level, amount)
+
+
+# Bomb Shelter (Slow): everyone outside jail at resolution -- caster first,
+# then the rest in seat order -- pays Free Parking.
+func _resolve_bomb_shelter(caster: Node2D, level: int, amount: int) -> void:
+	var payers: Array[int] = []
+	for offset in players.size():
+		var i: int = (caster.player_id + offset) % players.size()
+		if not players[i].is_bankrupt and not players[i].in_jail:
+			payers.append(i)
+	_log("%s's Bomb Shelter (Level %d): everyone outside Jail pays $%d to Free Parking." % [PLAYER_NAMES[caster.player_id], level, amount])
+	dice_label.text = "%s's Bomb Shelter (Level %d) resolves!" % [_player_display_name(caster.player_id), level]
+	for i in payers:
+		if players[i].is_bankrupt:
+			continue
+		var resolve_message: String = "%s pays $%d to Free Parking." % [PLAYER_NAMES[i], amount]
+		var debt_message: String = "%s owes $%d to Free Parking." % [PLAYER_NAMES[i], amount]
+		await _charge_spell_payment(players[i], amount, null, resolve_message, debt_message, true)
+
+
+func _prepare_escape_into_custody(caster: Node2D, level: int) -> Callable:
+	var penalty: int = SpellData.SPELLS["Escape Into Custody"]["levels"][level].get("roll_penalty", 0)
+	return _resolve_escape_into_custody.bind(caster, level, penalty)
+
+
+func _resolve_escape_into_custody(caster: Node2D, level: int, penalty: int) -> void:
+	_current_roll = maxi(0, _current_roll - penalty)
+	_log("%s's Escape Into Custody (Level %d) decreases the roll by %d (now %d)." % [PLAYER_NAMES[caster.player_id], level, penalty, _current_roll])
+	_update_player_panels()
+
+
+func _prepare_knockout_punch(caster: Node2D, level: int) -> Callable:
+	var target_index: int = await _pick_opponent_for_spell(caster, "Knockout Punch: choose an opponent to pay you and go to Jail.")
+	if target_index == -1:
+		return Callable()
+	_spell_target_player(target_index)
+	var amount: int = SpellData.SPELLS["Knockout Punch"]["levels"][level].get("amount", 0)
+	return _resolve_knockout_punch.bind(caster, level, target_index, amount)
+
+
+# Pay first, then jail -- unless paying bankrupted them.
+func _resolve_knockout_punch(caster: Node2D, level: int, target_index: int, amount: int) -> void:
+	var target: Node2D = players[target_index]
+	if target.is_bankrupt:
+		_log("%s's Knockout Punch (Level %d) fizzles -- %s is already out of the game." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index]])
+		return
+	var owed: int = _apply_payment_reduction(target, amount)
+	var resolve_message: String = "%s's Knockout Punch (Level %d) lands on %s for $%d!" % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], owed]
+	var debt_message: String = "%s's Knockout Punch (Level %d) lands on %s, who owes $%d!" % [_player_display_name(caster.player_id), level, PLAYER_NAMES[target_index], owed]
+	await _charge_spell_payment(target, owed, caster, resolve_message, debt_message)
+	if target.is_bankrupt or _returning_to_menu:
+		return
+	_log("%s's Knockout Punch sends %s to Jail." % [PLAYER_NAMES[caster.player_id], PLAYER_NAMES[target_index]])
+	_spell_send_to_jail(target, "Knockout Punch")
+
+
+# Every unmortgaged property an opponent of `player` owns that shares the
+# highest current rent (_hypothetical_rent: houses, monopoly doubling,
+# railroad count; utilities at a 12 roll). Empty if there's none.
+func _siren_song_candidates(player: Node2D) -> Array[int]:
+	var best: int = 0
+	var result: Array[int] = []
+	for i in board.TOTAL_SPACES:
+		if board.get_space_info(i).get("type", "") != "property":
+			continue
+		var owner_id: int = board.spaces[i].owner_id
+		if owner_id == -1 or owner_id == player.player_id or players[owner_id].is_bankrupt or board.spaces[i].is_mortgaged:
+			continue
+		var rent: int = _hypothetical_rent(i)
+		if rent > best:
+			best = rent
+			result.clear()
+			result.append(i)
+		elif rent == best and rent > 0:
+			result.append(i)
+	return result
+
+
+# How far `roll` must be increased for `player` to land on the nearest
+# Siren's Song candidate (0 if it already does), or -1 if there's none.
+func _siren_song_extra_steps(player: Node2D, roll: int) -> int:
+	var candidates: Array[int] = _siren_song_candidates(player)
+	if candidates.is_empty():
+		return -1
+	var landing: int = (player.current_space + roll) % board.TOTAL_SPACES
+	var best: int = board.TOTAL_SPACES
+	for i in candidates:
+		best = mini(best, posmod(i - landing, board.TOTAL_SPACES))
+	return best
+
+
+func _prepare_sirens_song(caster: Node2D, level: int) -> Callable:
+	var amount: int = SpellData.SPELLS["Siren's Song"]["levels"][level].get("amount", 0)
+	return _resolve_sirens_song.bind(caster, level, amount)
+
+
+# The money comes now; the pull is applied to the caster's next roll this
+# turn, in _perform_roll() -- the target is picked then, against the board
+# as it stands at that roll.
+func _resolve_sirens_song(caster: Node2D, level: int, amount: int) -> void:
+	caster.money += amount
+	caster.siren_song_active = true
+	_log("%s's Siren's Song (Level %d): they gain $%d, and their next roll this turn is drawn to the highest-rent opponent property." % [PLAYER_NAMES[caster.player_id], level, amount])
+	_update_player_panels()
+
+
 func _send_to_jail(player: Node2D) -> void:
 	player.current_space = JAIL_SPACE_INDEX
 	player.position = board.get_space_center(JAIL_SPACE_INDEX) + MARKER_OFFSETS[player.player_id]
 	player.in_jail = true
 	player.jail_turns_left = JAIL_SENTENCE_TURNS
 	player.consecutive_doubles = 0
+	# A fresh stint -- no Cramped Cell from an earlier one carries over.
+	player.cramped_cell_debts.clear()
 	_log("%s was sent to Jail." % PLAYER_NAMES[player.player_id])
 
 
@@ -6057,6 +6791,8 @@ func _advance_to_next_active_player() -> void:
 		player.next_roll_multiplier = 1
 		player.haggling_discount_percent = 0
 		player.haggling_bank_bonus = false
+		player.misplaced_payment_percent = 0
+		player.siren_song_active = false
 
 	for i in players.size():
 		current_player = (current_player + 1) % players.size()
@@ -6266,6 +7002,7 @@ func _restore_save(save: Dictionary) -> void:
 		p.owned_property_indices = _net_int_array(ps.get("owned", []))
 		p.spell_hand = _net_string_array(ps.get("hand", []))
 		p.temp_attunement = (ps.get("attunement", {}) as Dictionary).duplicate()
+		p.cramped_cell_debts = _cramped_cell_from_save(ps.get("cramped_cell", []))
 		p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
 		# Seat control comes from the config, not from whatever stand-in was
 		# driving it when the save was made (the host's "Take Player's Turn").
@@ -6307,6 +7044,17 @@ func _restore_save(save: Dictionary) -> void:
 # Writes this machine's result to the player profile, once per game. Called
 # with the winner when the game ends, or with -1 when an online player's own
 # seat is eliminated (so leaving early still counts as a loss).
+# Cramped Cell entries as stored in a save / snapshot, back to
+# {"creditor": int, "amount": int} (a JSON round-trip turns ints into floats).
+func _cramped_cell_from_save(raw: Variant) -> Array:
+	var out: Array = []
+	if raw is Array:
+		for e in raw:
+			if e is Dictionary:
+				out.append({"creditor": int(e.get("creditor", -1)), "amount": int(e.get("amount", 0))})
+	return out
+
+
 func _record_result(winner_id: int) -> void:
 	if _result_recorded or GameState.tutorial_mode:
 		return
@@ -6411,6 +7159,7 @@ func _build_snapshot() -> Dictionary:
 			"owned": p.owned_property_indices.duplicate(),
 			"hand": p.spell_hand.duplicate(),
 			"attunement": p.temp_attunement.duplicate(),
+			"cramped_cell": p.cramped_cell_debts.duplicate(true),
 		})
 	var space_states: Array = []
 	for s in board.spaces:
@@ -6514,6 +7263,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		p.owned_property_indices = _net_int_array(ps.get("owned", []))
 		p.spell_hand = _net_string_array(ps.get("hand", []))
 		p.temp_attunement = (ps.get("attunement", {}) as Dictionary).duplicate()
+		p.cramped_cell_debts = _cramped_cell_from_save(ps.get("cramped_cell", []))
 		p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
 
 	var space_states: Array = snap.get("spaces", [])
