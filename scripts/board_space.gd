@@ -116,9 +116,17 @@ var _targeted: bool = false
 # Toggled by set_landing_highlight().
 var landing_highlight: Panel = null
 
+# Landmarks on this space -- a row of small dots in their owners' colours,
+# centred on the tile, each with its landmark's description as a tooltip.
+# Built in code; filled by set_landmarks() (main.gd's _refresh_landmark_badges).
+const LANDMARK_DOT: float = 11.0
+var landmark_row: HBoxContainer = null
+var _landmark_items: Array = []
+
 
 func _ready() -> void:
 	_build_landing_highlight()
+	_build_landmark_row()
 	_build_target_outline()
 	_apply_layout()
 	_update_label()
@@ -142,6 +150,57 @@ func _build_target_outline() -> void:
 	target_outline.add_theme_stylebox_override("panel", style)
 	add_child(target_outline)
 	_position_target_outline()
+
+
+func _build_landmark_row() -> void:
+	landmark_row = HBoxContainer.new()
+	landmark_row.name = "LandmarkRow"
+	landmark_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	landmark_row.add_theme_constant_override("separation", 2)
+	landmark_row.visible = false
+	add_child(landmark_row)
+
+
+func _position_landmark_row() -> void:
+	if not landmark_row:
+		return
+	var n: int = mini(_landmark_items.size(), 5)
+	var row_w: float = n * LANDMARK_DOT + maxf(0.0, n - 1) * 2.0
+	var x: float = (tile_size.x - row_w) * 0.5
+	var y: float = (tile_size.y - LANDMARK_DOT) * 0.5
+	_set_rect(landmark_row, x, y, x + row_w, y + LANDMARK_DOT)
+
+
+# `items`: [{"color": Color, "text": String}], one per landmark here. More
+# than 5 share the last dot (its tooltip lists them all).
+func set_landmarks(items: Array) -> void:
+	if not landmark_row:
+		return
+	if items == _landmark_items:
+		return
+	_landmark_items = items.duplicate(true)
+	for child in landmark_row.get_children():
+		child.queue_free()
+	landmark_row.visible = not items.is_empty()
+	for k in mini(items.size(), 5):
+		var dot := Panel.new()
+		dot.custom_minimum_size = Vector2(LANDMARK_DOT, LANDMARK_DOT)
+		dot.mouse_filter = Control.MOUSE_FILTER_PASS
+		var tip: String = str(items[k].get("text", ""))
+		if k == 4 and items.size() > 5:
+			var rest: Array[String] = []
+			for j in range(4, items.size()):
+				rest.append(str(items[j].get("text", "")))
+			tip = "\n".join(rest)
+		dot.tooltip_text = tip
+		var style := StyleBoxFlat.new()
+		style.bg_color = items[k].get("color", Color.WHITE)
+		style.border_color = Color(0.05, 0.05, 0.05)
+		style.set_border_width_all(2)
+		style.set_corner_radius_all(int(LANDMARK_DOT * 0.5))
+		dot.add_theme_stylebox_override("panel", style)
+		landmark_row.add_child(dot)
+	_position_landmark_row()
 
 
 func _position_target_outline() -> void:
@@ -196,6 +255,7 @@ func _on_click_area_gui_input(event: InputEvent) -> void:
 # nodes exist (the setters can fire before _ready during board generation);
 # _ready() calls it again once they do.
 func _apply_layout() -> void:
+	_position_landmark_row()
 	var w: float = tile_size.x
 	var h: float = tile_size.y
 
