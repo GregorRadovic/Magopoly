@@ -369,6 +369,64 @@ func _update_wizard_vision() -> void:
 		_wv_landing_index = landing_index
 
 
+# --- Rolling token animation (purely cosmetic) ------------------------------
+# While a roll is in flight the roller's token slides along the Wizard Vision
+# route from its start tile to where the roll will put it, taking exactly one
+# response window (_response_window_seconds()) whatever the distance. Any
+# pause snaps it back to the start; once everyone unpauses it sets off again
+# (and _ensure_response_window() gives it a full window to arrive). The real
+# move in _move_player() then places the token for good. Runs on clients too,
+# from their mirrored roll / pause state.
+var _token_anim_start_msec: int = -1
+var _token_anim_seq: int = -1
+var _token_anim_player: int = -1
+
+
+func _animate_roll_token() -> void:
+	if not _roll_in_flight or current_player < 0 or current_player >= players.size():
+		_token_anim_player = -1
+		return
+	var roller: Node2D = players[current_player]
+	# A jail roll that isn't doubles goes nowhere, and neither does a roll
+	# cancelled by being sent to Jail mid-roll.
+	if _roll_cancelled or (roller.in_jail and _die1 != _die2):
+		return
+	var start_spot: Vector2 = board.get_space_center(roller.current_space) + MARKER_OFFSETS[roller.player_id]
+	var now: int = Time.get_ticks_msec()
+	if _token_anim_seq != _roll_seq or _token_anim_player != current_player:
+		_token_anim_seq = _roll_seq
+		_token_anim_player = current_player
+		_token_anim_start_msec = now
+	if _response_window_paused_by.has(true) or _casting_spell:
+		roller.position = start_spot
+		_token_anim_start_msec = -1
+		return
+	if _token_anim_start_msec == -1:
+		_token_anim_start_msec = now
+	var steps: int = _apply_pre_move_landmarks(roller, _current_roll, true)
+	if steps <= 0:
+		roller.position = start_spot
+		return
+	var t: float = clampf(float(now - _token_anim_start_msec) / (_response_window_seconds() * 1000.0), 0.0, 1.0)
+	roller.position = _point_along(_wizard_vision_path(roller, steps), t)
+
+
+# The point `t` (0..1) of the way along `route`, by distance.
+func _point_along(route: PackedVector2Array, t: float) -> Vector2:
+	if route.size() == 1:
+		return route[0]
+	var total: float = 0.0
+	for i in route.size() - 1:
+		total += route[i].distance_to(route[i + 1])
+	var target: float = total * t
+	for i in route.size() - 1:
+		var seg: float = route[i].distance_to(route[i + 1])
+		if target <= seg or i == route.size() - 2:
+			return route[i].lerp(route[i + 1], 0.0 if seg <= 0.0 else clampf(target / seg, 0.0, 1.0))
+		target -= seg
+	return route[route.size() - 1]
+
+
 # How far each extra lap of a Wizard Vision route is pulled in toward the
 # board's centre, so a route that goes all the way round never overlaps itself.
 const WV_LAP_OFFSET: float = 14.0
@@ -381,7 +439,9 @@ const WV_LAP_OFFSET: float = 14.0
 func _wizard_vision_path(player: Node2D, steps: int) -> PackedVector2Array:
 	var start: int = player.current_space
 	var marker: Vector2 = MARKER_OFFSETS[player.player_id]
-	var route := PackedVector2Array([player.position])
+	# Anchored on the start tile rather than the token itself, which slides
+	# along this route while the roll is in flight (_animate_roll_token()).
+	var route := PackedVector2Array([board.get_space_center(start) + marker])
 	for s in range(1, steps + 1):
 		var index: int = (start + s) % board.TOTAL_SPACES
 		var lap: int = (s - 1) / board.TOTAL_SPACES
@@ -2288,11 +2348,21 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 		# pickers -- at which point _prompt_slot still points at the caster and
 		# the rolling player's buy prompt gets misrouted to them (see
 		# _prompt_target / _ask_buy_property).
-		while _response_window_paused_by.has(true) or _casting_spell or Time.get_ticks_msec() < _window_deadline_msec:
+		var was_frozen: bool = false
+		while true:
 			# Quit to Main Menu (or a disconnect) frees this scene mid-loop --
 			# bail before touching a get_tree() that's about to go null.
 			if _returning_to_menu or not is_inside_tree():
 				return
+			var frozen: bool = _response_window_paused_by.has(true) or _casting_spell
+			# Everyone has just unpaused a roll's window: the rolling token
+			# starts its journey over (_animate_roll_token()), so give it the
+			# full window to get there before the move happens.
+			if was_frozen and not frozen and _roll_in_flight:
+				_window_deadline_msec = maxi(_window_deadline_msec, Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0))
+			was_frozen = frozen
+			if not frozen and Time.get_ticks_msec() >= _window_deadline_msec:
+				break
 			await get_tree().process_frame
 
 		_response_window_open = false
@@ -8345,6 +8415,7 @@ var _net_ready_peers: Dictionary = {}
 
 
 func _process(_delta: float) -> void:
+	_animate_roll_token()
 	if not (GameState.online and GameState.is_authority()):
 		return
 	_net_ai_takeover_watchdog()
