@@ -100,17 +100,29 @@ const TERMINUS_FIVE_RAILROAD_RENT: int = 300
 #                       (Adrenaline-boosted) roll finally resolves
 #   buy_oriental     -- click Yes on the Oriental Avenue buy prompt
 #   end_turn         -- click End Turn
+#
+# Basic Rules tutorial (BASIC_TUTORIAL_STEPS) also uses:
+#   inspect_property -- look at the title deed of step["space"] (right-click
+#                       its card in the Players panel, or click the board)
+#   roll_move        -- click Roll; the step ends when the move needs a
+#                       decision (the buy prompt) or, if none, once the roll
+#                       has fully resolved
+#   buy_yes / buy_no -- answer the buy prompt that way
+#   buy_house        -- click Buy Houses
+#   build_house      -- click step["space"] on the board to build there
+#   opponent_turn    -- no input: the Computer takes a scripted turn with
+#                       step["opponent_roll"], then ends it
 const TUTORIAL_STEPS: Array[Dictionary] = [
-	{"text": "Welcome to the Magopoly tutorial!"},
-	{"text": "We assume you know the rules of regular Monopoly; this tutorial will tell you how spells work."},
+	{"text": "Welcome to the Casting Spells tutorial! (New to Monopoly? Try the Basic Rules tutorial first.)"},
+	{"text": "Magopoly is Monopoly plus spells. This tutorial shows you how to cast them."},
 	{"text": "We've started you with a few properties and a few spells to make this easier."},
 	{"text": "Right click on a spell to see what it does. Right click on the sky blue spell, Migraine.", "action": "inspect_migraine"},
 	{"text": "Each spell has different levels, determined by the amount of unmortgaged properties you own of that spell's color."},
 	{"text": "For example, since you have two sky-blue properties, you can cast Migraine at level 2."},
 	{"text": "Left click Migraine to cast it.", "action": "cast_migraine"},
 	{"text": "For now let's cast it at level 2.", "action": "pick_level"},
-	{"text": "Now target your opponent.", "action": "pick_target"},
-	{"text": "Great job! You just cast your first spell!"},
+	{"text": "Now choose your target: click Player 2's entry in the Players panel on the right.", "action": "pick_target"},
+	{"text": "Great job! You just cast your first spell! While it waits to resolve, Player 2 is framed in your colour and marked TARGETED."},
 	{"text": "Now let's roll the dice to move for our turn. Click the Roll button.", "action": "roll", "forced_roll": Vector2i(1, 3), "tag": "roll"},
 	{"text": "Quick! Press Space Bar!", "action": "press_space"},
 	{"text": "Space Bar is how you pause the game to indicate that you want to cast a spell."},
@@ -122,7 +134,7 @@ const TUTORIAL_STEPS: Array[Dictionary] = [
 	{"text": "Now we'd be able to cast Adrenaline at Level 1, but we can do better than that. Look at your Manastone."},
 	{"text": "Manastones are a special type of card that help smooth out your mana. They get stronger if you own utilities, but even without them, you can still cast them at level 0."},
 	{"text": "Cast Manastone at level 0 now, adding 1 Green Attunement.", "action": "cast_manastone"},
-	{"text": "Spells go on the stack when cast, where they wait to resolve. Players can cast other spells in response."},
+	{"text": "Spells go on the stack when cast, where they wait to resolve. You can see it under \"Spells being cast\" in the Players panel. Players can cast other spells in response."},
 	{"text": "You could pause now to cast a spell in response to Manastone, but we want to let it resolve first to give you your attunement."},
 	{"text": "Wait for the Manastone to resolve...", "action": "await_manastone"},
 	{"text": "You automatically pause again after your spell resolves. Now you have all the Green attunement you need."},
@@ -132,7 +144,7 @@ const TUTORIAL_STEPS: Array[Dictionary] = [
 	{"text": "Since you have no more spells to cast, press spacebar again to unpause.", "action": "unpause_after_adrenaline"},
 	{"text": "Now you can buy Oriental Avenue.", "action": "buy_oriental"},
 	{"text": "One last thing: You'll notice you still have your temporary attunement. That lasts until the start of your next turn."},
-	{"text": "Let's make use of it before it goes away. Cast Sinkhole on your opponent.", "action": "cast_sinkhole"},
+	{"text": "Let's make use of it before it goes away. Cast Sinkhole on your opponent: pick a level, then click Player 2 in the Players panel.", "action": "cast_sinkhole"},
 	{"text": "Great job!"},
 	{"text": "There are three times when you can pause to cast spells: After your roll; after an opponent's roll; and whenever a player casts a spell."},
 	{"text": "Some spells are marked as \"Slow\", meaning you can only play them on your turn before or after your roll."},
@@ -140,6 +152,56 @@ const TUTORIAL_STEPS: Array[Dictionary] = [
 	{"text": "Congratulations! That's the basics of casting spells in Magopoly!"},
 	{"text": "Now you're ready to start playing for real. Good luck!"},
 ]
+
+# The Basic Rules tutorial: Monopoly's own rules, no spells. The dice are
+# scripted so the game plays out the same way every time:
+#  You 0 -> 9 Connecticut (buy, completing sky blue; build a house)
+#  Computer 0 -> 4 Income Tax ($200 to Free Parking)
+#  You 9 -> 13 States Avenue on doubles (decline), then 13 -> 20 Free Parking
+#  Computer 4 -> 9 Connecticut (pays you rent)
+#  You 20 -> 30 Go To Jail (doubles, but no extra turn)
+#  Computer 9 -> 16 St. James Place (buys it)
+#  You roll doubles in Jail: out, 10 -> 12 Electric Company (buy)
+const BASIC_TUTORIAL_STEPS: Array[Dictionary] = [
+	{"text": "Welcome to Magopoly! This first tutorial teaches the basic rules of Monopoly. Spells come in the next one."},
+	{"text": "Everyone starts with $1500. Take turns rolling the dice and moving around the board, buying properties and charging rent. The last player who isn't bankrupt wins."},
+	{"text": "You are Player 1. Your money, properties and spells are shown in the Players panel on the right. Your opponent, Player 2, is right below you."},
+	{"text": "We've started you off with two properties: Oriental Avenue and Vermont Avenue."},
+	{"text": "Right-click Vermont Avenue in the Players panel to look at its title deed.", "action": "inspect_property", "space": 8},
+	{"text": "The title deed lists the rent other players pay when they land on it. Rent goes up once you own the whole color set, and again with every house you build."},
+	{"text": "Let's start your turn. Click the Roll button.", "action": "roll_move", "forced_roll": Vector2i(4, 5)},
+	{"text": "You rolled a 9 and landed on Connecticut Avenue. Nobody owns it, so you can buy it. Click Yes to buy it.", "action": "buy_yes"},
+	{"text": "You now own all three sky blue properties -- a full color set! Rent on all three is doubled, and you can now build houses on them."},
+	{"text": "Click Buy Houses to start building.", "action": "buy_house"},
+	{"text": "Now click Connecticut Avenue on the board to build a house there.", "action": "build_house", "space": 9},
+	{"text": "Each house makes the rent much higher. Houses must be built evenly: a property can't have two more houses than another in its set. Five houses make a hotel."},
+	{"text": "You're done for this turn. Click End Turn.", "action": "end_turn"},
+	{"text": "Now it's Player 2's turn. Watch what happens...", "action": "opponent_turn", "opponent_roll": Vector2i(1, 3)},
+	{"text": "Player 2 landed on Income Tax and paid $200. In Magopoly, taxes and fees go into the Free Parking pot -- its total is shown under the players."},
+	{"text": "Your turn again. Click the Roll button.", "action": "roll_move", "forced_roll": Vector2i(2, 2)},
+	{"text": "Doubles! See \"Doubles!\" above the dice? Rolling doubles means you roll again after this. You landed on States Avenue, but you don't have to buy everything. Click No.", "action": "buy_no"},
+	{"text": "Because you rolled doubles, you get another roll. Click the Roll button.", "action": "roll_move", "forced_roll": Vector2i(4, 3)},
+	{"text": "You landed on Free Parking and collected everything in the pot: $200!"},
+	{"text": "Be careful: rolling doubles three times in a row sends you straight to Jail. Now click End Turn.", "action": "end_turn"},
+	{"text": "Player 2's turn...", "action": "opponent_turn", "opponent_roll": Vector2i(2, 3)},
+	{"text": "Player 2 landed on your Connecticut Avenue and paid you $40 rent. With the house you built, that's five times the normal rent!"},
+	{"text": "Your turn. Click the Roll button.", "action": "roll_move", "forced_roll": Vector2i(5, 5)},
+	{"text": "Oh no -- you landed on Go To Jail! You go straight to Jail without passing GO, and your turn ends even though you rolled doubles."},
+	{"text": "In Jail you can still collect rent and build. On each of your turns you roll: doubles get you out. After 3 turns without doubles, you pay $50 and leave. Click End Turn.", "action": "end_turn"},
+	{"text": "Player 2's turn...", "action": "opponent_turn", "opponent_roll": Vector2i(6, 1)},
+	{"text": "Player 2 bought St. James Place. When you land on an unowned property, you can buy it -- the Computer usually does!"},
+	{"text": "Your turn. Let's try to roll doubles to get out of Jail. Click the Roll button.", "action": "roll_move", "forced_roll": Vector2i(1, 1)},
+	{"text": "Doubles -- you're out of Jail! You landed on Electric Company. Utility rent is 4 times the dice roll, or 10 times if you own both utilities. Buy it.", "action": "buy_yes"},
+	{"text": "Railroads work similarly: the more railroads you own, the higher the rent on each one."},
+	{"text": "Every time you pass GO, you collect $200 (and in Magopoly, you also draw a spell)."},
+	{"text": "Short on money? Sell Houses / Mortgage lets you sell houses back for half price, or mortgage a property for cash. Mortgaged properties collect no rent."},
+	{"text": "The Trade button lets you swap properties, money and spells with other players."},
+	{"text": "If you ever can't pay what you owe, even after selling and mortgaging, you have to Declare Bankruptcy and you're out of the game."},
+	{"text": "Spell Shop and Magic Forest spaces have to do with spells. You'll learn about them in the Casting Spells tutorial."},
+	{"text": "That's everything for now. Click End Turn to finish.", "action": "end_turn"},
+	{"text": "Congratulations! You know the basic rules of Monopoly. Next, try the Casting Spells tutorial to learn about magic!"},
+]
+const BASIC_TUTORIAL_P1_PROPERTIES: Array[int] = [6, 8]  # Oriental Ave, Vermont Ave
 # Shown by _tutorial_rewind_roll() when the player misses the "press Space"
 # window; the next click jumps back to the "roll" step. Not a TUTORIAL_STEPS
 # entry so it never lands in the linear flow.
@@ -862,9 +924,14 @@ func _start_tutorial() -> void:
 	_tutorial_advance()
 
 
+# The script for this tutorial (GameState.tutorial_kind).
+func _tutorial_steps() -> Array[Dictionary]:
+	return BASIC_TUTORIAL_STEPS if GameState.tutorial_kind == "basic" else TUTORIAL_STEPS
+
+
 func _tutorial_advance() -> void:
 	_tutorial_step += 1
-	if _tutorial_step >= TUTORIAL_STEPS.size():
+	if _tutorial_step >= _tutorial_steps().size():
 		_end_tutorial()
 		return
 	_tutorial_apply_current_step()
@@ -873,7 +940,7 @@ func _tutorial_advance() -> void:
 func _tutorial_apply_current_step() -> void:
 	_tutorial_pick_phase = 0
 	_tutorial_rewind_pending = false
-	var step: Dictionary = TUTORIAL_STEPS[_tutorial_step]
+	var step: Dictionary = _tutorial_steps()[_tutorial_step]
 	_tutorial_expected_action = step.get("action", "")
 	_tutorial_forced_roll = step.get("forced_roll", Vector2i.ZERO)
 	tutorial_bubble_label.text = step.get("text", "")
@@ -891,7 +958,27 @@ func _tutorial_apply_current_step() -> void:
 		_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
 		_refresh_action_buttons()
 		_update_player_panels()
+	if _tutorial_expected_action == "opponent_turn":
+		_tutorial_run_opponent_turn.call_deferred(step.get("opponent_roll", Vector2i(1, 2)))
 
+
+# Basic Rules: the Computer's scripted turn -- a beat, the roll (it buys,
+# pays rent and so on by itself, as the AI always does), another beat, then
+# End Turn and on to the next step.
+func _tutorial_run_opponent_turn(dice: Vector2i) -> void:
+	var step_at_start: int = _tutorial_step
+	await get_tree().create_timer(1.0).timeout
+	if not _tutorial_active or _tutorial_step != step_at_start:
+		return
+	await _perform_roll(dice.x, dice.y)
+	if not _tutorial_active or _returning_to_menu or not is_inside_tree():
+		return
+	await get_tree().create_timer(1.0).timeout
+	if not _tutorial_active:
+		return
+	if _awaiting_end_turn:
+		_end_turn()
+	_tutorial_advance()
 
 # Works out what the current bubble text is pointing at and lights it up:
 # any spell it names by card title gets a gold outline on that card in the
@@ -909,7 +996,40 @@ func _tutorial_refresh_focus(text: String) -> void:
 	_tutorial_focus_roll_button = _tutorial_active and (
 		"roll button" in lower or "roll the dice" in lower or "end turn" in lower)
 	_tutorial_apply_roll_button_glow()
+	# The other action-panel buttons a step can name.
+	var named: Dictionary = {
+		buy_house_unmortgage_button: "buy houses",
+		sell_house_mortgage_button: "sell houses / mortgage",
+		trade_button: "trade button",
+		declare_bankruptcy_button: "declare bankruptcy",
+	}
+	for button in named:
+		_tutorial_set_glow(button, _tutorial_active and named[button] in lower)
 	_update_player_panels()
+
+
+# A gold outline around `button` (built on first use), shown or hidden.
+func _tutorial_set_glow(button: Control, on: bool) -> void:
+	var glow: Panel = button.get_node_or_null("TutorialGlow")
+	if glow == null:
+		if not on:
+			return
+		glow = Panel.new()
+		glow.name = "TutorialGlow"
+		glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		glow.set_anchors_preset(Control.PRESET_FULL_RECT)
+		glow.offset_left = -3.0
+		glow.offset_top = -3.0
+		glow.offset_right = 3.0
+		glow.offset_bottom = 3.0
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(1.0, 0.82, 0.15, 0.0)
+		style.border_color = Color(1.0, 0.82, 0.15)
+		style.set_border_width_all(3)
+		style.set_corner_radius_all(6)
+		glow.add_theme_stylebox_override("panel", style)
+		button.add_child(glow)
+	glow.visible = on
 
 
 func _tutorial_apply_roll_button_glow() -> void:
@@ -935,8 +1055,9 @@ func _tutorial_apply_roll_button_glow() -> void:
 
 
 func _tutorial_find_step(tag: String) -> int:
-	for i in TUTORIAL_STEPS.size():
-		if TUTORIAL_STEPS[i].get("tag", "") == tag:
+	var steps: Array[Dictionary] = _tutorial_steps()
+	for i in steps.size():
+		if steps[i].get("tag", "") == tag:
 			return i
 	return -1
 
@@ -958,6 +1079,8 @@ func _end_tutorial() -> void:
 	_tutorial_focus_roll_button = false
 	if _tutorial_roll_button_glow:
 		_tutorial_roll_button_glow.visible = false
+	for button in [buy_house_unmortgage_button, sell_house_mortgage_button, trade_button, declare_bankruptcy_button]:
+		_tutorial_set_glow(button, false)
 	tutorial_bubble.visible = false
 	GameState.tutorial_mode = false
 	get_tree().call_deferred("change_scene_to_file", "res://scenes/tutorial_menu.tscn")
@@ -986,10 +1109,14 @@ func _input(event: InputEvent) -> void:
 		return
 	if not (event is InputEventMouseButton and event.pressed):
 		return
-	if spell_card.visible:
-		spell_card.hide()
-		get_viewport().set_input_as_handled()
-		return
+	# A zoomed-in card (spell, title deed, utility / railroad / tax card) is
+	# dismissed by the next click, which is then swallowed and does NOT
+	# advance -- the card was covering the bubble.
+	for popup in [spell_card, property_card, asset_card, info_prompt]:
+		if popup.visible:
+			popup.hide()
+			get_viewport().set_input_as_handled()
+			return
 	if _tutorial_expected_action != "":
 		return
 	if event.button_index != MOUSE_BUTTON_LEFT:
@@ -1057,14 +1184,14 @@ func _tutorial_gate_check(index: int) -> bool:
 # The gate handed to confirm_prompt -- only the Oriental Avenue buy prompt is
 # gated, and only "Yes" is accepted there.
 func _tutorial_confirm_gate() -> Callable:
-	if _tutorial_active and _tutorial_expected_action == "buy_oriental":
+	if _tutorial_active and _tutorial_expected_action in ["buy_oriental", "buy_yes", "buy_no"]:
 		return _tutorial_buy_gate
 	return Callable()
 
 
 func _tutorial_buy_gate(yes: bool) -> bool:
-	if yes:
-		_tutorial_advance()  # -> "You'll notice you still have your temporary attunement."
+	if yes == (_tutorial_expected_action != "buy_no"):
+		_tutorial_advance()
 		return true
 	_toast("Follow the instructions!")
 	return false
@@ -1171,6 +1298,14 @@ func _tutorial_hand_spell_is(player_index: int, hand_index: int, spell_name: Str
 
 
 func _grant_tutorial_start(player: Node2D) -> void:
+	if GameState.tutorial_kind == "basic":
+		# Two of the three sky blues; the third is bought during the script.
+		if player.player_id == 0:
+			for space_index in BASIC_TUTORIAL_P1_PROPERTIES:
+				board.spaces[space_index].owner_id = player.player_id
+				player.owned_property_indices.append(space_index)
+			_sort_owned_properties(player)
+		return
 	if player.player_id == 0:
 		for space_index in TUTORIAL_P1_PROPERTIES:
 			board.spaces[space_index].owner_id = player.player_id
@@ -1369,7 +1504,9 @@ func _first_active_player() -> int:
 func _on_roll_pressed() -> void:
 	# Tutorial: the roll is only allowed on the step that asks for it. (End
 	# Turn presses go through -- no tutorial step gates those yet.)
-	if not _awaiting_end_turn and _tutorial_blocks("roll"):
+	if not _awaiting_end_turn and _tutorial_active and _tutorial_expected_action == "roll_move":
+		pass
+	elif not _awaiting_end_turn and _tutorial_blocks("roll"):
 		return
 	# Online: only the machine controlling the current player may act, and a
 	# client sends the press to the host rather than running it locally.
@@ -1400,7 +1537,12 @@ func _perform_roll_button_action() -> void:
 	if _tutorial_active and _tutorial_forced_roll != Vector2i.ZERO:
 		var forced: Vector2i = _tutorial_forced_roll
 		_tutorial_forced_roll = Vector2i.ZERO
+		var rolling_step: int = _tutorial_step
 		await _perform_roll(forced.x, forced.y)
+		# A roll_move step with no decision on the way (the buy prompt moves
+		# it on itself) ends once the move has fully played out.
+		if _tutorial_active and _tutorial_step == rolling_step and _tutorial_expected_action == "roll_move":
+			_tutorial_advance()
 		return
 	_perform_roll(randi_range(1, 6), randi_range(1, 6))
 
@@ -1654,9 +1796,9 @@ func _advance_turn() -> void:
 	dice_roller.clear_dice()
 	_advance_to_next_active_player()
 	_update_turn_label()
-	# Start-of-turn effects (Cramped Cell), then an AI seat's turn. In the
-	# tutorial the opponent never actually takes a turn -- the script ends
-	# (back to the Main Menu) right after the player's first End Turn.
+	# Start-of-turn effects (Cramped Cell), then an AI seat's turn. In a
+	# tutorial the opponent only moves when the script says so (the Basic
+	# Rules tutorial's opponent_turn steps -- _tutorial_run_opponent_turn).
 	if GameState.is_authority():
 		_begin_turn()
 
@@ -1898,6 +2040,8 @@ func _on_buy_house_unmortgage_pressed() -> void:
 	if _buying_house_or_unmortgaging:
 		_selling_house_or_mortgaging = false
 	_refresh_action_buttons()
+	if _tutorial_active and _buying_house_or_unmortgaging:
+		_tutorial_advance()  # -> "click Connecticut Avenue to build"
 
 
 # Dispatches to unmortgaging or house-building depending on the clicked
@@ -2287,6 +2431,8 @@ func _response_window_seconds() -> float:
 	if _tutorial_active:
 		# A generous window for the moments the player has to react to; snappier
 		# for the tutorial's own auto-resolutions (Migraine, Manastone, etc.).
+		if GameState.tutorial_kind == "basic":
+			return 0.6  # no spells in this one -- nothing to react with
 		return 5.0 if _tutorial_expected_action == "press_space" else 1.5
 	# Online, widen the window so a remote player's pause has time to reach
 	# the host before the countdown expires.
@@ -4063,6 +4209,10 @@ func _ask_buy_property(property_name: String, price: int) -> bool:
 		if player.money < price:
 			_ai_mortgage_properties(player, price)
 		return player.money >= price
+	# Basic Rules: the roll that brought us here hands over to the step
+	# about this buy decision.
+	if _tutorial_active and _tutorial_expected_action == "roll_move":
+		_tutorial_advance()
 	_awaiting_buy_decision = true
 	_pending_buy_property_name = property_name
 	_pending_buy_price = price
@@ -4262,11 +4412,21 @@ func _on_space_clicked(index: int) -> void:
 		else:
 			_show_toast("Choose one of the highlighted spaces.")
 		return
-	# Tutorial: board / mini-card clicks are never part of the script. (On a
-	# "click anywhere" step _input() has already swallowed the click; this
-	# only bites on an action step.)
+	# Tutorial: a board / mini-card click either builds where the step says
+	# (build_house), or just shows that space's card. (On a "click anywhere"
+	# step _input() has already swallowed the click; this only bites on an
+	# action step.)
 	if _tutorial_active:
-		_toast("Follow the instructions!")
+		if _tutorial_expected_action == "build_house" and _buying_house_or_unmortgaging:
+			if index != int(_tutorial_steps()[_tutorial_step].get("space", -1)):
+				_toast("Follow the instructions!")
+				return
+			_buy_house_or_unmortgage(index)
+			_buying_house_or_unmortgaging = false
+			_refresh_action_buttons()
+			_tutorial_advance()
+			return
+		_show_property_details(index)
 		return
 	if GameState.online and not GameState.is_authority():
 		# During a trade, a property click toggles it in/out of the offer
@@ -4330,10 +4490,11 @@ func _on_space_clicked(index: int) -> void:
 # fallback above, and for right-clicking a mini card to inspect it without
 # disturbing whatever picking mode (e.g. a trade) is currently active.
 func _show_property_details(index: int) -> void:
-	# Tutorial: inspecting properties isn't part of the script.
-	if _tutorial_active:
-		_toast("Follow the instructions!")
-		return
+	# Tutorial: looking at a card is always fine; on an inspect_property step
+	# it's the step's space that moves the script on.
+	if _tutorial_active and _tutorial_expected_action == "inspect_property" \
+			and index == int(_tutorial_steps()[_tutorial_step].get("space", -1)):
+		_tutorial_advance()
 	# Terminus Station -- the GO overlay, once summoned -- is a railroad card
 	# in everything but its name.
 	if index == 0 and board.spaces[0].owner_id != -1:
@@ -7799,7 +7960,8 @@ func _player_pick_start(text: String, entries: Array, mandatory: bool) -> void:
 	for entry in entries:
 		_player_pick_ids.append(int(entry["index"]))
 	_player_pick_hover = -1
-	_show_pick_banner(text, not mandatory)
+	# The tutorial wants a particular pick, so there's no Cancel there.
+	_show_pick_banner(text, not mandatory and not _tutorial_active)
 	for i in player_row_frames.size():
 		_style_player_row(i)
 
@@ -7844,6 +8006,9 @@ func _player_pick_input(event: InputEvent) -> bool:
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var which: int = _player_pick_at(event.position)
 		if which != -1:
+			# Tutorial: only the player the step asks for (the gate toasts).
+			if _tutorial_active and not _tutorial_gate_check(which):
+				return true
 			_player_pick_end(which)
 			return true
 	return false
@@ -7897,7 +8062,7 @@ func _hide_pick_banner() -> void:
 
 func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
 	if _prompt_is_local():
-		_pp_panel_mode = not _tutorial_active and _is_player_entries(entries)
+		_pp_panel_mode = _is_player_entries(entries)
 		if _pp_panel_mode:
 			_player_pick_start(text, entries, mandatory)
 		else:
