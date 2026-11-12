@@ -689,6 +689,7 @@ func _ready() -> void:
 	pause_menu.quit_to_menu_requested.connect(_quit_to_main_menu)
 	pause_menu.quit_to_desktop_requested.connect(get_tree().quit)
 	board.space_clicked.connect(_on_space_clicked)
+	board.landmark_clicked.connect(_on_landmark_badge_clicked)
 	_build_pick_banner()
 	player_picker.entry_hovered.connect(_on_picker_entry_hovered)
 	player_picker.player_chosen.connect(func(_i: int) -> void: _clear_picker_preview())
@@ -1970,33 +1971,27 @@ func _buy_house(index: int) -> void:
 	var effective_cost: int = house_cost
 	if player.haggling_discount_percent > 0:
 		effective_cost = maxi(0, house_cost - (house_cost * player.haggling_discount_percent / 100))
-	# Outland Settlements: during their own turn, the owner builds here as
-	# though they owned the whole color set -- the mortgage and even-build
-	# rules then only look at the properties of that set they really own.
+	# Outland Settlements: during their own turn, the owner may always build
+	# on the property it's on -- no color set, mortgage-in-the-set or
+	# even-building rules. Only a mortgaged property itself, 5 houses, or
+	# another player's turn stop it.
 	var outland: Dictionary = {}
 	if current_player == player.player_id:
 		outland = _outland_landmark(player.player_id, index)
-	var own_in_group: Array[int] = []
-	for g in board.get_color_group(color_name):
-		if board.spaces[g].owner_id == player.player_id:
-			own_in_group.append(g)
-	var own_mortgaged: bool = false
-	var own_min_houses: int = 5
-	for g in own_in_group:
-		own_mortgaged = own_mortgaged or board.spaces[g].is_mortgaged
-		own_min_houses = mini(own_min_houses, board.spaces[g].house_count)
 
 	if info.get("type", "") != "property" or not board.HOUSE_COSTS_BY_COLOR.has(color_name):
 		_toast("You can't build houses on that space.")
 	elif space.owner_id != player.player_id:
 		_toast("You don't own %s." % property_name)
-	elif (_group_has_mortgaged(color_name) if outland.is_empty() else own_mortgaged):
+	elif not outland.is_empty() and space.is_mortgaged:
+		_toast("You can't build houses on %s while it's mortgaged." % property_name)
+	elif outland.is_empty() and _group_has_mortgaged(color_name):
 		_toast("You can't build houses on %s while a property in its color set is mortgaged." % property_name)
 	elif outland.is_empty() and not _owns_full_color_group(player.player_id, color_name):
 		_toast("You need the full color set to build a house on %s." % property_name)
 	elif space.house_count >= 5:
 		_toast("%s already has the maximum of 5 houses." % property_name)
-	elif space.house_count > (_min_houses_in_group(color_name) if outland.is_empty() else own_min_houses):
+	elif outland.is_empty() and space.house_count > _min_houses_in_group(color_name):
 		_toast("You must build evenly -- other properties in the color set have fewer houses than %s." % property_name)
 	elif player.money < effective_cost:
 		_toast("%s can't afford a house on %s ($%d)." % [_player_display_name(player.player_id), property_name, effective_cost])
@@ -7731,23 +7726,27 @@ func _outland_landmark(player_id: int, space_index: int) -> Dictionary:
 
 
 # A house was just bought on Outland Settlements' property: use a trigger,
-# then move it to the owner's buildable property with the fewest houses
-# (first in board order on a tie; it may stay put).
+# then move it to the owner's property with the fewest houses -- color-set
+# properties only (railroads, utilities and taxes can't have houses) -- at
+# random among ties, which may mean it stays put.
 func _trigger_outland(lm: Dictionary, player: Node2D) -> void:
 	lm["triggers"] = int(lm["triggers"]) - 1
 	if int(lm["triggers"]) <= 0:
 		_remove_landmark(lm, "its last trigger was used")
 		return
-	var best: int = -1
+	var tied: Array[int] = []
 	var best_houses: int = 6
 	for space_index in _property_space_indices():
 		var space: Node2D = board.spaces[space_index]
 		var color_name: String = board.get_space_info(space_index).get("color", "")
-		if space.owner_id != player.player_id or space.is_mortgaged or not board.HOUSE_COSTS_BY_COLOR.has(color_name) or space.house_count >= 5:
+		if space.owner_id != player.player_id or not board.HOUSE_COSTS_BY_COLOR.has(color_name):
 			continue
 		if space.house_count < best_houses:
-			best = space_index
+			tied = [space_index]
 			best_houses = space.house_count
+		elif space.house_count == best_houses:
+			tied.append(space_index)
+	var best: int = -1 if tied.is_empty() else tied[randi_range(0, tied.size() - 1)]
 	if best != -1 and best != int(lm["space"]):
 		lm["space"] = best
 		_log("Outland Settlements moves to %s (%d left)." % [_property_name(best), int(lm["triggers"])])
@@ -7760,7 +7759,7 @@ func _refresh_landmark_badges() -> void:
 		var key: int = int(lm["space"])
 		if not per_space.has(key):
 			per_space[key] = []
-		per_space[key].append({"color": PLAYER_COLORS[int(lm["owner"])], "text": _landmark_label(lm), "glyph": LANDMARK_GLYPHS.get(lm["spell"], "?")})
+		per_space[key].append({"color": PLAYER_COLORS[int(lm["owner"])], "text": _landmark_label(lm), "glyph": LANDMARK_GLYPHS.get(lm["spell"], "?"), "spell": lm["spell"]})
 	for i in board.TOTAL_SPACES:
 		if board.spaces[i].has_method("set_landmarks"):
 			board.spaces[i].set_landmarks(per_space.get(i, []))
@@ -9041,6 +9040,17 @@ func _clear_picker_preview() -> void:
 	_picker_preview_on = false
 	for space in board.spaces:
 		space.set_pick_state(0)
+
+
+# A landmark badge on the board: zoom in on its card, like a spell link in
+# the log -- unless the player is picking a space (a board pick, building
+# or mortgaging, a trade, ...), where it counts as clicking that tile.
+func _on_landmark_badge_clicked(index: int, spell: String) -> void:
+	if not _board_pick_spaces.is_empty() or _buying_house_or_unmortgaging or _selling_house_or_mortgaging \
+			or _picking_promised_land_property or _admin_picking_property or _trading:
+		_on_space_clicked(index)
+		return
+	_on_log_meta_clicked("spell:" + spell.uri_encode())
 
 
 func _on_pick_banner_cancel() -> void:

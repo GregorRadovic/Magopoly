@@ -2,6 +2,9 @@ extends Node2D
 class_name BoardSpace
 
 signal clicked(index: int)
+# A landmark badge on this tile was clicked (main.gd zooms in on its card,
+# or treats it as a click on the tile while something is being picked).
+signal landmark_clicked(index: int, spell: String)
 
 # Border thickness, colour-banner height (top strip) and ownership-banner
 # thickness -- the ownership banner juts OUTSIDE the tile toward the board's
@@ -205,6 +208,9 @@ func set_landmarks(items: Array) -> void:
 				rest.append(str(items[j].get("text", "")))
 			tip = "\n".join(rest)
 		dot.tooltip_text = tip
+		dot.mouse_filter = Control.MOUSE_FILTER_STOP
+		dot.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		dot.gui_input.connect(_on_landmark_badge_input.bind(str(items[k].get("spell", ""))))
 		var style := StyleBoxFlat.new()
 		style.bg_color = items[k].get("color", Color.WHITE)
 		style.border_color = Color(0.98, 0.98, 0.95)
@@ -310,6 +316,11 @@ func set_targeted(value: bool) -> void:
 	_targeted = value
 	if target_outline:
 		target_outline.visible = value
+
+
+func _on_landmark_badge_input(event: InputEvent, spell: String) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		landmark_clicked.emit(index, spell)
 
 
 func _on_click_area_gui_input(event: InputEvent) -> void:

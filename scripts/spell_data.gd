@@ -743,9 +743,9 @@ const SPELLS: Dictionary = {
 		"color": "orange",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 4 1 Treasure Map.png",
 		"levels": {
-			1: {"description": "Create 3 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 3, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "Create 6 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 6, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "Create 10 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 10, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "Create 3 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 3},
+			2: {"description": "Create 6 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 6},
+			3: {"description": "Create 10 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 10},
 		},
 	},
 	"Contested Battlefield": {
