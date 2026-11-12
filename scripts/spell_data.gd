@@ -451,12 +451,13 @@ const SPELLS: Dictionary = {
 			3: {"description": "Reveal 3 random unowned properties. You may buy any of them; the money goes to Free Parking.", "count": 3, "requires_current_player": true, "requires_not_yet_rolled": true},
 		},
 	},
+	# Slow.
 	"Spiteful Destruction": {
 		"color": "ocean_blue",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 8 Spiteful Destruction.png",
 		"levels": {
-			1: {"description": "As an additional cost, pay $100 to Free Parking. An opponent pays $300 to Free Parking.", "amount": 300, "extra_cost": 100, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "As an additional cost, pay $100 to Free Parking. An opponent pays $500 to Free Parking.", "amount": 500, "extra_cost": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "As an additional cost, pay $100 to Free Parking. An opponent pays $300 to Free Parking.", "amount": 300, "extra_cost": 100},
+			2: {"description": "As an additional cost, pay $100 to Free Parking. An opponent pays $500 to Free Parking.", "amount": 500, "extra_cost": 100},
 		},
 	},
 
@@ -469,15 +470,16 @@ const SPELLS: Dictionary = {
 			2: {"description": "Send a player to jail. If this happens in the middle of their roll, cancel the roll.", "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
-	# Slow. The payment is charged at the start of each of the jailed
-	# player's own turns -- see _charge_cramped_cell() in main.gd.
+	# Slow. "jail_turns" sets the length of the sentence; the payment is
+	# charged at the start of each of the jailed player's own turns -- see
+	# _charge_cramped_cell() in main.gd.
 	"Cramped Cell": {
 		"color": "sky_blue",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 2 Cramped Cell.png",
 		"levels": {
-			1: {"description": "Send an opponent to jail. For as long as they are in jail, at the start of each of their turns, they pay you $30.", "amount": 30},
-			2: {"description": "Send an opponent to jail. For as long as they are in jail, at the start of each of their turns, they pay you $60.", "amount": 60},
-			3: {"description": "Send an opponent to jail. For as long as they are in jail, at the start of each of their turns, they pay you $100.", "amount": 100},
+			1: {"description": "Send a player to jail for 2 turns. For as long as they are in jail, at the start of their turn, they pay you $50.", "jail_turns": 2, "amount": 50},
+			2: {"description": "Send a player to jail for 4 turns. For as long as they are in jail, at the start of their turn, they pay you $50.", "jail_turns": 4, "amount": 50},
+			3: {"description": "Send a player to jail for 8 turns. For as long as they are in jail, at the start of their turn, they pay you $50.", "jail_turns": 8, "amount": 50},
 		},
 	},
 	"Penance": {
@@ -537,8 +539,8 @@ const SPELLS: Dictionary = {
 		"color": "ocean_blue",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 8 Sirens Song.png",
 		"levels": {
-			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property with the highest rent. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
-			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property with the highest rent. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
+			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property or tax with the highest rent. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
+			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property or tax with the highest rent. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
 		},
 	},
 
@@ -619,7 +621,7 @@ const SPELLS: Dictionary = {
 	# --- Expansion: Lingering Magic (C) -- Ongoing --------------------------
 	# "kind": "ongoing" -- the card stays in play (out of the deck) until its
 	# effect ends. "rotations" counts passes over Go by the affected player
-	# (the caster for self / all-opponent effects, the target otherwise). See
+	# (the caster for self-effects, the target otherwise). See
 	# the Ongoing section of main.gd.
 	"Word of Binding": {
 		"color": "brown",
@@ -635,9 +637,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/C 2 1 Natural Magician.png",
 		"kind": "ongoing",
 		"levels": {
-			1: {"description": "You have +1 Attunement to all colors. Opponents can't target you when casting spells. Lasts 1 rotation.", "rotations": 1, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "You have +1 Attunement to all colors. Opponents can't target you when casting spells. Lasts 2 rotations.", "rotations": 2, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "You have +1 Attunement to all colors. Opponents can't target you when casting spells. Lasts 3 rotations.", "rotations": 3, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "You have +1 Attunement to all colors. Opponents can't target you or your properties when casting spells. Lasts 1 rotation.", "rotations": 1, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "You have +1 Attunement to all colors. Opponents can't target you or your properties when casting spells. Lasts 2 rotations.", "rotations": 2, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "You have +1 Attunement to all colors. Opponents can't target you or your properties when casting spells. Lasts 3 rotations.", "rotations": 3, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
 	"Shielded From Harm": {
@@ -645,9 +647,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/C 3 1 Shielded From Harm.png",
 		"kind": "ongoing",
 		"levels": {
-			1: {"description": "Reduce all money you would pay by $300. Lasts 1 rotation.", "rotations": 1, "amount": 300},
-			2: {"description": "Reduce all money you would pay by $300. Lasts 2 rotations.", "rotations": 2, "amount": 300},
-			3: {"description": "Reduce all money you would pay by $300. Lasts 3 rotations.", "rotations": 3, "amount": 300},
+			1: {"description": "Reduce all money you would pay to other players by $300. Lasts 1 rotation.", "rotations": 1, "amount": 300},
+			2: {"description": "Reduce all money you would pay to other players by $300. Lasts 2 rotations.", "rotations": 2, "amount": 300},
+			3: {"description": "Reduce all money you would pay to other players by $300. Lasts 3 rotations.", "rotations": 3, "amount": 300},
 		},
 	},
 	"Fragile Goods": {
@@ -665,9 +667,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/C 5 1 Burn Bright .png",
 		"kind": "ongoing",
 		"levels": {
-			1: {"description": "Gain $1000. At the start of your turn, lose $50. Lasts 5 rotations.", "amount": 1000, "upkeep": 50, "rotations": 5, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "Gain $1000. At the start of your turn, lose $50. Lasts 4 rotations.", "amount": 1000, "upkeep": 50, "rotations": 4, "timings": ["turn", "roll_response", "spell_response"]},
-			3: {"description": "Gain $1000. At the start of your turn, lose $50. Lasts 3 rotations.", "amount": 1000, "upkeep": 50, "rotations": 3, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "Gain $500. At the start of your turn, pay $20 to the bank. Lasts 5 rotations.", "amount": 500, "upkeep": 20, "rotations": 5, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "Gain $500. At the start of your turn, pay $20 to the bank. Lasts 4 rotations.", "amount": 500, "upkeep": 20, "rotations": 4, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "Gain $500. At the start of your turn, pay $20 to the bank. Lasts 3 rotations.", "amount": 500, "upkeep": 20, "rotations": 3, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
 	"Anti-Magic Law": {
@@ -680,23 +682,27 @@ const SPELLS: Dictionary = {
 			3: {"description": "Choose an opponent. Whenever they cast a spell, counter it. Triggers 3 times.", "triggers": 3},
 		},
 	},
-	"Curse of Stalked Prey": {
+	# Charged at the start of each of the target's turns; its rotations count
+	# the target's passes over Go.
+	"Parasite": {
 		"color": "green",
-		"icon": "res://Magopoly Assets/Magopoly Expansions/C 7 1 Curse of Stalked Prey.png",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/C 7 1 Parasite.png",
 		"kind": "ongoing",
 		"levels": {
-			1: {"description": "Choose an opponent. When landing on your properties, they pay double. Lasts 1 rotation.", "rotations": 1},
-			2: {"description": "Choose an opponent. When landing on your properties, they pay double. Lasts 2 rotations.", "rotations": 2},
-			3: {"description": "Choose an opponent. When landing on your properties, they pay double. Lasts 3 rotations.", "rotations": 3},
+			1: {"description": "Choose an opponent. At the start of their turn, they pay you $20. Lasts 2 rotations.", "amount": 20, "rotations": 2, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "Choose an opponent. At the start of their turn, they pay you $20. Lasts 3 rotations.", "amount": 20, "rotations": 3, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "Choose an opponent. At the start of their turn, they pay you $20. Lasts 4 rotations.", "amount": 20, "rotations": 4, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
-	"Miasma": {
+	# Its rotations count the target's passes over Go. Cast on whoever's
+	# roll is in flight, it also shortens that roll -- see _resolve_lethargy().
+	"Lethargy": {
 		"color": "ocean_blue",
-		"icon": "res://Magopoly Assets/Magopoly Expansions/C 8 1 Miasma.png",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/C 8 1 Lethargy.png",
 		"kind": "ongoing",
 		"levels": {
-			1: {"description": "Opponents get -1 to their rolls. Lasts 3 rotations.", "roll_penalty": 1, "rotations": 3},
-			2: {"description": "Opponents get -2 to their rolls. Lasts 3 rotations.", "roll_penalty": 2, "rotations": 3},
+			1: {"description": "Choose an opponent. They get -1 to their rolls. Lasts 5 rotations.", "roll_penalty": 1, "rotations": 5, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "Choose an opponent. They get -2 to their rolls. Lasts 5 rotations.", "roll_penalty": 2, "rotations": 5, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
 
@@ -729,9 +735,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 3 1 Outland Settlements.png",
 		"kind": "landmark",
 		"levels": {
-			1: {"description": "You may buy a house on this property regardless of housing rules. When you do, move this landmark to the property you own with the fewest houses. Triggers 3 times.", "triggers": 3},
-			2: {"description": "You may buy a house on this property regardless of housing rules. When you do, move this landmark to the property you own with the fewest houses. Triggers 6 times.", "triggers": 6},
-			3: {"description": "You may buy a house on this property regardless of housing rules. When you do, move this landmark to the property you own with the fewest houses. Triggers 10 times.", "triggers": 10},
+			1: {"description": "During your turn, you may buy houses on this property as though you owned the color set. When you do, move this landmark to the property you own with the fewest houses. Triggers 3 times.", "triggers": 3},
+			2: {"description": "During your turn, you may buy houses on this property as though you owned the color set. When you do, move this landmark to the property you own with the fewest houses. Triggers 6 times.", "triggers": 6},
+			3: {"description": "During your turn, you may buy houses on this property as though you owned the color set. When you do, move this landmark to the property you own with the fewest houses. Triggers 10 times.", "triggers": 10},
 		},
 	},
 	"Treasure Map": {

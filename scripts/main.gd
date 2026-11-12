@@ -1939,21 +1939,33 @@ func _buy_house(index: int) -> void:
 	var effective_cost: int = house_cost
 	if player.haggling_discount_percent > 0:
 		effective_cost = maxi(0, house_cost - (house_cost * player.haggling_discount_percent / 100))
-	# Outland Settlements: the owner ignores the set / mortgage / even-build
-	# rules on this property (still max 5, still pays).
-	var outland: Dictionary = _outland_landmark(player.player_id, index)
+	# Outland Settlements: during their own turn, the owner builds here as
+	# though they owned the whole color set -- the mortgage and even-build
+	# rules then only look at the properties of that set they really own.
+	var outland: Dictionary = {}
+	if current_player == player.player_id:
+		outland = _outland_landmark(player.player_id, index)
+	var own_in_group: Array[int] = []
+	for g in board.get_color_group(color_name):
+		if board.spaces[g].owner_id == player.player_id:
+			own_in_group.append(g)
+	var own_mortgaged: bool = false
+	var own_min_houses: int = 5
+	for g in own_in_group:
+		own_mortgaged = own_mortgaged or board.spaces[g].is_mortgaged
+		own_min_houses = mini(own_min_houses, board.spaces[g].house_count)
 
 	if info.get("type", "") != "property" or not board.HOUSE_COSTS_BY_COLOR.has(color_name):
 		_toast("You can't build houses on that space.")
 	elif space.owner_id != player.player_id:
 		_toast("You don't own %s." % property_name)
-	elif outland.is_empty() and _group_has_mortgaged(color_name):
+	elif (_group_has_mortgaged(color_name) if outland.is_empty() else own_mortgaged):
 		_toast("You can't build houses on %s while a property in its color set is mortgaged." % property_name)
 	elif outland.is_empty() and not _owns_full_color_group(player.player_id, color_name):
 		_toast("You need the full color set to build a house on %s." % property_name)
 	elif space.house_count >= 5:
 		_toast("%s already has the maximum of 5 houses." % property_name)
-	elif outland.is_empty() and space.house_count > _min_houses_in_group(color_name):
+	elif space.house_count > (_min_houses_in_group(color_name) if outland.is_empty() else own_min_houses):
 		_toast("You must build evenly -- other properties in the color set have fewer houses than %s." % property_name)
 	elif player.money < effective_cost:
 		_toast("%s can't afford a house on %s ($%d)." % [_player_display_name(player.player_id), property_name, effective_cost])
@@ -2668,11 +2680,11 @@ func _perform_roll(die1: int, die2: int) -> void:
 		dice_label.text += "\nHasty Exit adds %d (now %d)." % [player.next_roll_bonus, roll]
 		_log("%s's roll is modified by %+d (now %d)." % [PLAYER_NAMES[current_player], player.next_roll_bonus, roll])
 		player.next_roll_bonus = 0
-	# Miasma: every opponent's Miasma shortens the roll.
-	var miasma: int = _miasma_penalty(player)
-	if miasma > 0:
-		roll = maxi(0, roll - miasma)
-		_log("Miasma: %s's roll is reduced by %d (now %d)." % [PLAYER_NAMES[current_player], miasma, roll])
+	# Lethargy: every Lethargy on the roller shortens the roll.
+	var lethargy: int = _lethargy_penalty(player)
+	if lethargy > 0:
+		roll = maxi(0, roll - lethargy)
+		_log("Lethargy: %s's roll is reduced by %d (now %d)." % [PLAYER_NAMES[current_player], lethargy, roll])
 	# Siren's Song: applied last, so it accounts for every "before rolling"
 	# change above. Anything cast during the response window can still move
 	# the roll afterwards.
@@ -2734,7 +2746,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 		else:
 			player.jail_turns_left -= 1
 			if player.jail_turns_left <= 0:
-				var jail_fee: int = _shield_reduce(player, 50)
+				var jail_fee: int = 50
 				player.money -= jail_fee
 				free_parking_amount += jail_fee
 				_release_from_jail(player)
@@ -2853,7 +2865,6 @@ func _move_and_land(player: Node2D, roll: int) -> bool:
 			if await _pay_landing_charge(player, owed, owner, tax_text + " Owes ${amount}.", tax_text + " Paid ${amount}."):
 				return player.is_bankrupt
 		else:
-			tax_value = _shield_reduce(player, tax_value)
 			if tax_value > player.money:
 				dice_label.text += "\nLanded on %s! Owes $%d." % [landed_info.get("name", ""), tax_value]
 				await _collect_debt(player, tax_value, null)
@@ -2952,7 +2963,6 @@ func _move_and_land(player: Node2D, roll: int) -> bool:
 			if charged and _word_of_binding_waives(player, player.current_space):
 				charged = false
 			if charged:
-				rent_amount = _apply_stalked_prey(player, space.owner_id, rent_amount)
 				rent_amount = _apply_payment_reduction(player, rent_amount)
 				var owner: Node2D = players[space.owner_id]
 				var rent_text: String = "\nLanded on " + property_name + " (owned by " + PLAYER_NAMES[space.owner_id] + ")!"
@@ -2992,7 +3002,9 @@ func _apply_payment_reduction(payer: Node2D, amount: int) -> int:
 # only the very last payment would ever be visible, even though every
 # payment still actually happened.
 func _charge_spell_payment(payer: Node2D, amount: int, creditor: Node2D, resolve_message: String, debt_message: String, append: bool = false) -> void:
-	amount = _shield_reduce(payer, amount)
+	# Shielded From Harm only covers money paid to other players.
+	if creditor != null:
+		amount = _shield_reduce(payer, amount)
 	# Misplaced Payment only redirects payments to an opponent, not ones
 	# already headed for Free Parking.
 	if creditor != null:
@@ -4673,7 +4685,7 @@ func _spell_extra_validation(caster: Node2D, spell_name: String, level: int) -> 
 				return "None of %s's opponents are in jail." % who
 		"Siren's Song":
 			if _siren_song_candidates(caster).is_empty():
-				return "No opponent owns an unmortgaged property for %s to be drawn to." % who
+				return "No opponent owns an unmortgaged property or tax space for %s to be drawn to." % who
 		"Seize the Opportunity":
 			if not _roll_in_flight or current_player == caster.player_id or players[current_player].is_bankrupt:
 				return "Seize the Opportunity needs an opponent who just rolled."
@@ -4868,10 +4880,8 @@ func _prepare_spell_cast(caster: Node2D, hand_index: int, spell_name: String, le
 			return _prepare_self_ongoing(caster, spell_name, level)
 		"Burn Bright":
 			return _prepare_burn_bright(caster, level)
-		"Anti-Magic Law", "Curse of Stalked Prey":
+		"Anti-Magic Law", "Parasite", "Lethargy":
 			return await _prepare_opponent_ongoing(caster, spell_name, level)
-		"Miasma":
-			return _prepare_miasma(caster, level)
 		# Landmarks
 		"Landmine", "Power Sink", "Outland Settlements", "Toll Road", "Ensnaring Roots":
 			return await _prepare_simple_landmark(caster, spell_name, level)
@@ -5655,7 +5665,7 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 	var target_entries: Array = []
 	for space_index in board.TOTAL_SPACES:
 		var space: Node2D = board.spaces[space_index]
-		if space.owner_id != -1 and space.owner_id != caster.player_id and space.house_count == 0 and board.get_space_info(space_index).get("type", "") == "property":
+		if space.owner_id != -1 and space.owner_id != caster.player_id and space.house_count == 0 and board.get_space_info(space_index).get("type", "") == "property" and _can_target_property(caster, space_index):
 			target_entries.append({"index": space_index, "name": "%s (%s)" % [_property_name(space_index), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
 	if target_entries.is_empty():
 		dice_label.text += "\nThere's no eligible property to take."
@@ -5751,7 +5761,7 @@ func _resolve_haggling(caster: Node2D, level: int) -> void:
 func _prepare_burn_to_the_ground(caster: Node2D, level: int) -> Callable:
 	var entries: Array = []
 	for i in board.TOTAL_SPACES:
-		if board.spaces[i].house_count > 0:
+		if board.spaces[i].house_count > 0 and _can_target_property(caster, i):
 			var color_name: String = board.get_space_info(i).get("color", "")
 			entries.append({"index": i, "name": _property_name(i), "color": board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE)})
 	if entries.is_empty():
@@ -5869,7 +5879,7 @@ func _prepare_threaten(caster: Node2D, level: int) -> Callable:
 	var entries: Array = []
 	for space_index in board.TOTAL_SPACES:
 		var space: Node2D = board.spaces[space_index]
-		if space.owner_id != -1 and space.owner_id != caster.player_id and space.house_count == 0 and board.get_space_info(space_index).get("type", "") == "property":
+		if space.owner_id != -1 and space.owner_id != caster.player_id and space.house_count == 0 and board.get_space_info(space_index).get("type", "") == "property" and _can_target_property(caster, space_index):
 			entries.append({"index": space_index, "name": "%s (%s)" % [_property_name(space_index), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
 	if entries.is_empty():
 		dice_label.text += "\nThere's no eligible property to threaten."
@@ -6058,7 +6068,7 @@ func _prepare_annexation(caster: Node2D, level: int) -> Callable:
 		var space: Node2D = board.spaces[space_index]
 		if space.house_count > 0:
 			continue
-		if space.owner_id == -1 or space.owner_id == caster.player_id:
+		if space.owner_id == -1 or space.owner_id == caster.player_id or not _can_target_property(caster, space_index):
 			continue
 		var color_name: String = board.get_space_info(space_index).get("color", "")
 		if _count_owned_in_group(caster.player_id, color_name) != owned_in_group:
@@ -6180,7 +6190,7 @@ func _prepare_reclaimed_by_nature(caster: Node2D, level: int) -> Callable:
 			if space_index in chosen:
 				continue
 			var space: Node2D = board.spaces[space_index]
-			if not space.is_mortgaged:
+			if not space.is_mortgaged or not _can_target_property(caster, space_index):
 				continue
 			entries.append({"index": space_index, "name": "%s (%s)" % [_property_name(space_index), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
 		if entries.is_empty():
@@ -6430,7 +6440,7 @@ func _pick_opponent_for_spell(caster: Node2D, prompt: String) -> int:
 # countered. Returns false (cast abandoned) if the caster can no longer
 # cover it; _spell_extra_validation() normally rules that out up front.
 func _pay_spell_extra_cost(caster: Node2D, spell_name: String, level: int) -> bool:
-	var cost: int = _shield_reduce(caster, SpellData.SPELLS[spell_name]["levels"][level].get("extra_cost", 0))
+	var cost: int = SpellData.SPELLS[spell_name]["levels"][level].get("extra_cost", 0)
 	if cost <= 0:
 		return true
 	if caster.money < cost:
@@ -6543,10 +6553,13 @@ func _charge_cramped_cell(player: Node2D) -> void:
 func _begin_turn() -> void:
 	var player: Node2D = players[current_player]
 	var has_upkeep: bool = not _ongoing_where("Burn Bright", player.player_id).is_empty()
+	var has_parasite: bool = not _ongoing_where("Parasite", player.player_id).is_empty()
 	var has_cell: bool = player.in_jail and not player.cramped_cell_debts.is_empty()
-	if not _tutorial_active and (has_upkeep or has_cell):
+	if not _tutorial_active and (has_upkeep or has_parasite or has_cell):
 		if has_upkeep:
 			await _charge_burn_bright(player)
+		if has_parasite and not player.is_bankrupt:
+			await _charge_parasite(player)
 		if has_cell and not player.is_bankrupt:
 			await _charge_cramped_cell(player)
 		_update_player_panels()
@@ -6618,7 +6631,7 @@ func _market_manipulation_targets(caster: Node2D, level: int) -> Array[int]:
 		if info.get("type", "") != "property":
 			continue
 		var space: Node2D = board.spaces[i]
-		if space.owner_id == -1 or space.owner_id == caster.player_id or space.house_count > 0:
+		if space.owner_id == -1 or space.owner_id == caster.player_id or space.house_count > 0 or not _can_target_property(caster, i):
 			continue
 		if free_parking_amount >= int(info.get("price", 0)) * multiple:
 			result.append(i)
@@ -6830,24 +6843,42 @@ func _resolve_bribe_the_guards(caster: Node2D, level: int, target_index: int) ->
 # Cramped Cell (Slow): jails an opponent and attaches a per-turn payment to
 # their stay -- see _charge_cramped_cell() / _begin_turn(). Casting it on
 # someone already in jail just attaches the payment.
+# Cramped Cell (Slow): any player -- the caster included -- goes to jail
+# for the card's number of turns, and owes the caster a payment at the start
+# of each of their turns while there. On someone already in jail it extends
+# their sentence to that length (never shortens it) and adds the payment.
 func _prepare_cramped_cell(caster: Node2D, level: int) -> Callable:
-	var target_index: int = await _pick_opponent_for_spell(caster, "Cramped Cell: choose an opponent to send to Jail.")
+	var entries: Array = []
+	for i in players.size():
+		if players[i].is_bankrupt or not _can_target_player(caster, i):
+			continue
+		var label: String = PLAYER_NAMES[i] + (" (you)" if i == caster.player_id else "")
+		entries.append({"index": i, "name": label, "color": PLAYER_COLORS[i]})
+	if entries.is_empty():
+		_toast("There's no player to target.")
+		return Callable()
+	var turns: int = SpellData.SPELLS["Cramped Cell"]["levels"][level].get("jail_turns", JAIL_SENTENCE_TURNS)
+	_pp_open("Cramped Cell: choose a player to send to Jail for %d turns." % turns, entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 	_spell_target_player(target_index)
 	var amount: int = SpellData.SPELLS["Cramped Cell"]["levels"][level].get("amount", 0)
-	return _resolve_cramped_cell.bind(caster, level, target_index, amount)
+	return _resolve_cramped_cell.bind(caster, level, target_index, amount, turns)
 
 
-func _resolve_cramped_cell(caster: Node2D, level: int, target_index: int, amount: int) -> void:
+func _resolve_cramped_cell(caster: Node2D, level: int, target_index: int, amount: int, turns: int) -> void:
 	var target: Node2D = players[target_index]
 	if target.is_bankrupt:
 		_log("%s's Cramped Cell (Level %d) fizzles -- %s is out of the game." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index]])
 		return
 	if not target.in_jail:
 		_spell_send_to_jail(target, "Cramped Cell")
-	target.cramped_cell_debts.append({"creditor": caster.player_id, "amount": amount})
-	_log("%s's Cramped Cell (Level %d): %s pays them $%d at the start of each turn while in Jail." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index], amount])
+	target.jail_turns_left = maxi(target.jail_turns_left, turns)
+	# Paying yourself is a no-op, so a self-cast just jails you.
+	if target_index != caster.player_id:
+		target.cramped_cell_debts.append({"creditor": caster.player_id, "amount": amount})
+	_log("%s's Cramped Cell (Level %d): %s is in Jail for %d turns%s." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index], target.jail_turns_left, "" if target_index == caster.player_id else ", paying %s $%d at the start of each turn there" % [PLAYER_NAMES[caster.player_id], amount]])
 	_update_player_panels()
 
 
@@ -6953,19 +6984,23 @@ func _resolve_knockout_punch(caster: Node2D, level: int, target_index: int, amou
 	_spell_send_to_jail(target, "Knockout Punch")
 
 
-# Every unmortgaged property an opponent of `player` owns that shares the
-# highest current rent (_hypothetical_rent: houses, monopoly doubling,
-# railroad count; utilities at a 12 roll). Empty if there's none.
+# Every unmortgaged property or claimed tax space an opponent of `player`
+# owns that shares the highest current rent (_hypothetical_rent: houses,
+# monopoly doubling, railroad count; utilities at a 12 roll; a tax space's
+# rent is its tax, which its owner collects -- see Tax Haven). Empty if
+# there's none.
 func _siren_song_candidates(player: Node2D) -> Array[int]:
 	var best: int = 0
 	var result: Array[int] = []
 	for i in board.TOTAL_SPACES:
-		if board.get_space_info(i).get("type", "") != "property":
+		var info: Dictionary = board.get_space_info(i)
+		var space_type: String = info.get("type", "")
+		if space_type != "property" and space_type != "tax":
 			continue
 		var owner_id: int = board.spaces[i].owner_id
 		if owner_id == -1 or owner_id == player.player_id or players[owner_id].is_bankrupt or board.spaces[i].is_mortgaged:
 			continue
-		var rent: int = _hypothetical_rent(i)
+		var rent: int = _hypothetical_rent(i) if space_type == "property" else int(info.get("value", 0))
 		if rent > best:
 			best = rent
 			result.clear()
@@ -7024,10 +7059,10 @@ func _property_space_indices() -> Array[int]:
 # Picker over property spaces passing `filter` (Callable(space_index) ->
 # bool). Returns the chosen space, or -1 if none qualify / the caster backs
 # out. Entries are tinted by owner (white = unowned).
-func _pick_property_space(prompt: String, filter: Callable) -> int:
+func _pick_property_space(caster: Node2D, prompt: String, filter: Callable) -> int:
 	var entries: Array = []
 	for i in _property_space_indices():
-		if not filter.call(i):
+		if not filter.call(i) or not _can_target_property(caster, i):
 			continue
 		var owner_id: int = board.spaces[i].owner_id
 		var owner_text: String = "unowned" if owner_id == -1 else PLAYER_NAMES[owner_id]
@@ -7068,6 +7103,13 @@ func _can_target_player(caster: Node2D, target_id: int) -> bool:
 	return _ongoing_where("Natural Magician", target_id).is_empty()
 
 
+# ...nor their properties: checked by every spell that has the caster choose
+# a property (area effects like Line of Fire don't choose one).
+func _can_target_property(caster: Node2D, space_index: int) -> bool:
+	var owner_id: int = board.spaces[space_index].owner_id
+	return owner_id == -1 or _can_target_player(caster, owner_id)
+
+
 # ============================================================================
 # Ongoing effects (Lingering Magic)
 #
@@ -7076,7 +7118,7 @@ func _can_target_player(caster: Node2D, target_id: int) -> bool:
 # "rotations" ticks down each time `rotation_player` passes Go (see
 # _on_player_passed_go()); "triggers" ticks down per use; -1 = no limit.
 # `target` is who the effect is on: the caster for self-effects, the chosen
-# opponent, or -1 for "all opponents" (Miasma).
+# opponent.
 # ============================================================================
 
 func _add_ongoing(spell_name: String, level: int, caster_id: int, target_id: int, rotation_player: int, data: Dictionary = {}) -> Dictionary:
@@ -7145,8 +7187,10 @@ func _on_player_money_lost(player_id: int) -> void:
 		_end_ongoing(e, "%s lost money" % PLAYER_NAMES[player_id])
 
 
-# Shielded From Harm: cuts every charge (rent, tax, fees, spell payments --
-# not purchases) by $300 per active shield, floored at $0.
+# Shielded From Harm: cuts money paid to another player (rent, a claimed tax
+# space, spell payments to an opponent -- not the bank, Free Parking or
+# purchases) by $300 per active shield, floored at $0. Callers only apply it
+# to such payments.
 func _shield_reduce(payer: Node2D, amount: int) -> int:
 	if amount <= 0:
 		return amount
@@ -7159,16 +7203,6 @@ func _shield_reduce(payer: Node2D, amount: int) -> int:
 	var reduced: int = maxi(0, amount - cut)
 	_log("%s's Shielded From Harm cuts a $%d payment to $%d." % [PLAYER_NAMES[payer.player_id], amount, reduced])
 	return reduced
-
-
-# Curse of Stalked Prey: doubles the rent `lander` owes on `owner_id`'s
-# property, once per active curse from that owner.
-func _apply_stalked_prey(lander: Node2D, owner_id: int, rent: int) -> int:
-	for e in _ongoing_where("Curse of Stalked Prey", lander.player_id):
-		if int(e["caster"]) == owner_id:
-			rent *= 2
-			_log("Curse of Stalked Prey: %s pays double (now $%d)." % [PLAYER_NAMES[lander.player_id], rent])
-	return rent
 
 
 # Word of Binding: true (and the effect is used up) if `player` has one
@@ -7184,12 +7218,11 @@ func _word_of_binding_waives(player: Node2D, space_index: int) -> bool:
 	return false
 
 
-# Miasma: the total roll penalty `player` suffers from opponents' Miasmas.
-func _miasma_penalty(player: Node2D) -> int:
+# Lethargy: the total roll penalty on `player` from Lethargies cast on them.
+func _lethargy_penalty(player: Node2D) -> int:
 	var total: int = 0
-	for e in _ongoing_where("Miasma"):
-		if int(e["caster"]) != player.player_id:
-			total += int(_lvl("Miasma", int(e["level"]), "roll_penalty", 0))
+	for e in _ongoing_where("Lethargy", player.player_id):
+		total += int(_lvl("Lethargy", int(e["level"]), "roll_penalty", 0))
 	return total
 
 
@@ -7219,18 +7252,33 @@ func _anti_magic_counters(caster: Node2D, stack_id: int) -> bool:
 	return false
 
 
-# Start of `player`'s turn: Burn Bright's upkeep. "Lose" money goes to the
-# bank, not Free Parking (unless it has to be raised as a debt).
+# Start of `player`'s turn: Burn Bright's upkeep, paid to the bank (not Free
+# Parking, and not another player, so Shielded From Harm doesn't cover it).
+# If they're short they raise it first, then pay the bank.
 func _charge_burn_bright(player: Node2D) -> void:
 	for e in _ongoing_where("Burn Bright", player.player_id):
 		if player.is_bankrupt:
 			return
 		var upkeep: int = int(_lvl("Burn Bright", int(e["level"]), "upkeep", 0))
-		_log("Burn Bright: %s loses $%d." % [PLAYER_NAMES[player.player_id], upkeep])
-		if player.money >= upkeep:
-			player.money -= upkeep
-		else:
-			await _collect_debt(player, upkeep, null)
+		_log("Burn Bright: %s pays $%d to the bank." % [PLAYER_NAMES[player.player_id], upkeep])
+		if player.money < upkeep:
+			if await _raise_money(player, upkeep, null, false, false) != "paid":
+				return
+		player.money -= upkeep
+		_log_payment(player.player_id, upkeep, "the bank")
+
+
+# Start of `player`'s turn: each Parasite on them pays its caster.
+func _charge_parasite(player: Node2D) -> void:
+	for e in _ongoing_where("Parasite", player.player_id):
+		if player.is_bankrupt:
+			return
+		var caster_id: int = int(e["caster"])
+		if players[caster_id].is_bankrupt:
+			continue
+		var amount: int = int(_lvl("Parasite", int(e["level"]), "amount", 0))
+		_log("Parasite: %s pays %s $%d." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[caster_id], amount])
+		await _charge_spell_payment(player, amount, players[caster_id], "Parasite: %s pays %s $%d." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[caster_id], amount], "Parasite: %s owes %s $%d." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[caster_id], amount], true)
 
 
 func _ongoing_chip_text(e: Dictionary) -> String:
@@ -7689,7 +7737,7 @@ func _prepare_pilgrimage(caster: Node2D, level: int) -> Callable:
 				break
 		if not any_left:
 			break
-		var pick: int = await _pick_property_space("Pilgrimage: choose an unowned property (%d of %d)." % [k + 1, count], filter)
+		var pick: int = await _pick_property_space(caster, "Pilgrimage: choose an unowned property (%d of %d)." % [k + 1, count], filter)
 		if pick == -1:
 			return Callable()
 		chosen.append(pick)
@@ -7853,7 +7901,7 @@ func _apply_fated_ending(player: Node2D, die1: int, die2: int) -> Vector2i:
 
 func _prepare_word_of_binding(caster: Node2D, level: int) -> Callable:
 	if level == 1:
-		var space_index: int = await _pick_property_space("Word of Binding: name a property.", func(_i: int) -> bool: return true)
+		var space_index: int = await _pick_property_space(caster, "Word of Binding: name a property.", func(_i: int) -> bool: return true)
 		if space_index == -1:
 			return Callable()
 		_spell_target_property(space_index)
@@ -7897,13 +7945,13 @@ func _prepare_burn_bright(caster: Node2D, level: int) -> Callable:
 func _resolve_burn_bright(caster: Node2D, level: int) -> void:
 	var amount: int = int(_lvl("Burn Bright", level, "amount", 0))
 	caster.money += amount
-	_log("%s's Burn Bright (Level %d): they gain $%d, and lose $%d at the start of each of their turns for %d rotations." % [PLAYER_NAMES[caster.player_id], level, amount, int(_lvl("Burn Bright", level, "upkeep", 0)), int(_lvl("Burn Bright", level, "rotations", 0))])
+	_log("%s's Burn Bright (Level %d): they gain $%d, and pay $%d to the bank at the start of each of their turns for %d rotations." % [PLAYER_NAMES[caster.player_id], level, amount, int(_lvl("Burn Bright", level, "upkeep", 0)), int(_lvl("Burn Bright", level, "rotations", 0))])
 	_add_ongoing("Burn Bright", level, caster.player_id, caster.player_id, caster.player_id)
 
 
-# Anti-Magic Law / Curse of Stalked Prey: on a chosen opponent. The Law has
-# no rotation limit (triggers only); the Curse counts the target's passes
-# over Go.
+# Anti-Magic Law / Parasite / Lethargy: on a chosen opponent. The Law has
+# no rotation limit (triggers only); Parasite and Lethargy count the
+# target's passes over Go.
 func _prepare_opponent_ongoing(caster: Node2D, spell_name: String, level: int) -> Callable:
 	var target_index: int = await _pick_opponent_for_spell(caster, "%s: choose an opponent." % spell_name)
 	if target_index == -1:
@@ -7916,19 +7964,14 @@ func _resolve_opponent_ongoing(caster: Node2D, spell_name: String, level: int, t
 	if players[target_index].is_bankrupt:
 		_log("%s's %s fizzles." % [PLAYER_NAMES[caster.player_id], spell_name])
 		return
-	var rotation_player: int = target_index if spell_name == "Curse of Stalked Prey" else -1
+	var rotation_player: int = -1 if spell_name == "Anti-Magic Law" else target_index
 	_log("%s's %s (Level %d) takes hold of %s." % [PLAYER_NAMES[caster.player_id], spell_name, level, PLAYER_NAMES[target_index]])
 	_add_ongoing(spell_name, level, caster.player_id, target_index, rotation_player)
-
-
-func _prepare_miasma(caster: Node2D, level: int) -> Callable:
-	return _resolve_miasma.bind(caster, level)
-
-
-# Hits every opponent; its 3 rotations count the caster's passes over Go.
-func _resolve_miasma(caster: Node2D, level: int) -> void:
-	_log("%s's Miasma (Level %d): opponents get -%d to their rolls." % [PLAYER_NAMES[caster.player_id], level, int(_lvl("Miasma", level, "roll_penalty", 0))])
-	_add_ongoing("Miasma", level, caster.player_id, -1, caster.player_id)
+	# Lethargy cast on whoever's roll is in flight shortens that roll too.
+	if spell_name == "Lethargy" and _roll_in_flight and target_index == current_player:
+		var penalty: int = int(_lvl("Lethargy", level, "roll_penalty", 0))
+		_current_roll = maxi(0, _current_roll - penalty)
+		_log("Lethargy: %s's current roll is reduced by %d (now %d)." % [PLAYER_NAMES[target_index], penalty, _current_roll])
 
 
 # ============================================================================
@@ -7938,7 +7981,7 @@ func _resolve_miasma(caster: Node2D, level: int) -> void:
 # Landmine / Power Sink / Outland Settlements / Toll Road / Ensnaring
 # Roots: placed on any property space.
 func _prepare_simple_landmark(caster: Node2D, spell_name: String, level: int) -> Callable:
-	var space_index: int = await _pick_property_space("%s: choose a property to place it on." % spell_name, func(_i: int) -> bool: return true)
+	var space_index: int = await _pick_property_space(caster, "%s: choose a property to place it on." % spell_name, func(_i: int) -> bool: return true)
 	if space_index == -1:
 		return Callable()
 	_spell_target_property(space_index)
@@ -7952,11 +7995,11 @@ func _resolve_simple_landmark(caster: Node2D, spell_name: String, level: int, sp
 
 func _contested_battlefield_ok(caster: Node2D, space_index: int) -> bool:
 	var space: Node2D = board.spaces[space_index]
-	return space.owner_id != -1 and space.owner_id != caster.player_id and space.house_count == 0 and not players[space.owner_id].is_bankrupt
+	return space.owner_id != -1 and space.owner_id != caster.player_id and space.house_count == 0 and not players[space.owner_id].is_bankrupt and _can_target_property(caster, space_index)
 
 
 func _prepare_contested_battlefield(caster: Node2D, level: int) -> Callable:
-	var space_index: int = await _pick_property_space("Contested Battlefield: choose an opponent's property without houses.", func(i: int) -> bool: return _contested_battlefield_ok(caster, i))
+	var space_index: int = await _pick_property_space(caster, "Contested Battlefield: choose an opponent's property without houses.", func(i: int) -> bool: return _contested_battlefield_ok(caster, i))
 	if space_index == -1:
 		return Callable()
 	_spell_target_property(space_index)
@@ -7978,10 +8021,10 @@ func _resolve_contested_battlefield(caster: Node2D, level: int, space_index: int
 
 
 func _prepare_stabilized_portal(caster: Node2D, level: int) -> Callable:
-	var space_index: int = await _pick_property_space("Stabilized Portal: choose a property to place it on.", func(_i: int) -> bool: return true)
+	var space_index: int = await _pick_property_space(caster, "Stabilized Portal: choose a property to place it on.", func(_i: int) -> bool: return true)
 	if space_index == -1:
 		return Callable()
-	var destination: int = await _pick_property_space("Stabilized Portal: name the property it sends opponents to.", func(i: int) -> bool: return i != space_index)
+	var destination: int = await _pick_property_space(caster, "Stabilized Portal: name the property it sends opponents to.", func(i: int) -> bool: return i != space_index)
 	if destination == -1:
 		return Callable()
 	_spell_target_property(space_index)
@@ -8152,7 +8195,7 @@ func _update_player_panels() -> void:
 			chip.text = "%s +%d" % [color_name.capitalize(), count]
 			chip.add_theme_color_override("font_color", board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE))
 			attunement_flow.add_child(chip)
-		# Ongoing effects on this player (Miasma shows under its caster), and
+		# Ongoing effects on this player, and
 		# a pending Fated Ending -- hover for the card text.
 		for e in _ongoing:
 			var shown_on: int = int(e["target"]) if int(e["target"]) != -1 else int(e["caster"])
