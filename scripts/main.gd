@@ -2473,6 +2473,12 @@ func _auto_pause_applies(opt: int, event: String, seat: int, trigger_seat: int) 
 	return false  # PAUSE_MANUAL / unknown
 
 
+# The two dice currently show the same value. A die zeroed out has no
+# value, so 0 + 0 isn't doubles.
+func _dice_are_doubles() -> bool:
+	return _die1 == _die2 and _die1 > 0
+
+
 func _perform_roll(die1: int, die2: int) -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
@@ -2484,8 +2490,11 @@ func _perform_roll(die1: int, die2: int) -> void:
 	trade_button.disabled = true
 
 	var roll: int = die1 + die2
-	var is_double: bool = die1 == die2
 	var player: Node2D = players[current_player]
+	# Doubles follow the dice as they currently stand (_dice_are_doubles()):
+	# a spell that changes the dice during the response window can make or
+	# break them. Whatever the dice show when the roll resolves decides the
+	# extra turn (and jail release).
 	# Register the dice and start the tumble animation -- it runs for the
 	# first half of the response window, then settles on the real faces.
 	_die1 = die1
@@ -2494,7 +2503,8 @@ func _perform_roll(die1: int, die2: int) -> void:
 	dice_roller.roll(die1, die2, _response_window_seconds() * 0.5)
 	dice_label.text = "%s rolled: %d + %d = %d" % [_player_display_name(current_player), die1, die2, roll]
 	_log("%s rolled %d + %d = %d." % [PLAYER_NAMES[current_player], die1, die2, roll])
-	if is_double:
+	var started_double: bool = _dice_are_doubles()
+	if started_double:
 		_log("%s rolled doubles." % PLAYER_NAMES[current_player])
 
 	# Unstable Portal, then Hasty Exit Level 1 -- both set up before this
@@ -2552,6 +2562,13 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# the response window can't leave it pointing elsewhere.
 	_prompt_slot = -1
 
+	# Doubles as the dice stand now, after anything cast during the window.
+	var is_double: bool = _dice_are_doubles()
+	if is_double != started_double and not _roll_cancelled:
+		if is_double:
+			_log("%s's dice are now doubles (%d + %d)." % [PLAYER_NAMES[current_player], _die1, _die2])
+		else:
+			_log("%s's dice are no longer doubles (%d + %d)." % [PLAYER_NAMES[current_player], _die1, _die2])
 	var grants_extra_turn: bool = is_double
 
 	if _roll_cancelled:

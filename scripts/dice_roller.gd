@@ -15,6 +15,9 @@ const SHUFFLE_MS: int = 55
 const BODY_COLOR: Color = Color(0.97, 0.97, 0.94)
 const EDGE_COLOR: Color = Color(0.1, 0.1, 0.12)
 const PIP_COLOR: Color = Color(0.1, 0.1, 0.12)
+const DOUBLES_COLOR: Color = Color(1.0, 0.82, 0.25)
+const DOUBLES_FONT_SIZE: int = 26
+const DOUBLES_GAP: float = 12.0
 
 var _shown: Array[int] = [1, 1]
 var _final: Array[int] = [1, 1]
@@ -73,6 +76,16 @@ func _draw() -> void:
 	for i in 2:
 		var origin: Vector2 = Vector2(i * (DIE_SIZE + GAP), 0.0) + _jitter[i]
 		_draw_die(origin, _shown[i])
+	# "Doubles!" for as long as the settled dice match (a zeroed die has no
+	# value, so blank + blank doesn't count) -- it follows any spell that
+	# changes the dice, since those re-roll() them.
+	if not _rolling and _shown[0] == _shown[1] and _shown[0] > 0:
+		var font: Font = ThemeDB.fallback_font
+		var text: String = "Doubles!"
+		var width: float = 2.0 * DIE_SIZE + GAP
+		var y: float = -DOUBLES_GAP
+		draw_string_outline(font, Vector2(0.0, y), text, HORIZONTAL_ALIGNMENT_CENTER, width, DOUBLES_FONT_SIZE, 6, Color(0.1, 0.1, 0.12))
+		draw_string(font, Vector2(0.0, y), text, HORIZONTAL_ALIGNMENT_CENTER, width, DOUBLES_FONT_SIZE, DOUBLES_COLOR)
 
 
 func _draw_die(origin: Vector2, face: int) -> void:
