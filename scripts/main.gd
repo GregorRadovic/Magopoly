@@ -7357,7 +7357,7 @@ func _charge_burn_bright(player: Node2D) -> void:
 		if player.is_bankrupt:
 			return
 		var upkeep: int = int(_lvl("Burn Bright", int(e["level"]), "upkeep", 0))
-		_log("Burn Bright: %s pays $%d to the bank." % [PLAYER_NAMES[player.player_id], upkeep])
+		_log("Burn Bright: %s's $%d upkeep is due." % [PLAYER_NAMES[player.player_id], upkeep])
 		if player.money < upkeep:
 			if await _raise_money(player, upkeep, null, false, false, true) != "paid":
 				return
@@ -7374,7 +7374,7 @@ func _charge_parasite(player: Node2D) -> void:
 		if players[caster_id].is_bankrupt:
 			continue
 		var amount: int = int(_lvl("Parasite", int(e["level"]), "amount", 0))
-		_log("Parasite: %s pays %s $%d." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[caster_id], amount])
+		_log("Parasite: %s's Parasite feeds on %s." % [PLAYER_NAMES[caster_id], PLAYER_NAMES[player.player_id]])
 		await _charge_spell_payment(player, amount, players[caster_id], "Parasite: %s pays %s $%d." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[caster_id], amount], "Parasite: %s owes %s $%d." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[caster_id], amount], true)
 
 
