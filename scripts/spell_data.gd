@@ -613,7 +613,7 @@ const SPELLS: Dictionary = {
 		"color": "ocean_blue",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/B 8 1 Fated Ending.png",
 		"levels": {
-			1: {"description": "Choose an opponent. On their next turn, instead of rolling normally, they roll 1 die."},
+			1: {"description": "Choose an opponent. On their next turn, they roll 2 dice and a random one lands on 0."},
 			2: {"description": "Choose an opponent. On their next turn, instead of rolling normally, they roll 2 dice, then you choose one of them to set to 0."},
 		},
 	},

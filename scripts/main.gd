@@ -169,6 +169,8 @@ signal trade_concluded
 signal board_space_picked(index: int)
 # _board_pick_local() / _board_pick_end(): the space clicked, or -1.
 signal board_pick_chosen(index: int)
+# _face_pick_local(): the die face (1-6) clicked.
+signal face_pick_chosen(value: int)
 
 @onready var board: Node2D = $Board
 @onready var players_container: Node2D = $Players
@@ -251,10 +253,17 @@ var _picking_promised_land_property: bool = false
 # The spaces a board pick (_pick_board_space) is waiting on, highlighted on
 # this machine's board; empty = no board pick armed here.
 var _board_pick_spaces: Array[int] = []
+# Pilgrimage properties passed during the move in progress, waiting to be
+# offered once the mover lands (_offer_pilgrimage_queue()).
+var _pilgrimage_queue: Array[int] = []
 var _pick_banner: PanelContainer
 var _pick_banner_label: Label
 var _pick_banner_cancel: Button
 const PICK_BANNER_RECT: Rect2i = Rect2i(150, 128, 616, 0)
+# Master Plan's six die faces: centred over the action panel's dice spot.
+const FACE_ROW_CENTER: Vector2 = Vector2(459, 600)
+const DieFaceButton = preload("res://scripts/die_face_button.gd")
+var _face_row: PanelContainer = null
 # Set while the current player is casting a spell (choosing its level, then
 # any target it asks for), so a second spell card click can't start another
 # cast on top of it and stomp the shared player_picker popup.
@@ -2859,6 +2868,10 @@ func _move_and_land(player: Node2D, roll: int) -> bool:
 	player.current_space = new_space_raw % board.TOTAL_SPACES
 	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
 	_log("%s landed on %s." % [PLAYER_NAMES[player.player_id], _property_name(player.current_space)])
+
+	# Pilgrimage purchases come first, then whatever the landing does.
+	if await _offer_pilgrimage_queue(player):
+		return true
 
 	# Terminus Station: an overlay on Go, not a real SPACE_DATA space, so
 	# this is a standalone check rather than part of the "type" chain below
@@ -7124,14 +7137,49 @@ func _pick_property_space(caster: Node2D, prompt: String, filter: Callable) -> i
 
 
 # A dice-face picker (1-6) for Master Plan, routed to whoever _prompt_slot
-# names. Can't be cancelled.
-func _pick_die_value(prompt: String, color: Color) -> int:
-	var entries: Array = []
-	for v in range(1, 7):
-		entries.append({"index": v, "name": str(v), "color": color})
-	_pp_open(prompt, entries, true)
-	var v: int = await _pp_result()
+# names: six clickable die faces under the prompt banner. Can't be
+# cancelled.
+func _pick_die_value(prompt: String, _color: Color = Color.WHITE) -> int:
+	var v: int
+	if _prompt_is_local():
+		v = await _face_pick_local(prompt)
+	else:
+		_net_open_remote("face", {"text": prompt})
+		v = int(await _net_await_reply())
 	return clampi(v, 1, 6)
+
+
+func _face_pick_local(text: String) -> int:
+	if _face_row == null:
+		_build_face_row()
+	_show_pick_banner(text, false)
+	_face_row.visible = true
+	_face_row.reset_size()
+	_face_row.position = Vector2(FACE_ROW_CENTER.x - _face_row.size.x / 2.0, FACE_ROW_CENTER.y)
+	var v: int = await face_pick_chosen
+	_face_row.visible = false
+	_hide_pick_banner()
+	return v
+
+
+func _build_face_row() -> void:
+	_face_row = PanelContainer.new()
+	_face_row.name = "FacePickRow"
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.12, 0.12, 0.14, 0.95)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(10)
+	_face_row.add_theme_stylebox_override("panel", style)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	_face_row.add_child(row)
+	for v in range(1, 7):
+		var face: Control = DieFaceButton.new()
+		face.value = v
+		face.face_chosen.connect(func(chosen: int) -> void: face_pick_chosen.emit(chosen))
+		row.add_child(face)
+	_face_row.visible = false
+	$UI.add_child(_face_row)
 
 
 # Changes the dice of the roll in flight (Dodge, Veto) and re-shows them --
@@ -7482,6 +7530,7 @@ func _apply_pre_move_landmarks(player: Node2D, roll: int, simulate: bool = false
 # Runs after Go's salary, before the landing itself. Returns true if the
 # player went bankrupt along the way.
 func _process_passing_effects(player: Node2D, start: int, roll: int) -> bool:
+	_pilgrimage_queue.clear()
 	if roll <= 0:
 		return false
 	var path: Array[int] = []
@@ -7504,6 +7553,9 @@ func _process_passing_effects(player: Node2D, start: int, roll: int) -> bool:
 			if player.is_bankrupt:
 				return true
 
+	# Pilgrimage: every chosen property passed on the way joins a queue, in
+	# the order passed, offered for purchase once the player has landed --
+	# before the landing itself resolves (see _offer_pilgrimage_queue()).
 	if not player.pilgrimage_spaces.is_empty():
 		var landing: int = path.back()
 		for space_index in path:
@@ -7513,15 +7565,8 @@ func _process_passing_effects(player: Node2D, start: int, roll: int) -> bool:
 			# Landing there gets the normal buy prompt anyway.
 			if space_index == landing or board.spaces[space_index].owner_id != -1:
 				continue
-			var price: int = int(board.get_space_info(space_index).get("price", 0))
-			_prompt_slot = player.player_id
-			_cf_open("Pilgrimage: buy %s for $%d as you pass it?" % [_property_name(space_index), price])
-			var yes: bool = await _cf_result()
-			_prompt_slot = -1
-			if yes and await _buy_property_via_spell(player, space_index, price, -1):
-				_log("%s bought %s on their Pilgrimage." % [PLAYER_NAMES[player.player_id], _property_name(space_index)])
-			if player.is_bankrupt:
-				return true
+			_pilgrimage_queue.append(space_index)
+			_log("%s passes %s on their Pilgrimage." % [PLAYER_NAMES[player.player_id], _property_name(space_index)])
 
 	if player.go_for_the_kill_amount > 0:
 		var passed: Array[int] = []
@@ -7536,6 +7581,26 @@ func _process_passing_effects(player: Node2D, start: int, roll: int) -> bool:
 			_log("Go For the Kill: %s passes %s." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[pid]])
 			await _charge_spell_payment(players[pid], owed, player, "Go For the Kill: %s pays %s $%d." % [PLAYER_NAMES[pid], PLAYER_NAMES[player.player_id], owed], "Go For the Kill: %s owes %s $%d." % [PLAYER_NAMES[pid], PLAYER_NAMES[player.player_id], owed], true)
 	return player.is_bankrupt
+
+
+# Pilgrimage: offers each queued property (passed this move) one at a time,
+# in the order passed. Returns true if the player went bankrupt paying.
+func _offer_pilgrimage_queue(player: Node2D) -> bool:
+	while not _pilgrimage_queue.is_empty():
+		var space_index: int = _pilgrimage_queue.pop_front()
+		if board.spaces[space_index].owner_id != -1:
+			continue
+		var price: int = int(board.get_space_info(space_index).get("price", 0))
+		_prompt_slot = player.player_id
+		_cf_open("Pilgrimage: you passed %s. Buy it for $%d?" % [_property_name(space_index), price])
+		var yes: bool = await _cf_result()
+		_prompt_slot = -1
+		if yes and await _buy_property_via_spell(player, space_index, price, -1):
+			_log("%s bought %s on their Pilgrimage." % [PLAYER_NAMES[player.player_id], _property_name(space_index)])
+		if player.is_bankrupt:
+			_pilgrimage_queue.clear()
+			return true
+	return false
 
 
 # After the normal landing has resolved: the landmarks on the space just
@@ -7928,8 +7993,10 @@ func _apply_fated_ending(player: Node2D, die1: int, die2: int) -> Vector2i:
 	_update_player_panels()
 	var caster_id: int = int(fe.get("caster", -1))
 	if int(fe.get("level", 1)) == 1:
-		_log("Fated Ending: %s rolls only 1 die." % PLAYER_NAMES[player.player_id])
-		return Vector2i(die1, 0)
+		# Both dice are rolled; fate picks one at random to land on 0.
+		var zero_die: int = randi_range(1, 2)
+		_log("Fated Ending: one of %s's dice lands on 0." % PLAYER_NAMES[player.player_id])
+		return Vector2i(0, die2) if zero_die == 1 else Vector2i(die1, 0)
 	var zero_first: bool = die1 >= die2
 	if caster_id >= 0 and caster_id < players.size() and not players[caster_id].is_bankrupt and not players[caster_id].is_ai:
 		# Show the dice as rolled so the caster can click one (online clients
@@ -7937,7 +8004,7 @@ func _apply_fated_ending(player: Node2D, die1: int, die2: int) -> Vector2i:
 		_set_roll_dice(die1, die2)
 		dice_roller.finish_now()
 		_prompt_slot = caster_id
-		zero_first = (await _pick_die("Fated Ending: %s rolled %d + %d. Click a die to set to 0." % [PLAYER_NAMES[player.player_id], die1, die2])) != 2
+		zero_first = (await _pick_die("%s's Fated Ending: %s rolled %d + %d. %s, click a die to set to 0." % [PLAYER_NAMES[caster_id], PLAYER_NAMES[player.player_id], die1, die2, PLAYER_NAMES[caster_id]])) != 2
 		_prompt_slot = -1
 	_log("Fated Ending: %s sets %s's %s die to 0." % [PLAYER_NAMES[caster_id] if caster_id >= 0 else "Fate", PLAYER_NAMES[player.player_id], "first" if zero_first else "second"])
 	return Vector2i(0, die2) if zero_first else Vector2i(die1, 0)
@@ -9066,6 +9133,8 @@ func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
 				_net_int_array(payload.get("spaces", [])), bool(payload.get("cancellable", true)))
 		"die":
 			return await _die_pick_local(str(payload.get("text", "")))
+		"face":
+			return await _face_pick_local(str(payload.get("text", "")))
 		"card":
 			card_picker.open(str(payload.get("text", "")),
 				_net_unpack_card_entries(payload.get("entries", [])),
