@@ -253,6 +253,8 @@ var _picking_promised_land_property: bool = false
 # The spaces a board pick (_pick_board_space) is waiting on, highlighted on
 # this machine's board; empty = no board pick armed here.
 var _board_pick_spaces: Array[int] = []
+# A hovered picker entry is lighting up its spaces (_on_picker_entry_hovered).
+var _picker_preview_on: bool = false
 # Pilgrimage properties passed during the move in progress, waiting to be
 # offered once the mover lands (_offer_pilgrimage_queue()).
 var _pilgrimage_queue: Array[int] = []
@@ -682,6 +684,8 @@ func _ready() -> void:
 	pause_menu.quit_to_desktop_requested.connect(get_tree().quit)
 	board.space_clicked.connect(_on_space_clicked)
 	_build_pick_banner()
+	player_picker.entry_hovered.connect(_on_picker_entry_hovered)
+	player_picker.player_chosen.connect(func(_i: int) -> void: _clear_picker_preview())
 	_build_log_markup()
 	game_log.meta_clicked.connect(_on_log_meta_clicked)
 	_update_turn_label()
@@ -7378,6 +7382,25 @@ func _charge_parasite(player: Node2D) -> void:
 		await _charge_spell_payment(player, amount, players[caster_id], "Parasite: %s pays %s $%d." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[caster_id], amount], "Parasite: %s owes %s $%d." % [PLAYER_NAMES[player.player_id], PLAYER_NAMES[caster_id], amount], true)
 
 
+# A player-panel line for an ongoing effect: the spell's name is a link
+# (like in the log) that zooms in on its card; `suffix` follows it.
+func _spell_chip(spell_name: String, suffix: String) -> RichTextLabel:
+	var chip := RichTextLabel.new()
+	chip.bbcode_enabled = true
+	chip.fit_content = true
+	chip.autowrap_mode = TextServer.AUTOWRAP_OFF
+	chip.scroll_active = false
+	chip.mouse_filter = Control.MOUSE_FILTER_PASS
+	var color: Color = board.COLOR_GROUP_COLORS.get(SpellData.SPELLS.get(spell_name, {}).get("color", ""), Color.WHITE)
+	chip.add_theme_color_override("default_color", color)
+	chip.add_theme_font_size_override("normal_font_size", 18)
+	chip.text = "[url=spell:%s][u]%s[/u][/url]%s" % [spell_name.uri_encode(), spell_name, suffix.replace("[", "[lb]")]
+	chip.meta_clicked.connect(_on_log_meta_clicked)
+	chip.meta_hover_started.connect(func(_m: Variant) -> void: chip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND)
+	chip.meta_hover_ended.connect(func(_m: Variant) -> void: chip.mouse_default_cursor_shape = Control.CURSOR_ARROW)
+	return chip
+
+
 func _ongoing_chip_text(e: Dictionary) -> String:
 	var text: String = str(e["spell"])
 	var data: Dictionary = e["data"]
@@ -8028,7 +8051,12 @@ func _prepare_word_of_binding(caster: Node2D, level: int) -> Callable:
 			colors.append(c)
 	var entries: Array = []
 	for k in colors.size():
-		entries.append({"index": k, "name": colors[k].capitalize().replace("_", " "), "color": board.COLOR_GROUP_COLORS.get(colors[k], Color.WHITE)})
+		var group: Array[int] = []
+		for i in _property_space_indices():
+			if board.get_space_info(i).get("color", "") == colors[k]:
+				group.append(i)
+		# "spaces": hovering the entry lights them up (_on_picker_entry_hovered).
+		entries.append({"index": k, "name": colors[k].capitalize().replace("_", " "), "color": board.COLOR_GROUP_COLORS.get(colors[k], Color.WHITE), "spaces": group})
 	_pp_open("Word of Binding: name a color.", entries)
 	var pick: int = await _pp_result()
 	if pick < 0 or pick >= colors.size():
@@ -8104,8 +8132,15 @@ func _resolve_simple_landmark(caster: Node2D, spell_name: String, level: int, sp
 
 
 func _contested_battlefield_ok(caster: Node2D, space_index: int) -> bool:
+	return _contested_battlefield_eligible(caster, space_index) and _can_target_property(caster, space_index)
+
+
+# Without the targeting check: what resolution re-checks. Natural Magician
+# only stops spells from being aimed at you -- one cast in response doesn't
+# fizzle a spell that already targeted you.
+func _contested_battlefield_eligible(caster: Node2D, space_index: int) -> bool:
 	var space: Node2D = board.spaces[space_index]
-	return space.owner_id != -1 and space.owner_id != caster.player_id and space.house_count == 0 and not players[space.owner_id].is_bankrupt and _can_target_property(caster, space_index)
+	return space.owner_id != -1 and space.owner_id != caster.player_id and space.house_count == 0 and not players[space.owner_id].is_bankrupt
 
 
 func _prepare_contested_battlefield(caster: Node2D, level: int) -> Callable:
@@ -8118,7 +8153,7 @@ func _prepare_contested_battlefield(caster: Node2D, level: int) -> Callable:
 
 func _resolve_contested_battlefield(caster: Node2D, level: int, space_index: int, owner_id: int) -> void:
 	var space: Node2D = board.spaces[space_index]
-	if space.owner_id != owner_id or not _contested_battlefield_ok(caster, space_index):
+	if space.owner_id != owner_id or not _contested_battlefield_eligible(caster, space_index):
 		_log("%s's Contested Battlefield fizzles -- %s is no longer eligible." % [PLAYER_NAMES[caster.player_id], _property_name(space_index)])
 		return
 	players[owner_id].owned_property_indices.erase(space_index)
@@ -8311,17 +8346,11 @@ func _update_player_panels() -> void:
 			var shown_on: int = int(e["target"]) if int(e["target"]) != -1 else int(e["caster"])
 			if shown_on != i:
 				continue
-			var effect_chip := Label.new()
-			effect_chip.text = _ongoing_chip_text(e)
-			effect_chip.mouse_filter = Control.MOUSE_FILTER_PASS
+			var effect_chip: RichTextLabel = _spell_chip(str(e["spell"]), _ongoing_chip_text(e).substr(str(e["spell"]).length()))
 			effect_chip.tooltip_text = str(SpellData.SPELLS[e["spell"]]["levels"][int(e["level"])].get("description", ""))
-			effect_chip.add_theme_color_override("font_color", board.COLOR_GROUP_COLORS.get(SpellData.SPELLS[e["spell"]]["color"], Color.WHITE))
 			attunement_flow.add_child(effect_chip)
 		if not players[i].fated_ending.is_empty():
-			var fate_chip := Label.new()
-			fate_chip.text = "Fated Ending (Level %d)" % int(players[i].fated_ending.get("level", 1))
-			fate_chip.add_theme_color_override("font_color", board.COLOR_GROUP_COLORS.get("ocean_blue", Color.WHITE))
-			attunement_flow.add_child(fate_chip)
+			attunement_flow.add_child(_spell_chip("Fated Ending", " (Level %d)" % int(players[i].fated_ending.get("level", 1))))
 
 	if _trading:
 		_populate_trade_flow(trader1_flow, _trade1_offered)
@@ -8948,6 +8977,28 @@ func _die_pick_local(text: String) -> int:
 	return which
 
 
+# A picker entry that names board spaces (Word of Binding's colors) lights
+# them up on this machine's board while it's hovered.
+func _on_picker_entry_hovered(entry: Dictionary, on: bool) -> void:
+	if not _board_pick_spaces.is_empty() or not entry.has("spaces"):
+		return
+	if not on:
+		_clear_picker_preview()
+		return
+	var spaces: Array = entry["spaces"]
+	for space in board.spaces:
+		space.set_pick_state(1 if space.index in spaces else -1)
+	_picker_preview_on = true
+
+
+func _clear_picker_preview() -> void:
+	if not _picker_preview_on or not _board_pick_spaces.is_empty():
+		return
+	_picker_preview_on = false
+	for space in board.spaces:
+		space.set_pick_state(0)
+
+
 func _on_pick_banner_cancel() -> void:
 	_board_pick_end(-1)
 
@@ -9156,20 +9207,26 @@ func _net_show_info(text: String) -> void:
 func _net_pack_entries(entries: Array) -> Array:
 	var out: Array = []
 	for e in entries:
-		out.append({
+		var packed: Dictionary = {
 			"index": int(e["index"]), "name": str(e["name"]),
 			"color": e.get("color", Color.WHITE),
-		})
+		}
+		if e.has("spaces"):
+			packed["spaces"] = e["spaces"]
+		out.append(packed)
 	return out
 
 
 func _net_unpack_entries(entries: Array) -> Array:
 	var out: Array = []
 	for e in entries:
-		out.append({
+		var entry: Dictionary = {
 			"index": int(e["index"]), "name": str(e["name"]),
 			"color": e.get("color", Color.WHITE),
-		})
+		}
+		if e.has("spaces"):
+			entry["spaces"] = _net_int_array(e["spaces"])
+		out.append(entry)
 	return out
 
 
