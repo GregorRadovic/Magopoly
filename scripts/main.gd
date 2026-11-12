@@ -7281,7 +7281,7 @@ func _charge_burn_bright(player: Node2D) -> void:
 		var upkeep: int = int(_lvl("Burn Bright", int(e["level"]), "upkeep", 0))
 		_log("Burn Bright: %s pays $%d to the bank." % [PLAYER_NAMES[player.player_id], upkeep])
 		if player.money < upkeep:
-			if await _raise_money(player, upkeep, null, false, false) != "paid":
+			if await _raise_money(player, upkeep, null, false, false, true) != "paid":
 				return
 		player.money -= upkeep
 		_log_payment(player.player_id, upkeep, "the bank")
