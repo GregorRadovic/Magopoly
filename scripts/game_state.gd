@@ -81,6 +81,9 @@ var blitzstart_mode: bool = false
 # walks the player through a fixed script of moves. See main.gd's
 # TUTORIAL_STEPS. Overrides the Quickstart / BlitzStart toggles.
 var tutorial_mode: bool = false
+# Which scripted tutorial runs when tutorial_mode is on: "basic" (Monopoly's
+# rules) or "spells" (casting spells). See main.gd's _tutorial_steps().
+var tutorial_kind: String = "spells"
 
 # --- Online play (set by Net._recv_start; see net.gd) ------------------
 # True when this session was launched from the online lobby rather than the
