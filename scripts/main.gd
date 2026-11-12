@@ -3159,7 +3159,10 @@ func _refresh_action_buttons() -> void:
 	# turned off (see _on_buy/sell_house_*_pressed).
 	var house_mode: bool = _buying_house_or_unmortgaging or _selling_house_or_mortgaging
 
-	roll_button.disabled = limited_to_selling or lock or house_mode
+	# _roll_in_flight: a spell resolving after the response window closed
+	# but before the move (a Dodge picker, a debt screen) must not let the
+	# roller press Roll again and start a second roll on top of this one.
+	roll_button.disabled = limited_to_selling or lock or house_mode or _roll_in_flight
 	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
 	admin_button.disabled = limited_to_selling or lock or _awaiting_end_turn or host_only or house_mode
 	admin_properties_button.disabled = limited_to_selling or lock or host_only or house_mode
