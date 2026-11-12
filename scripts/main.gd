@@ -167,6 +167,8 @@ signal trade_concluded
 # flag, just via a signal instead of a follow-up function call. -1 if the
 # clicked space isn't actually a valid target (see _prepare_promised_land()).
 signal board_space_picked(index: int)
+# _board_pick_local() / _board_pick_end(): the space clicked, or -1.
+signal board_pick_chosen(index: int)
 
 @onready var board: Node2D = $Board
 @onready var players_container: Node2D = $Players
@@ -246,6 +248,13 @@ var _selling_house_or_mortgaging: bool = false
 # property to (maybe) buy -- see board_space_picked and
 # _prepare_promised_land().
 var _picking_promised_land_property: bool = false
+# The spaces a board pick (_pick_board_space) is waiting on, highlighted on
+# this machine's board; empty = no board pick armed here.
+var _board_pick_spaces: Array[int] = []
+var _pick_banner: PanelContainer
+var _pick_banner_label: Label
+var _pick_banner_cancel: Button
+const PICK_BANNER_RECT: Rect2i = Rect2i(150, 128, 616, 0)
 # Set while the current player is casting a spell (choosing its level, then
 # any target it asks for), so a second spell card click can't start another
 # cast on top of it and stomp the shared player_picker popup.
@@ -315,8 +324,10 @@ var _current_roll: int = 0:
 # counter bumped on every roll, so a client can tell one roll from the next
 # even if the faces happen to repeat. Drives the dice-rolling animation
 # (see dice_roller / _apply_dice_animation).
-var _die1: int = 0
-var _die2: int = 0
+# -1 = no dice showing. 0 = a die a spell zeroed out (shown as a blank
+# face).
+var _die1: int = -1
+var _die2: int = -1
 var _roll_seq: int = 0
 # Set when a spell jails whoever's roll is in flight (Bribe the Guards L2,
 # Knockout Punch): once the response window closes, _perform_roll() cancels
@@ -661,6 +672,7 @@ func _ready() -> void:
 	pause_menu.quit_to_menu_requested.connect(_quit_to_main_menu)
 	pause_menu.quit_to_desktop_requested.connect(get_tree().quit)
 	board.space_clicked.connect(_on_space_clicked)
+	_build_pick_banner()
 	_build_log_markup()
 	game_log.meta_clicked.connect(_on_log_meta_clicked)
 	_update_turn_label()
@@ -1665,8 +1677,8 @@ func _advance_turn() -> void:
 	_awaiting_end_turn = false
 	_buying_house_or_unmortgaging = false
 	_selling_house_or_mortgaging = false
-	_die1 = 0
-	_die2 = 0
+	_die1 = -1
+	_die2 = -1
 	dice_roller.clear_dice()
 	_advance_to_next_active_player()
 	_update_turn_label()
@@ -4286,6 +4298,14 @@ func _color_attunement(player: Node2D, color_name: String) -> int:
 
 
 func _on_space_clicked(index: int) -> void:
+	# A board pick (_pick_board_space) is armed on this machine: the click
+	# answers it -- only the highlighted spaces count.
+	if not _board_pick_spaces.is_empty():
+		if index in _board_pick_spaces:
+			_board_pick_end(index)
+		else:
+			_show_toast("Choose one of the highlighted spaces.")
+		return
 	# Tutorial: board / mini-card clicks are never part of the script. (On a
 	# "click anywhere" step _input() has already swallowed the click; this
 	# only bites on an action step.)
@@ -5362,8 +5382,7 @@ func _prepare_impossible_architecture(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no property to build on."
 		return Callable()
 
-	_pp_open("Impossible Architecture: choose a property to build on.", entries)
-	var space_index: int = await _pp_result()
+	var space_index: int = await _pick_space("Impossible Architecture: choose a property to build on.", entries)
 	if space_index == -1:
 		return Callable()
 	_spell_target_property(space_index)
@@ -5432,16 +5451,13 @@ func _prepare_promised_land(caster: Node2D, level: int) -> Callable:
 				return Callable()
 			space_index = pool[randi_range(0, pool.size() - 1)]
 		3:
-			_picking_promised_land_property = true
-			_info_open("Promised Land: click an unowned property to (maybe) buy.")
-			var clicked: int = await board_space_picked
-			if info_prompt.visible:
-				info_prompt.hide()
-			var clicked_info: Dictionary = board.get_space_info(clicked)
-			if clicked_info.get("type", "") != "property" or board.spaces[clicked].owner_id != -1:
-				dice_label.text += "\nThat wasn't an unowned property -- the spell fizzles."
+			var pool: Array[int] = _unowned_property_indices()
+			if pool.is_empty():
+				dice_label.text += "\nThere are no unowned properties left."
 				return Callable()
-			space_index = clicked
+			space_index = await _pick_board_space("Promised Land: choose an unowned property to (maybe) buy.", pool)
+			if space_index == -1:
+				return Callable()
 
 	var price: int = board.get_space_info(space_index).get("price", 0)
 	_cf_open("Promised Land: buy %s for $%d?" % [_property_name(space_index), price])
@@ -5698,8 +5714,7 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no eligible property to take."
 		return Callable()
 
-	_pp_open("Offer You Can't Refuse: choose an opponent's property without houses.", target_entries)
-	var target_space_index: int = await _pp_result()
+	var target_space_index: int = await _pick_space("Offer You Can't Refuse: choose an opponent's property without houses.", target_entries)
 	if target_space_index == -1:
 		return Callable()
 	_spell_target_property(target_space_index)
@@ -5733,8 +5748,7 @@ func _prepare_offer_you_cant_refuse(caster: Node2D, level: int) -> Callable:
 			prompt = "Offer You Can't Refuse: choose a property to give in return."
 		else:
 			prompt = "Offer You Can't Refuse: choose %d properties to give in return (%d picked)." % [give_count, given.size()]
-		_pp_open(prompt, entries)
-		var picked: int = await _pp_result()
+		var picked: int = await _pick_space(prompt, entries)
 		if picked == -1:
 			return Callable()
 		given.append(picked)
@@ -5795,8 +5809,7 @@ func _prepare_burn_to_the_ground(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere are no houses to destroy."
 		return Callable()
 
-	_pp_open("Burn to the Ground: choose a property.", entries)
-	var space_index: int = await _pp_result()
+	var space_index: int = await _pick_space("Burn to the Ground: choose a property.", entries)
 	if space_index == -1:
 		return Callable()
 	_spell_target_property(space_index)
@@ -5912,8 +5925,7 @@ func _prepare_threaten(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no eligible property to threaten."
 		return Callable()
 
-	_pp_open("Threaten: choose an opponent's property without houses.", entries)
-	var space_index: int = await _pp_result()
+	var space_index: int = await _pick_space("Threaten: choose an opponent's property without houses.", entries)
 	if space_index == -1:
 		return Callable()
 	_spell_target_property(space_index)
@@ -5978,8 +5990,7 @@ func _prepare_royal_aid(caster: Node2D, level: int) -> Callable:
 			entries.append({"index": space_index, "name": display_name, "color": Color.WHITE})
 		if entries.is_empty():
 			break
-		_pp_open("Royal Aid: choose a mortgaged property to unmortgage for free (%d/%d)." % [chosen.size() + 1, count], entries)
-		var picked: int = await _pp_result()
+		var picked: int = await _pick_space("Royal Aid: choose a mortgaged property to unmortgage for free (%d/%d)." % [chosen.size() + 1, count], entries)
 		if picked == -1:
 			break
 		chosen.append(picked)
@@ -6106,8 +6117,7 @@ func _prepare_annexation(caster: Node2D, level: int) -> Callable:
 		dice_label.text += "\nThere's no eligible property to annex."
 		return Callable()
 
-	_pp_open("Annexation: choose an opponent's property without houses to buy.", entries)
-	var target_space_index: int = await _pp_result()
+	var target_space_index: int = await _pick_space("Annexation: choose an opponent's property without houses to buy.", entries)
 	if target_space_index == -1:
 		return Callable()
 	_spell_target_property(target_space_index)
@@ -6222,8 +6232,7 @@ func _prepare_reclaimed_by_nature(caster: Node2D, level: int) -> Callable:
 			entries.append({"index": space_index, "name": "%s (%s)" % [_property_name(space_index), PLAYER_NAMES[space.owner_id]], "color": PLAYER_COLORS[space.owner_id]})
 		if entries.is_empty():
 			break
-		_pp_open("Reclaimed by Nature: choose a mortgaged property to return to the bank (%d/%d)." % [chosen.size() + 1, count], entries)
-		var picked: int = await _pp_result()
+		var picked: int = await _pick_space("Reclaimed by Nature: choose a mortgaged property to return to the bank (%d/%d)." % [chosen.size() + 1, count], entries)
 		if picked == -1:
 			break
 		chosen.append(picked)
@@ -6674,8 +6683,7 @@ func _prepare_market_manipulation(caster: Node2D, level: int) -> Callable:
 		entries.append({"index": i, "name": "%s (%s, $%d)" % [_property_name(i), PLAYER_NAMES[owner_id], int(board.get_space_info(i).get("price", 0))], "color": PLAYER_COLORS[owner_id]})
 	if entries.is_empty():
 		return Callable()
-	_pp_open("Market Manipulation: choose an opponent's property to take.", entries)
-	var space_index: int = await _pp_result()
+	var space_index: int = await _pick_space("Market Manipulation: choose an opponent's property to take.", entries)
 	if space_index == -1:
 		return Callable()
 	_spell_target_property(space_index)
@@ -8715,7 +8723,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_current_roll = snap.get("current_roll", 0)
 	_roll_in_flight = snap.get("roll_in_flight", false)
 
-	_apply_dice_animation(snap.get("die1", 0), snap.get("die2", 0), snap.get("roll_seq", 0))
+	_apply_dice_animation(snap.get("die1", -1), snap.get("die2", -1), snap.get("roll_seq", 0))
 
 	_update_player_panels()
 	_refresh_action_buttons()
@@ -8724,7 +8732,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 
 # Client: mirror the host's dice-rolling animation from the snapshot.
 func _apply_dice_animation(d1: int, d2: int, seq: int) -> void:
-	if d1 == 0:
+	if d1 < 0:
 		dice_roller.clear_dice()
 		_roll_seq = seq
 		return
@@ -8815,6 +8823,120 @@ func _cf_result() -> bool:
 
 
 # --- player_picker (choice list) ------------------------------------
+
+# --- board pick (click a highlighted space) / die pick (click a die) -----
+#
+# Instead of a list, the spaces that can be chosen light up on the board and
+# the rest dim; a banner over the board gives the prompt (and Cancel). Clicks
+# arrive through _on_space_clicked() -- tiles and the players' mini cards
+# alike. Routed like every other prompt: locally, or to the deciding
+# player's machine (kind "board" / "die" in _net_client_run_prompt()).
+
+# Picker entries ({"index": space index, ...}) -> a board pick over exactly
+# those spaces. -1 if cancelled.
+func _pick_space(text: String, entries: Array, cancellable: bool = true) -> int:
+	var spaces: Array[int] = []
+	for e in entries:
+		spaces.append(int(e["index"]))
+	return await _pick_board_space(text, spaces, cancellable)
+
+
+func _pick_board_space(text: String, spaces: Array[int], cancellable: bool = true) -> int:
+	if spaces.is_empty():
+		return -1
+	if _prompt_is_local():
+		return await _board_pick_local(text, spaces, cancellable)
+	_net_open_remote("board", {"text": text, "spaces": spaces, "cancellable": cancellable})
+	return int(await _net_await_reply())
+
+
+# Which die (1 or 2) the deciding player clicks. Can't be cancelled.
+func _pick_die(text: String) -> int:
+	if _prompt_is_local():
+		return await _die_pick_local(text)
+	_net_open_remote("die", {"text": text})
+	var which: int = int(await _net_await_reply())
+	return 2 if which == 2 else 1
+
+
+func _board_pick_local(text: String, spaces: Array[int], cancellable: bool) -> int:
+	if not _board_pick_spaces.is_empty():
+		_board_pick_end(-1)
+	_board_pick_spaces = spaces.duplicate()
+	for space in board.spaces:
+		space.set_pick_state(1 if space.index in _board_pick_spaces else -1)
+	_show_pick_banner(text, cancellable)
+	return await board_pick_chosen
+
+
+func _board_pick_end(index: int) -> void:
+	if _board_pick_spaces.is_empty():
+		return
+	_board_pick_spaces.clear()
+	for space in board.spaces:
+		space.set_pick_state(0)
+	_hide_pick_banner()
+	board_pick_chosen.emit(index)
+
+
+func _die_pick_local(text: String) -> int:
+	_show_pick_banner(text, false)
+	dice_roller.start_pick()
+	var which: int = await dice_roller.die_picked
+	dice_roller.stop_pick()
+	_hide_pick_banner()
+	return which
+
+
+func _on_pick_banner_cancel() -> void:
+	_board_pick_end(-1)
+
+
+func _build_pick_banner() -> void:
+	_pick_banner = PanelContainer.new()
+	_pick_banner.name = "PickBanner"
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.12, 0.12, 0.14, 0.95)
+	style.border_color = Color(1.0, 0.82, 0.25)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(6)
+	style.set_content_margin_all(12)
+	_pick_banner.add_theme_stylebox_override("panel", style)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	_pick_banner.add_child(row)
+	_pick_banner_label = Label.new()
+	_pick_banner_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_pick_banner_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_pick_banner_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_pick_banner_label.add_theme_font_size_override("font_size", 20)
+	# A wrapping label needs a set width, or its first layout wraps every word
+	# onto its own line and the banner fills the screen.
+	_pick_banner_label.custom_minimum_size = Vector2(PICK_BANNER_RECT.size.x - 24 - 14 - 110, 0)
+	row.add_child(_pick_banner_label)
+	_pick_banner_cancel = Button.new()
+	_pick_banner_cancel.text = "Cancel"
+	_pick_banner_cancel.custom_minimum_size = Vector2(110, 44)
+	_pick_banner_cancel.pressed.connect(_on_pick_banner_cancel)
+	row.add_child(_pick_banner_cancel)
+	# Over the middle of the board, above the action panel.
+	_pick_banner.position = Vector2(PICK_BANNER_RECT.position)
+	_pick_banner.custom_minimum_size = Vector2(PICK_BANNER_RECT.size.x, 0)
+	_pick_banner.size = Vector2(PICK_BANNER_RECT.size.x, 0)
+	_pick_banner.visible = false
+	$UI.add_child(_pick_banner)
+
+
+func _show_pick_banner(text: String, cancellable: bool) -> void:
+	_pick_banner_label.text = text
+	_pick_banner_cancel.visible = cancellable
+	_pick_banner.visible = true
+	_pick_banner.reset_size()
+
+
+func _hide_pick_banner() -> void:
+	_pick_banner.visible = false
+
 
 func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
 	if _prompt_is_local():
@@ -8946,6 +9068,11 @@ func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
 				{"index": int(burn["index"]), "name": str(burn.get("name", ""))} if burn.has("index") else {},
 				true)
 			return await spell_level_picker.level_chosen
+		"board":
+			return await _board_pick_local(str(payload.get("text", "")),
+				_net_int_array(payload.get("spaces", [])), bool(payload.get("cancellable", true)))
+		"die":
+			return await _die_pick_local(str(payload.get("text", "")))
 		"card":
 			card_picker.open(str(payload.get("text", "")),
 				_net_unpack_card_entries(payload.get("entries", [])),
