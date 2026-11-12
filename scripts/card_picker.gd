@@ -46,9 +46,9 @@ const BACKDROP_SHADER: Shader = preload("res://scripts/picker_backdrop.gdshader"
 var _backdrop: ColorRect = null
 
 # Magic Forest: the cards from this entry on are the ones just drawn. They
-# appear one at a time, REVEAL_STEP_SEC apart, and nothing can be picked
+# appear one at a time, reveal_step_sec apart, and nothing can be picked
 # until they're all in.
-const REVEAL_STEP_SEC: float = 0.5
+var reveal_step_sec: float = 0.5
 var _revealing: bool = false
 
 @onready var prompt_label: Label = $VBox/PromptLabel
@@ -81,7 +81,7 @@ func _ready() -> void:
 # player_picker.gd's open(): a same-frame hide() -> open() on the same
 # popup races Window's own internal close bookkeeping.
 # reveal_from: if >= 0, entries from that position on are held back and
-# dealt in one at a time (see REVEAL_STEP_SEC).
+# dealt in one at a time (see reveal_step_sec).
 func open(prompt: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2, sticky: bool = false, large: bool = false, reveal_from: int = -1) -> void:
 	call_deferred("_do_open", prompt, entries, mandatory, skip_text, skip_index, sticky, large, reveal_from)
 
@@ -161,11 +161,11 @@ func _do_open(prompt: String, entries: Array, mandatory: bool, skip_text: String
 
 
 # Deals the held-back cards in one at a time: each pops in (fade + grow)
-# REVEAL_STEP_SEC after the last. Picking is blocked until the last lands.
+# reveal_step_sec after the last. Picking is blocked until the last lands.
 func _reveal(nodes: Array[Control], answered_box: Array) -> void:
 	_revealing = true
 	for node in nodes:
-		await get_tree().create_timer(REVEAL_STEP_SEC).timeout
+		await get_tree().create_timer(reveal_step_sec).timeout
 		if answered_box != _answered_box or not is_instance_valid(node):
 			return
 		node.visible = true
