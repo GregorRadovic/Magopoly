@@ -359,6 +359,12 @@ var _next_landmark_id: int = 1
 # returns when the effect ends / the landmark is discarded.
 var _card_stays_in_play: bool = false
 const BURIED_TREASURE_VALUE: int = 100
+# The letter on each landmark's board badge (board_space.gd's set_landmarks).
+const LANDMARK_GLYPHS: Dictionary = {
+	"Landmine": "L", "Power Sink": "P", "Outland Settlements": "O",
+	"Contested Battlefield": "C", "Toll Road": "T", "Ensnaring Roots": "R",
+	"Stabilized Portal": "S", "Buried Treasure": "$",
+}
 
 
 # Wizard Vision: while a roll is in flight (the response window right after
@@ -7391,7 +7397,9 @@ func _spell_chip(spell_name: String, suffix: String) -> RichTextLabel:
 	chip.autowrap_mode = TextServer.AUTOWRAP_OFF
 	chip.scroll_active = false
 	chip.mouse_filter = Control.MOUSE_FILTER_PASS
-	var color: Color = board.COLOR_GROUP_COLORS.get(SpellData.SPELLS.get(spell_name, {}).get("color", ""), Color.WHITE)
+	# A token (Buried Treasure) takes the colour of the card that makes it.
+	var card_name: String = "Treasure Map" if spell_name == "Buried Treasure" else spell_name
+	var color: Color = board.COLOR_GROUP_COLORS.get(SpellData.SPELLS.get(card_name, {}).get("color", ""), Color.WHITE)
 	chip.add_theme_color_override("default_color", color)
 	chip.add_theme_font_size_override("normal_font_size", 18)
 	chip.text = "[url=spell:%s][u]%s[/u][/url]%s" % [spell_name.uri_encode(), spell_name, suffix.replace("[", "[lb]")]
@@ -7399,6 +7407,21 @@ func _spell_chip(spell_name: String, suffix: String) -> RichTextLabel:
 	chip.meta_hover_started.connect(func(_m: Variant) -> void: chip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND)
 	chip.meta_hover_ended.connect(func(_m: Variant) -> void: chip.mouse_default_cursor_shape = Control.CURSOR_ARROW)
 	return chip
+
+
+# After a landmark's name on its owner's panel: where it is and what's left.
+func _landmark_chip_suffix(lm: Dictionary) -> String:
+	var space_index: int = int(lm["space"])
+	var text: String = " on %s" % _property_name(space_index)
+	if lm["spell"] == "Power Sink":
+		var color_name: String = _attunement_color_of_space(space_index)
+		if color_name != "":
+			text += " (+%d %s)" % [int(_lvl("Power Sink", int(lm["level"]), "amount", 0)), color_name.capitalize().replace("_", " ")]
+	if lm["data"].has("destination"):
+		text += " -> %s" % _property_name(int(lm["data"]["destination"]))
+	if int(lm["triggers"]) > 0:
+		text += " (x%d)" % int(lm["triggers"])
+	return text
 
 
 func _ongoing_chip_text(e: Dictionary) -> String:
@@ -7731,7 +7754,7 @@ func _refresh_landmark_badges() -> void:
 		var key: int = int(lm["space"])
 		if not per_space.has(key):
 			per_space[key] = []
-		per_space[key].append({"color": PLAYER_COLORS[int(lm["owner"])], "text": _landmark_label(lm)})
+		per_space[key].append({"color": PLAYER_COLORS[int(lm["owner"])], "text": _landmark_label(lm), "glyph": LANDMARK_GLYPHS.get(lm["spell"], "?")})
 	for i in board.TOTAL_SPACES:
 		if board.spaces[i].has_method("set_landmarks"):
 			board.spaces[i].set_landmarks(per_space.get(i, []))
@@ -8351,6 +8374,21 @@ func _update_player_panels() -> void:
 			attunement_flow.add_child(effect_chip)
 		if not players[i].fated_ending.is_empty():
 			attunement_flow.add_child(_spell_chip("Fated Ending", " (Level %d)" % int(players[i].fated_ending.get("level", 1))))
+		# This player's landmarks (Buried Treasures grouped into one line).
+		var treasure_spaces: Array[String] = []
+		for lm in _landmarks:
+			if int(lm["owner"]) != i:
+				continue
+			if lm.get("token", false):
+				treasure_spaces.append(_property_name(int(lm["space"])))
+				continue
+			var lm_chip: RichTextLabel = _spell_chip(str(lm["spell"]), _landmark_chip_suffix(lm))
+			lm_chip.tooltip_text = str(SpellData.SPELLS[lm["spell"]]["levels"][int(lm["level"])].get("description", ""))
+			attunement_flow.add_child(lm_chip)
+		if not treasure_spaces.is_empty():
+			var treasure_chip: RichTextLabel = _spell_chip("Buried Treasure", " x%d" % treasure_spaces.size())
+			treasure_chip.tooltip_text = "Buried Treasure on: " + ", ".join(treasure_spaces)
+			attunement_flow.add_child(treasure_chip)
 
 	if _trading:
 		_populate_trade_flow(trader1_flow, _trade1_offered)
@@ -9367,6 +9405,13 @@ func _on_log_meta_clicked(meta: Variant) -> void:
 		var info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 		if info.has("icon"):
 			spell_card.show_card(load(info["icon"]))
+			return
+		# Not a deck card: an expansion token (Buried Treasure).
+		for exp in Expansions.LIST:
+			var tokens: Dictionary = exp.get("tokens", {})
+			if tokens.has(spell_name):
+				spell_card.show_card(load(tokens[spell_name]))
+				return
 
 
 func _log_line_bbcode(msg: String, color: Color) -> String:

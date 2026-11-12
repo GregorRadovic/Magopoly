@@ -119,7 +119,7 @@ var landing_highlight: Panel = null
 # Landmarks on this space -- a row of small dots in their owners' colours,
 # centred on the tile, each with its landmark's description as a tooltip.
 # Built in code; filled by set_landmarks() (main.gd's _refresh_landmark_badges).
-const LANDMARK_DOT: float = 11.0
+const LANDMARK_DOT: float = 17.0
 var landmark_row: HBoxContainer = null
 var _landmark_items: Array = []
 # Board pick (main.gd's _pick_board_space): 1 = can be chosen (gold frame,
@@ -181,8 +181,10 @@ func _position_landmark_row() -> void:
 	_set_rect(landmark_row, x, y, x + row_w, y + LANDMARK_DOT)
 
 
-# `items`: [{"color": Color, "text": String}], one per landmark here. More
-# than 5 share the last dot (its tooltip lists them all).
+# `items`: [{"color": Color, "text": String, "glyph": String}], one per
+# landmark here: a small square badge in the owner's colour with the
+# card's letter on it (square, so it's never mistaken for a round player
+# token). More than 5 share the last badge (its tooltip lists them all).
 func set_landmarks(items: Array) -> void:
 	if not landmark_row:
 		return
@@ -205,10 +207,21 @@ func set_landmarks(items: Array) -> void:
 		dot.tooltip_text = tip
 		var style := StyleBoxFlat.new()
 		style.bg_color = items[k].get("color", Color.WHITE)
-		style.border_color = Color(0.05, 0.05, 0.05)
+		style.border_color = Color(0.98, 0.98, 0.95)
 		style.set_border_width_all(2)
-		style.set_corner_radius_all(int(LANDMARK_DOT * 0.5))
+		style.set_corner_radius_all(3)
 		dot.add_theme_stylebox_override("panel", style)
+		var glyph := Label.new()
+		glyph.text = "+" if (k == 4 and items.size() > 5) else str(items[k].get("glyph", ""))
+		glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		glyph.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		glyph.add_theme_font_size_override("font_size", 11)
+		glyph.add_theme_color_override("font_color", Color.WHITE)
+		glyph.add_theme_color_override("font_outline_color", Color(0.05, 0.05, 0.05))
+		glyph.add_theme_constant_override("outline_size", 3)
+		glyph.set_anchors_preset(Control.PRESET_FULL_RECT)
+		dot.add_child(glyph)
 		landmark_row.add_child(dot)
 	_position_landmark_row()
 
