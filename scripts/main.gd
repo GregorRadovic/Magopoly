@@ -3241,6 +3241,9 @@ func _apply_haggling_discount(buyer: Node2D, price: int) -> int:
 # response-window click from someone else can't collide with it (there's no
 # response window of its own here, this isn't an Instant Timing).
 func _visit_magic_forest(player: Node2D) -> void:
+	# The hand as it was before drawing -- the picker deals the new cards in
+	# after these (card_picker's reveal_from).
+	var hand_before: int = player.spell_hand.size()
 	var drawn: Array[String] = []
 	for i in 2:
 		var spell_name: String = _draw_spell(player)
@@ -3267,7 +3270,7 @@ func _visit_magic_forest(player: Node2D) -> void:
 			var spell_name: String = player.spell_hand[i]
 			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 			entries.append({"index": i, "name": spell_name, "icon": load(spell_info.get("icon", ""))})
-		_cp_open("Magic Forest: choose a spell to discard.", entries, true, "", -2, true)
+		_cp_open("Magic Forest: Draw 2 cards, then discard a card.", entries, true, "", -2, true, hand_before)
 		hand_index = await _cp_result()
 
 	var discarded: String = player.spell_hand[hand_index]
@@ -3307,7 +3310,7 @@ func _visit_spell_shop(player: Node2D) -> void:
 			var caption: String = "[color=#e23c3c]$50[/color]" if i == sale_index else "$100"
 			entries.append({"index": i, "name": top_cards[i], "icon": load(spell_info.get("icon", "")), "caption": caption})
 		while true:
-			_cp_open("Spell Shop: buy a spell ($100, one on sale for $50), or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX, true)
+			_cp_open("Spell Shop: buy a spell for $100 -- one is on sale for $50 -- or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX, true)
 			choice = await _cp_result()
 			if choice < 0 or choice >= top_cards.size():
 				choice = SPELL_SHOP_SKIP_INDEX
@@ -9401,14 +9404,14 @@ func _lp_result() -> int:
 
 # --- card_picker --------------------------------------------------
 
-func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2, large: bool = false) -> void:
+func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2, large: bool = false, reveal_from: int = -1) -> void:
 	if _prompt_is_local():
-		card_picker.open(text, entries, mandatory, skip_text, skip_index, false, large)
+		card_picker.open(text, entries, mandatory, skip_text, skip_index, false, large, reveal_from)
 	else:
 		_net_open_remote("card", {
 			"text": text, "entries": _net_pack_card_entries(entries),
 			"mandatory": mandatory, "skip_text": skip_text, "skip_index": skip_index,
-			"large": large,
+			"large": large, "reveal_from": reveal_from,
 		})
 
 
@@ -9514,7 +9517,8 @@ func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
 				bool(payload.get("mandatory", false)),
 				str(payload.get("skip_text", "")),
 				int(payload.get("skip_index", -2)), true,
-				bool(payload.get("large", false)))
+				bool(payload.get("large", false)),
+				int(payload.get("reveal_from", -1)))
 			return await card_picker.card_chosen
 	return -1
 

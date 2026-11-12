@@ -40,6 +40,17 @@ var _skip_index: int = -2
 var _large_size: Vector2i = Vector2i(1200, 700)
 var _card_cols: int = 1
 
+# Large pickers dim and blur everything behind them, so the choice has the
+# player's full attention (Hide is how to look back at the game).
+const BACKDROP_SHADER: Shader = preload("res://scripts/picker_backdrop.gdshader")
+var _backdrop: ColorRect = null
+
+# Magic Forest: the cards from this entry on are the ones just drawn. They
+# appear one at a time, REVEAL_STEP_SEC apart, and nothing can be picked
+# until they're all in.
+const REVEAL_STEP_SEC: float = 0.5
+var _revealing: bool = false
+
 @onready var prompt_label: Label = $VBox/PromptLabel
 @onready var card_container: HFlowContainer = $VBox/CardScroll/CardContainer
 @onready var skip_button: Button = $VBox/ButtonRow/SkipButton
@@ -69,11 +80,13 @@ func _ready() -> void:
 # Deferred rather than done immediately, for the same reason as
 # player_picker.gd's open(): a same-frame hide() -> open() on the same
 # popup races Window's own internal close bookkeeping.
-func open(prompt: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2, sticky: bool = false, large: bool = false) -> void:
-	call_deferred("_do_open", prompt, entries, mandatory, skip_text, skip_index, sticky, large)
+# reveal_from: if >= 0, entries from that position on are held back and
+# dealt in one at a time (see REVEAL_STEP_SEC).
+func open(prompt: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2, sticky: bool = false, large: bool = false, reveal_from: int = -1) -> void:
+	call_deferred("_do_open", prompt, entries, mandatory, skip_text, skip_index, sticky, large, reveal_from)
 
 
-func _do_open(prompt: String, entries: Array, mandatory: bool, skip_text: String, skip_index: int, sticky: bool, large: bool) -> void:
+func _do_open(prompt: String, entries: Array, mandatory: bool, skip_text: String, skip_index: int, sticky: bool, large: bool, reveal_from: int = -1) -> void:
 	_mandatory = mandatory
 	_sticky = sticky
 	_large = large
@@ -109,7 +122,9 @@ func _do_open(prompt: String, entries: Array, mandatory: bool, skip_text: String
 		_large_size = _large_popup_size(card_size, entries.size(), has_caption)
 	_show_popup()
 
-	for entry in entries:
+	var held_back: Array[Control] = []
+	for k in entries.size():
+		var entry: Dictionary = entries[k]
 		var mini: Control = MINI_CARD_SCENE.instantiate()
 		mini.custom_minimum_size = card_size
 		var caption: String = str(entry.get("caption", ""))
@@ -135,9 +150,36 @@ func _do_open(prompt: String, entries: Array, mandatory: bool, skip_text: String
 		mini.setup(entry["index"], entry["icon"])
 		mini.card_clicked.connect(_on_pick.bind(answered_box))
 		mini.card_right_clicked.connect(_on_zoom.bind(entry["icon"]))
+		if reveal_from >= 0 and k >= reveal_from:
+			node.visible = false
+			held_back.append(node)
 
 	popup_hide.connect(_on_popup_hide.bind(answered_box), CONNECT_ONE_SHOT)
 	set_process(_mandatory or _sticky)
+	if not held_back.is_empty():
+		_reveal(held_back, answered_box)
+
+
+# Deals the held-back cards in one at a time: each pops in (fade + grow)
+# REVEAL_STEP_SEC after the last. Picking is blocked until the last lands.
+func _reveal(nodes: Array[Control], answered_box: Array) -> void:
+	_revealing = true
+	for node in nodes:
+		await get_tree().create_timer(REVEAL_STEP_SEC).timeout
+		if answered_box != _answered_box or not is_instance_valid(node):
+			return
+		node.visible = true
+		node.modulate.a = 0.0
+		await get_tree().process_frame
+		if not is_instance_valid(node):
+			return
+		node.pivot_offset = node.size * 0.5
+		node.scale = Vector2(0.6, 0.6)
+		var tween: Tween = node.create_tween().set_parallel(true)
+		tween.tween_property(node, "modulate:a", 1.0, 0.25)
+		tween.tween_property(node, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if answered_box == _answered_box:
+		_revealing = false
 
 
 const GRID_GAP: float = 20.0
@@ -190,20 +232,46 @@ func _show_popup() -> void:
 	if _large:
 		# Explicit rect rather than popup_centered_ratio(), which needs
 		# subwindow embedding to know the parent size and otherwise collapses
-		# to the content minimum. Anchored near the top so the button row
-		# doesn't reach down over the board's bottom edge.
+		# to the content minimum. Centred in the window.
 		var vp: Vector2 = Vector2(get_tree().root.get_visible_rect().size)
 		var x: int = roundi((vp.x - _large_size.x) * 0.5)
-		var y: int = clampi(roundi((vp.y - _large_size.y) * 0.4), 20, 60)
+		var y: int = maxi(0, roundi((vp.y - _large_size.y) * 0.5))
+		_show_backdrop()
 		popup(Rect2i(Vector2i(x, y), _large_size))
 	else:
 		popup_centered(POPUP_SIZE)
+
+
+# --- Backdrop -------------------------------------------------------------
+
+func _show_backdrop() -> void:
+	if not is_instance_valid(_backdrop):
+		_backdrop = ColorRect.new()
+		_backdrop.name = "CardPickerBackdrop"
+		_backdrop.color = Color(0, 0, 0, 1)
+		_backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
+		# Swallows clicks so the game behind can't be used while choosing.
+		_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+		var mat := ShaderMaterial.new()
+		mat.shader = BACKDROP_SHADER
+		_backdrop.material = mat
+		get_parent().add_child(_backdrop)
+	var vp: Vector2 = Vector2(get_tree().root.get_visible_rect().size)
+	_backdrop.position = Vector2.ZERO
+	_backdrop.size = vp
+	_backdrop.visible = true
+
+
+func _hide_backdrop() -> void:
+	if is_instance_valid(_backdrop):
+		_backdrop.visible = false
 
 
 # --- Hide / Unhide -------------------------------------------------------
 
 func _on_hide_pressed() -> void:
 	_hidden = true
+	_hide_backdrop()
 	hide()
 	_ensure_unhide_button()
 	_unhide_button.visible = true
@@ -239,6 +307,8 @@ func _clear_unhide_button() -> void:
 
 func _finish(index: int) -> void:
 	_answered_box[0] = true
+	_revealing = false
+	_hide_backdrop()
 	_hidden = false
 	_clear_unhide_button()
 	set_process(false)
@@ -247,7 +317,7 @@ func _finish(index: int) -> void:
 
 
 func _on_pick(index: int, answered_box: Array) -> void:
-	if answered_box != _answered_box:
+	if answered_box != _answered_box or _revealing:
 		return
 	_finish(index)
 
