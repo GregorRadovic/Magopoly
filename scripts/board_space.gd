@@ -116,9 +116,18 @@ var _targeted: bool = false
 # Toggled by set_landing_highlight().
 var landing_highlight: Panel = null
 
+# Board pick (main.gd's _pick_board_space): 1 = can be chosen (gold frame,
+# brighter on hover), -1 = can't (dimmed), 0 = no pick in progress.
+# Toggled by set_pick_state(). Built in code; sits under the target frame.
+const PICK_COLOR: Color = Color(1.0, 0.82, 0.25)
+var pick_overlay: Panel = null
+var _pick_state: int = 0
+var _pick_hovered: bool = false
+
 
 func _ready() -> void:
 	_build_landing_highlight()
+	_build_pick_overlay()
 	_build_target_outline()
 	_apply_layout()
 	_update_label()
@@ -128,6 +137,8 @@ func _ready() -> void:
 	_update_price()
 	_update_tile_image()
 	click_area.gui_input.connect(_on_click_area_gui_input)
+	click_area.mouse_entered.connect(_on_pick_hover.bind(true))
+	click_area.mouse_exited.connect(_on_pick_hover.bind(false))
 
 
 func _build_target_outline() -> void:
@@ -178,6 +189,49 @@ func set_landing_highlight(on: bool, color: Color = Color.WHITE) -> void:
 	landing_highlight.add_theme_stylebox_override("panel", style)
 
 
+func _build_pick_overlay() -> void:
+	pick_overlay = Panel.new()
+	pick_overlay.name = "PickOverlay"
+	pick_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pick_overlay.visible = false
+	add_child(pick_overlay)
+	_position_pick_overlay()
+
+
+func _position_pick_overlay() -> void:
+	if pick_overlay:
+		_set_rect(pick_overlay, 0.0, 0.0, tile_size.x, tile_size.y)
+
+
+func set_pick_state(state: int) -> void:
+	_pick_state = state
+	if click_area:
+		click_area.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if state == 1 else Control.CURSOR_ARROW
+	_update_pick_overlay()
+
+
+func _on_pick_hover(on: bool) -> void:
+	_pick_hovered = on
+	if _pick_state == 1:
+		_update_pick_overlay()
+
+
+func _update_pick_overlay() -> void:
+	if not pick_overlay:
+		return
+	pick_overlay.visible = _pick_state != 0
+	if _pick_state == 0:
+		return
+	var style := StyleBoxFlat.new()
+	if _pick_state == 1:
+		style.bg_color = Color(PICK_COLOR.r, PICK_COLOR.g, PICK_COLOR.b, 0.38 if _pick_hovered else 0.16)
+		style.border_color = PICK_COLOR
+		style.set_border_width_all(5 if _pick_hovered else 4)
+	else:
+		style.bg_color = Color(0.0, 0.0, 0.0, 0.55)
+	pick_overlay.add_theme_stylebox_override("panel", style)
+
+
 # Called by main.gd's _refresh_spell_target_highlights().
 func set_targeted(value: bool) -> void:
 	if _targeted == value:
@@ -196,6 +250,7 @@ func _on_click_area_gui_input(event: InputEvent) -> void:
 # nodes exist (the setters can fire before _ready during board generation);
 # _ready() calls it again once they do.
 func _apply_layout() -> void:
+	_position_pick_overlay()
 	var w: float = tile_size.x
 	var h: float = tile_size.y
 

@@ -27,6 +27,13 @@ var _end_msec: int = 0
 var _next_shuffle_msec: int = 0
 var _jitter: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]
 
+# Die pick (main.gd's _pick_die): both dice get a gold frame and the one
+# clicked is reported as 1 or 2.
+signal die_picked(which: int)
+const PICK_COLOR: Color = Color(1.0, 0.82, 0.25)
+var _picking: bool = false
+var _pick_hover: int = 0
+
 
 func roll(die1: int, die2: int, duration_sec: float) -> void:
 	_final = [die1, die2]
@@ -45,6 +52,49 @@ func finish_now() -> void:
 	_shown = _final.duplicate()
 	_jitter = [Vector2.ZERO, Vector2.ZERO]
 	queue_redraw()
+
+
+func start_pick() -> void:
+	finish_now()
+	_visible_dice = true
+	_picking = true
+	_pick_hover = 0
+	queue_redraw()
+
+
+func stop_pick() -> void:
+	_picking = false
+	_pick_hover = 0
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	queue_redraw()
+
+
+# 1 or 2 for the die under `screen_pos`, else 0.
+func _die_at(screen_pos: Vector2) -> int:
+	var local: Vector2 = get_global_transform_with_canvas().affine_inverse() * screen_pos
+	for i in 2:
+		var rect := Rect2(Vector2(i * (DIE_SIZE + GAP), 0.0), Vector2(DIE_SIZE, DIE_SIZE)).grow(6.0)
+		if rect.has_point(local):
+			return i + 1
+	return 0
+
+
+# _input, not _unhandled_input: the dice sit over the action panel, which
+# would otherwise swallow the click.
+func _input(event: InputEvent) -> void:
+	if not _picking:
+		return
+	if event is InputEventMouseMotion:
+		var hover: int = _die_at(event.position)
+		if hover != _pick_hover:
+			_pick_hover = hover
+			Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if hover else Input.CURSOR_ARROW)
+			queue_redraw()
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var which: int = _die_at(event.position)
+		if which:
+			get_viewport().set_input_as_handled()
+			die_picked.emit(which)
 
 
 func clear_dice() -> void:
@@ -76,6 +126,12 @@ func _draw() -> void:
 	for i in 2:
 		var origin: Vector2 = Vector2(i * (DIE_SIZE + GAP), 0.0) + _jitter[i]
 		_draw_die(origin, _shown[i])
+		if _picking:
+			var frame := Rect2(origin, Vector2(DIE_SIZE, DIE_SIZE)).grow(6.0)
+			if _pick_hover == i + 1:
+				draw_rect(frame, Color(PICK_COLOR.r, PICK_COLOR.g, PICK_COLOR.b, 0.35))
+				_draw_die(origin, _shown[i])
+			draw_rect(frame, PICK_COLOR, false, 5.0 if _pick_hover == i + 1 else 3.0)
 	# "Doubles!" for as long as the settled dice match (a zeroed die has no
 	# value, so blank + blank doesn't count) -- it follows any spell that
 	# changes the dice, since those re-roll() them.
