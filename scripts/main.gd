@@ -7907,6 +7907,8 @@ func _resolve_fated_ending(caster: Node2D, level: int, target_index: int) -> voi
 func _apply_fated_ending(player: Node2D, die1: int, die2: int) -> Vector2i:
 	var fe: Dictionary = player.fated_ending
 	player.fated_ending = {}
+	# Drop the "Fated Ending" chip now that it's being used up.
+	_update_player_panels()
 	var caster_id: int = int(fe.get("caster", -1))
 	if int(fe.get("level", 1)) == 1:
 		_log("Fated Ending: %s rolls only 1 die." % PLAYER_NAMES[player.player_id])
