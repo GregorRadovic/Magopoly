@@ -3,6 +3,15 @@ extends Node2D
 # Small enough that a full 8-marker cluster fits on one board space (see
 # main.gd's MARKER_OFFSETS).
 const RADIUS: float = 10.0
+# The playing piece (player_markers.gd) is drawn this big, centred on the
+# player's position, tinted toward their colour by MARKER_TINT (0 = the plain
+# white piece, 1 = solid colour). Its dark line art stays dark.
+const MARKER_SIZE: float = 34.0
+const MARKER_TINT: float = 0.6
+const OUTLINE_OFFSETS: Array[Vector2] = [
+	Vector2(-1.5, 0), Vector2(1.5, 0), Vector2(0, -1.5), Vector2(0, 1.5),
+	Vector2(-1.1, -1.1), Vector2(1.1, -1.1), Vector2(-1.1, 1.1), Vector2(1.1, 1.1),
+]
 const STARTING_MONEY: int = 1500
 
 var player_id: int = 0
@@ -105,12 +114,28 @@ var cramped_cell_debts: Array = []
 var pending_return_spells: Dictionary = {}
 
 
-func setup(id: int, color: Color) -> void:
+var marker: String = ""
+var _marker_texture: Texture2D = null
+
+
+func setup(id: int, color: Color, marker_name: String = "") -> void:
 	player_id = id
 	player_color = color
+	marker = marker_name
+	_marker_texture = PlayerMarkers.icon(marker_name)
 	queue_redraw()
 
 
 func _draw() -> void:
-	draw_circle(Vector2.ZERO, RADIUS, player_color)
-	draw_arc(Vector2.ZERO, RADIUS, 0.0, TAU, 24, Color.BLACK, 2.0)
+	if _marker_texture == null:
+		# No piece chosen: the plain coloured counter.
+		draw_circle(Vector2.ZERO, RADIUS, player_color)
+		draw_arc(Vector2.ZERO, RADIUS, 0.0, TAU, 24, Color.BLACK, 2.0)
+		return
+	var rect := Rect2(Vector2(-MARKER_SIZE, -MARKER_SIZE) * 0.5, Vector2(MARKER_SIZE, MARKER_SIZE))
+	# A dark outline (the piece's silhouette drawn black, nudged around it)
+	# so it stands out on any tile, then the piece tinted toward the
+	# player's colour.
+	for off in OUTLINE_OFFSETS:
+		draw_texture_rect(_marker_texture, Rect2(rect.position + off, rect.size), false, Color(0.05, 0.05, 0.08, 0.9))
+	draw_texture_rect(_marker_texture, rect, false, Color.WHITE.lerp(player_color, MARKER_TINT))

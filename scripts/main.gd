@@ -1337,7 +1337,7 @@ func _spawn_players() -> void:
 	for i in PLAYER_COLORS.size():
 		var player: Node2D = PLAYER_SCENE.instantiate()
 		players_container.add_child(player)
-		player.setup(i, PLAYER_COLORS[i])
+		player.setup(i, PLAYER_COLORS[i], GameState.player_markers[i] if i < GameState.player_markers.size() else "")
 		player.current_space = 0
 		player.position = board.get_space_center(0) + MARKER_OFFSETS[i]
 		players.append(player)
@@ -8459,6 +8459,7 @@ func _build_save() -> Dictionary:
 			"expansions": GameState.expansions.duplicate(),
 			"hero_mode": GameState.hero_mode,
 			"heroes": GameState.player_heroes.duplicate(),
+			"markers": GameState.player_markers.duplicate(),
 		},
 		"state": {
 			"players": snap["players"],
