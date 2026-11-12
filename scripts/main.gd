@@ -2646,8 +2646,8 @@ func _update_spell_stack_display() -> void:
 			cap.text = "→ %s" % target["text"]
 			cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			cap.clip_text = true
-			cap.add_theme_font_size_override("font_size", 15)
+			cap.max_lines_visible = 2
+			cap.add_theme_font_size_override("font_size", 14)
 			cap.add_theme_color_override("font_color", _caster_color(int(target.get("caster", -1))).lightened(0.25))
 			cap.add_theme_color_override("font_outline_color", Color(0.06, 0.06, 0.08))
 			cap.add_theme_constant_override("outline_size", 4)
@@ -5255,9 +5255,7 @@ func _style_player_row(i: int) -> void:
 		var c: Color = _caster_color(int(_targeted_player_ids[i]))
 		style.border_color = c
 		style.set_border_width_all(4)
-		style.bg_color = Color(c.r, c.g, c.b, 0.16)
-		style.shadow_color = Color(c.r, c.g, c.b, 0.55)
-		style.shadow_size = 10
+		style.bg_color = Color(c.r, c.g, c.b, 0.10)
 	player_row_frames[i].add_theme_stylebox_override("panel", style)
 	badge.visible = targeted
 	if targeted:
