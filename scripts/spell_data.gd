@@ -694,15 +694,14 @@ const SPELLS: Dictionary = {
 			3: {"description": "Choose an opponent. At the start of their turn, they pay you $20. Lasts 4 rotations.", "amount": 20, "rotations": 4, "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
-	# Its rotations count the target's passes over Go. Cast on whoever's
-	# roll is in flight, it also shortens that roll -- see _resolve_lethargy().
+	# Slow. Its rotations count the target's passes over Go.
 	"Lethargy": {
 		"color": "ocean_blue",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/C 8 1 Lethargy.png",
 		"kind": "ongoing",
 		"levels": {
-			1: {"description": "Choose an opponent. They get -1 to their rolls. Lasts 5 rotations.", "roll_penalty": 1, "rotations": 5, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "Choose an opponent. They get -2 to their rolls. Lasts 5 rotations.", "roll_penalty": 2, "rotations": 5, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "Choose an opponent. They get -1 to their rolls. Lasts 5 rotations.", "roll_penalty": 1, "rotations": 5},
+			2: {"description": "Choose an opponent. They get -2 to their rolls. Lasts 5 rotations.", "roll_penalty": 2, "rotations": 5},
 		},
 	},
 

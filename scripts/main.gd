@@ -7967,11 +7967,6 @@ func _resolve_opponent_ongoing(caster: Node2D, spell_name: String, level: int, t
 	var rotation_player: int = -1 if spell_name == "Anti-Magic Law" else target_index
 	_log("%s's %s (Level %d) takes hold of %s." % [PLAYER_NAMES[caster.player_id], spell_name, level, PLAYER_NAMES[target_index]])
 	_add_ongoing(spell_name, level, caster.player_id, target_index, rotation_player)
-	# Lethargy cast on whoever's roll is in flight shortens that roll too.
-	if spell_name == "Lethargy" and _roll_in_flight and target_index == current_player:
-		var penalty: int = int(_lvl("Lethargy", level, "roll_penalty", 0))
-		_current_roll = maxi(0, _current_roll - penalty)
-		_log("Lethargy: %s's current roll is reduced by %d (now %d)." % [PLAYER_NAMES[target_index], penalty, _current_roll])
 
 
 # ============================================================================
