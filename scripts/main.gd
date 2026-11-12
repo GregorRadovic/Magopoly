@@ -7120,8 +7120,7 @@ func _pick_property_space(caster: Node2D, prompt: String, filter: Callable) -> i
 	if entries.is_empty():
 		_toast("There's no property that can be chosen.")
 		return -1
-	_pp_open(prompt, entries)
-	return await _pp_result()
+	return await _pick_space(prompt, entries)
 
 
 # A dice-face picker (1-6) for Master Plan, routed to whoever _prompt_slot
@@ -7714,12 +7713,7 @@ func _resolve_dodge(caster: Node2D, level: int) -> void:
 		d2 = randi_range(1, 6)
 	else:
 		_prompt_slot = caster.player_id
-		var entries: Array = [
-			{"index": 1, "name": "Die 1 (showing %d)" % d1, "color": PLAYER_COLORS[caster.player_id]},
-			{"index": 2, "name": "Die 2 (showing %d)" % d2, "color": PLAYER_COLORS[caster.player_id]},
-		]
-		_pp_open("Dodge: choose a die to reroll.", entries, true)
-		var which: int = await _pp_result()
+		var which: int = await _pick_die("Dodge: click a die to reroll.")
 		if which == 2:
 			d2 = randi_range(1, 6)
 		else:
@@ -7938,13 +7932,12 @@ func _apply_fated_ending(player: Node2D, die1: int, die2: int) -> Vector2i:
 		return Vector2i(die1, 0)
 	var zero_first: bool = die1 >= die2
 	if caster_id >= 0 and caster_id < players.size() and not players[caster_id].is_bankrupt and not players[caster_id].is_ai:
+		# Show the dice as rolled so the caster can click one (online clients
+		# get them through the state sync, like any dice change).
+		_set_roll_dice(die1, die2)
+		dice_roller.finish_now()
 		_prompt_slot = caster_id
-		var entries: Array = [
-			{"index": 1, "name": "Die 1 (%d)" % die1, "color": PLAYER_COLORS[caster_id]},
-			{"index": 2, "name": "Die 2 (%d)" % die2, "color": PLAYER_COLORS[caster_id]},
-		]
-		_pp_open("Fated Ending: %s rolled %d + %d. Choose a die to set to 0." % [PLAYER_NAMES[player.player_id], die1, die2], entries, true)
-		zero_first = (await _pp_result()) != 2
+		zero_first = (await _pick_die("Fated Ending: %s rolled %d + %d. Click a die to set to 0." % [PLAYER_NAMES[player.player_id], die1, die2])) != 2
 		_prompt_slot = -1
 	_log("Fated Ending: %s sets %s's %s die to 0." % [PLAYER_NAMES[caster_id] if caster_id >= 0 else "Fate", PLAYER_NAMES[player.player_id], "first" if zero_first else "second"])
 	return Vector2i(0, die2) if zero_first else Vector2i(die1, 0)
