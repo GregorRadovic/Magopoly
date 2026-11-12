@@ -206,6 +206,9 @@ var dice_label: DiceSink = DiceSink.new()
 @onready var spell_level_picker: PopupPanel = $UI/SpellLevelPicker
 @onready var card_picker: PopupPanel = $UI/CardPicker
 @onready var free_parking_label: Label = $UI/PlayersPanel/VBox/FreeParkingLabel
+# Each player's piece next to their name in the Players panel.
+var player_marker_icons: Array[TextureRect] = []
+const PANEL_MARKER_SIZE: float = 40.0
 @onready var player_list: VBoxContainer = $UI/PlayersPanel/VBox/PlayersScroll/PlayerList
 # One entry per slot, filled by _build_player_rows() from player_row.tscn.
 var player_header_labels: Array[Label] = []
@@ -1182,7 +1185,25 @@ func _build_player_rows() -> void:
 		player_list.add_child(row)
 		player_rows.append(row)
 		player_row_separators.append(row.get_node("TopSeparator"))
-		player_header_labels.append(row.get_node("HeaderLabel"))
+		var header: Label = row.get_node("HeaderLabel")
+		player_header_labels.append(header)
+		# The player's piece (player_markers.gd) in front of their name, tinted
+		# like it is on the board.
+		var header_row := HBoxContainer.new()
+		header_row.add_theme_constant_override("separation", 10)
+		row.add_child(header_row)
+		row.move_child(header_row, header.get_index())
+		var marker_icon := TextureRect.new()
+		marker_icon.name = "MarkerIcon"
+		marker_icon.custom_minimum_size = Vector2(PANEL_MARKER_SIZE, PANEL_MARKER_SIZE)
+		marker_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		marker_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		marker_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		header_row.add_child(marker_icon)
+		player_marker_icons.append(marker_icon)
+		row.remove_child(header)
+		header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		header_row.add_child(header)
 		player_properties_flows.append(row.get_node("AssetsRow/PropertiesFlow"))
 		player_spells_flows.append(row.get_node("AssetsRow/SpellsFlow"))
 		player_attunement_flows.append(row.get_node("AssetsRow/AttunementFlow"))
@@ -1197,6 +1218,8 @@ func _spawn_players() -> void:
 		player.position = board.get_space_center(0) + MARKER_OFFSETS[i]
 		players.append(player)
 		player_header_labels[i].add_theme_color_override("font_color", PLAYER_COLORS[i])
+		player_marker_icons[i].texture = PlayerMarkers.icon(player.marker)
+		player_marker_icons[i].modulate = Color.WHITE.lerp(PLAYER_COLORS[i], player.MARKER_TINT)
 
 		var type: GameState.PlayerType = GameState.player_types[i]
 		if type == GameState.PlayerType.DISABLED:
