@@ -3047,10 +3047,13 @@ func _fail_all_debts_for(player_id: int, outcome: String) -> void:
 # Re-entrant: a spell cast to raise money can charge someone who can't pay,
 # stacking a new debt on top -- that one is settled first, then this one
 # resumes (see the _debt_stack note up top).
-func _raise_money(player: Node2D, amount: int, creditor: Node2D, cancellable: bool, auto_pay: bool) -> String:
+func _raise_money(player: Node2D, amount: int, creditor: Node2D, cancellable: bool, auto_pay: bool, to_bank: bool = false) -> String:
+	# `to_bank`: a creditor-less debt owed to the bank itself (Burn Bright),
+	# rather than to Free Parking -- see _bankrupt_player().
 	var entry: Dictionary = {
 		"player_id": player.player_id, "amount": amount, "creditor": creditor,
 		"cancellable": cancellable, "auto_pay": auto_pay, "outcome": "",
+		"to_bank": to_bank,
 	}
 	_debt_stack.push_back(entry)
 	_sync_current_debt()
@@ -3725,6 +3728,15 @@ func _bankrupt_player(player: Node2D, creditor: Node2D) -> void:
 			creditor.owned_property_indices.append(space_index)
 		_sort_owned_properties(creditor)
 	else:
+		# Bankrupted by a debt with no player to pay -- money owed to Free
+		# Parking (taxes, Bomb Shelter, Spiteful Destruction, a payment
+		# Misplaced Payment redirected): their cash, house sales included,
+		# goes into Free Parking. Properties still go back to the bank. A
+		# debt to the bank itself is raised with `to_bank` and skips this.
+		var debt: Dictionary = _debt_stack.back() if not _debt_stack.is_empty() else {}
+		if not debt.is_empty() and int(debt["player_id"]) == player.player_id and debt["creditor"] == null and not debt.get("to_bank", false) and not debt.get("cancellable", false) and player.money > 0:
+			free_parking_amount += player.money
+			_log("%s's remaining $%d goes into Free Parking." % [PLAYER_NAMES[player.player_id], player.money])
 		for space_index in player.owned_property_indices:
 			var space: Node2D = board.spaces[space_index]
 			space.owner_id = -1
@@ -6472,18 +6484,25 @@ func _resolve_unclaimed_wilderness(caster: Node2D, level: int, count: int) -> vo
 	if revealed.is_empty():
 		_log("%s's Unclaimed Wilderness (Level %d) fizzles -- there are no unowned properties left." % [PLAYER_NAMES[caster.player_id], level])
 		return
-	var names: Array[String] = []
+	# Every option, with its price, goes in the log -- and in each prompt --
+	# before the first decision, so the caster can plan the whole spend
+	# (and raise money for it: a purchase they can't cover opens Raise Money).
+	var options: Array[String] = []
 	for i in revealed:
-		names.append(_property_name(i))
-	_log("%s's Unclaimed Wilderness (Level %d) reveals %s." % [PLAYER_NAMES[caster.player_id], level, ", ".join(names)])
-	for space_index in revealed:
+		options.append("%s ($%d)" % [_property_name(i), int(board.get_space_info(i).get("price", 0))])
+	_log("%s's Unclaimed Wilderness (Level %d) reveals: %s." % [PLAYER_NAMES[caster.player_id], level, ", ".join(options)])
+	for k in revealed.size():
+		var space_index: int = revealed[k]
 		if caster.is_bankrupt or _returning_to_menu:
 			return
 		if board.spaces[space_index].owner_id != -1:
 			continue
 		var price: int = int(board.get_space_info(space_index).get("price", 0))
+		var revealed_note: String = ""
+		if revealed.size() > 1:
+			revealed_note = "\nRevealed: %s (%d of %d)" % [", ".join(options), k + 1, revealed.size()]
 		_prompt_slot = caster.player_id
-		_cf_open("Unclaimed Wilderness: buy %s for $%d? (The money goes to Free Parking.)" % [_property_name(space_index), price])
+		_cf_open("Unclaimed Wilderness: buy %s for $%d? (The money goes to Free Parking.)%s" % [_property_name(space_index), price, revealed_note])
 		var yes: bool = await _cf_result()
 		_prompt_slot = -1
 		if not yes:
