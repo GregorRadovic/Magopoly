@@ -389,7 +389,7 @@ func _animate_roll_token() -> void:
 	var roller: Node2D = players[current_player]
 	# A jail roll that isn't doubles goes nowhere, and neither does a roll
 	# cancelled by being sent to Jail mid-roll.
-	if _roll_cancelled or (roller.in_jail and _die1 != _die2):
+	if _roll_cancelled or (roller.in_jail and not _dice_are_doubles()):
 		return
 	var start_spot: Vector2 = board.get_space_center(roller.current_space) + MARKER_OFFSETS[roller.player_id]
 	var now: int = Time.get_ticks_msec()
@@ -2628,6 +2628,12 @@ func _auto_pause_applies(opt: int, event: String, seat: int, trigger_seat: int) 
 	return false  # PAUSE_MANUAL / unknown
 
 
+# The two dice currently show the same value. A die zeroed out (Veto, Fated
+# Ending) has no value, so 0 + 0 isn't doubles.
+func _dice_are_doubles() -> bool:
+	return _die1 == _die2 and _die1 > 0
+
+
 func _perform_roll(die1: int, die2: int) -> void:
 	roll_button.disabled = true
 	admin_button.disabled = true
@@ -2639,22 +2645,18 @@ func _perform_roll(die1: int, die2: int) -> void:
 	trade_button.disabled = true
 
 	var player: Node2D = players[current_player]
-	# Doubles are fixed by the dice the Roll button produced: Master Plan and
-	# Fated Ending (and Dodge / Veto later) only change how far you move.
-	var is_double: bool = die1 == die2
+	# Doubles follow the dice as they currently stand (_dice_are_doubles()):
+	# Master Plan / Fated Ending here, or Dodge / Veto during the response
+	# window, can make or break them. Whatever the dice show when the roll
+	# resolves decides the extra turn (and jail release).
 	if player.master_plan_level > 0:
 		var planned: Vector2i = await _apply_master_plan(player, die1, die2)
 		die1 = planned.x
 		die2 = planned.y
 	if not player.fated_ending.is_empty():
-		var fated_level: int = int(player.fated_ending.get("level", 1))
 		var fated: Vector2i = await _apply_fated_ending(player, die1, die2)
 		die1 = fated.x
 		die2 = fated.y
-		if fated_level == 1:
-			is_double = false
-	if is_double:
-		player.rolled_doubles_this_turn = true
 	var roll: int = die1 + die2
 	# Register the dice and start the tumble animation -- it runs for the
 	# first half of the response window, then settles on the real faces.
@@ -2664,7 +2666,8 @@ func _perform_roll(die1: int, die2: int) -> void:
 	dice_roller.roll(die1, die2, _response_window_seconds() * 0.5)
 	dice_label.text = "%s rolled: %d + %d = %d" % [_player_display_name(current_player), die1, die2, roll]
 	_log("%s rolled %d + %d = %d." % [PLAYER_NAMES[current_player], die1, die2, roll])
-	if is_double:
+	var started_double: bool = _dice_are_doubles()
+	if started_double:
 		_log("%s rolled doubles." % PLAYER_NAMES[current_player])
 
 	# Unstable Portal, then Hasty Exit Level 1 -- both set up before this
@@ -2727,6 +2730,15 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# the response window can't leave it pointing elsewhere.
 	_prompt_slot = -1
 
+	# Doubles as the dice stand now, after anything cast during the window.
+	var is_double: bool = _dice_are_doubles()
+	if is_double != started_double and not _roll_cancelled:
+		if is_double:
+			_log("%s's dice are now doubles (%d + %d)." % [PLAYER_NAMES[current_player], _die1, _die2])
+		else:
+			_log("%s's dice are no longer doubles (%d + %d)." % [PLAYER_NAMES[current_player], _die1, _die2])
+	if is_double and not _roll_cancelled:
+		player.rolled_doubles_this_turn = true
 	var grants_extra_turn: bool = is_double
 
 	if _roll_cancelled:
@@ -7827,7 +7839,10 @@ func _resolve_critical_hit(caster: Node2D, level: int, target_index: int) -> voi
 		_log("%s's Critical Hit fizzles." % PLAYER_NAMES[caster.player_id])
 		return
 	var amount: int = int(_lvl("Critical Hit", level, "amount", 0))
-	if caster.rolled_doubles_this_turn:
+	# Doubles resolved earlier this turn, or showing on the caster's roll in
+	# flight right now.
+	var doubles_now: bool = _roll_in_flight and current_player == caster.player_id and _dice_are_doubles()
+	if caster.rolled_doubles_this_turn or doubles_now:
 		amount += 100
 		_log("Critical Hit: %s rolled doubles this turn, so it's $%d." % [PLAYER_NAMES[caster.player_id], amount])
 	var owed: int = _apply_payment_reduction(target, amount)

@@ -545,8 +545,8 @@ const SPELLS: Dictionary = {
 	},
 
 	# --- Expansion: Loaded Dice (B) ---------------------------------------
-	# "Doubles" are always judged on the dice as originally rolled: these
-	# change how far you move, never whether the roll was doubles.
+	# "Doubles" follow the dice as they currently stand: changing the dice
+	# can make or break doubles (see _dice_are_doubles() in main.gd).
 	"Dodge": {
 		"color": "brown",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/B 1 1 Dodge.png",
