@@ -2643,7 +2643,7 @@ func _update_spell_stack_display() -> void:
 		var target: Dictionary = targets[i] if i < targets.size() else {}
 		if str(target.get("text", "")) != "":
 			var cap := Label.new()
-			cap.text = "→ %s" % target["text"]
+			cap.text = "→\u00a0%s" % target["text"]
 			cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			cap.max_lines_visible = 2
