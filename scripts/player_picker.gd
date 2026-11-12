@@ -27,11 +27,26 @@ const POPUP_SIZE: Vector2i = Vector2i(420, 320)
 @onready var prompt_label: Label = $VBox/PromptLabel
 @onready var button_container: VBoxContainer = $VBox/ButtonContainer
 @onready var cancel_button: Button = $VBox/CancelButton
+# Wraps button_container so a long list (e.g. every unowned property for
+# Pilgrimage) scrolls instead of running off the bottom of the screen.
+var _scroll: ScrollContainer
+
+const ENTRY_HEIGHT: int = 50
+const ENTRY_SEPARATION: int = 8
 
 
 func _ready() -> void:
 	cancel_button.pressed.connect(_on_cancel)
 	set_process(false)
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var vbox: Node = button_container.get_parent()
+	var at: int = button_container.get_index()
+	vbox.remove_child(button_container)
+	vbox.add_child(_scroll)
+	vbox.move_child(_scroll, at)
+	_scroll.add_child(button_container)
+	button_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 
 # entries: Array of {"index": int, "name": String, "color": Color}
@@ -66,11 +81,17 @@ func _do_open(prompt: String, entries: Array, mandatory: bool, sticky: bool, gat
 		child.queue_free()
 	for entry in entries:
 		var btn := Button.new()
-		btn.custom_minimum_size = Vector2(0, 50)
+		btn.custom_minimum_size = Vector2(0, ENTRY_HEIGHT)
 		btn.text = entry["name"]
 		btn.add_theme_color_override("font_color", entry["color"])
 		btn.pressed.connect(_on_pick.bind(entry["index"], answered_box))
 		button_container.add_child(btn)
+	# As tall as the list needs, up to what fits on screen with the prompt
+	# and Cancel button; past that it scrolls.
+	var list_height: int = entries.size() * ENTRY_HEIGHT + maxi(0, entries.size() - 1) * ENTRY_SEPARATION
+	var max_height: int = int(get_parent().get_viewport().get_visible_rect().size.y) - 260
+	_scroll.custom_minimum_size = Vector2(0, mini(list_height, maxi(max_height, ENTRY_HEIGHT * 3)))
+	_scroll.scroll_vertical = 0
 	popup_centered(POPUP_SIZE)
 	set_process(_mandatory or _sticky or _gate.is_valid())
 	popup_hide.connect(_on_popup_hide.bind(answered_box), CONNECT_ONE_SHOT)
