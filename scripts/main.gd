@@ -7701,7 +7701,10 @@ func _build_log_markup() -> void:
 		# so the link text itself is the spell's colour.
 		_log_markup.append({
 			"name": spell_name,
-			"bbcode": "[url=spell:%s][color=#%s]%s[/color][/url]" % [spell_name, sc.to_html(false), spell_name],
+			# The name is URI-encoded inside the tag: a raw apostrophe (King's
+			# Escape Tunnel, Siren's Song) breaks the BBCode parser and the
+			# whole link vanishes from the log.
+			"bbcode": "[url=spell:%s][color=#%s]%s[/color][/url]" % [spell_name.uri_encode(), sc.to_html(false), spell_name],
 		})
 	for i in board.SPACE_DATA:
 		var info: Dictionary = board.SPACE_DATA[i]
@@ -7747,7 +7750,7 @@ func _markup_names(text: String) -> String:
 func _on_log_meta_clicked(meta: Variant) -> void:
 	var m: String = str(meta)
 	if m.begins_with("spell:"):
-		var spell_name: String = m.substr(6)
+		var spell_name: String = m.substr(6).uri_decode()
 		var info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 		if info.has("icon"):
 			spell_card.show_card(load(info["icon"]))
