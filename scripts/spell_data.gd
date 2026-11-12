@@ -533,14 +533,14 @@ const SPELLS: Dictionary = {
 		},
 	},
 	# Slow, and only before rolling. The money is gained on resolution; the
-	# roll redirect is applied to the caster's next roll this turn -- see
-	# _apply_siren_song() in main.gd.
+	# roll redirect is applied to the caster's next roll this turn (even from
+	# Jail, where it only moves them on doubles) -- see _perform_roll().
 	"Siren's Song": {
 		"color": "ocean_blue",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 8 Sirens Song.png",
 		"levels": {
-			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property or tax with the highest rent. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
-			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property or tax with the highest rent. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
+			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
+			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
 		},
 	},
 }

@@ -2522,7 +2522,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 		elif extra == 0:
 			_log("Siren's Song: %s's roll already lands on %s." % [PLAYER_NAMES[current_player], _property_name((player.current_space + roll) % board.TOTAL_SPACES)])
 		else:
-			_log("Siren's Song finds no opponent property to draw %s to." % PLAYER_NAMES[current_player])
+			_log("Siren's Song finds no costly space to draw %s to." % PLAYER_NAMES[current_player])
 
 	_roll_cancelled = false
 	_jail_released_mid_roll = false
@@ -4497,7 +4497,7 @@ func _spell_extra_validation(caster: Node2D, spell_name: String, level: int) -> 
 				return "None of %s's opponents are in jail." % who
 		"Siren's Song":
 			if _siren_song_candidates(caster).is_empty():
-				return "No opponent owns an unmortgaged property or tax space for %s to be drawn to." % who
+				return "There's no space that would cost %s money to land on." % who
 	return ""
 
 
@@ -6737,28 +6737,36 @@ func _resolve_knockout_punch(caster: Node2D, level: int, target_index: int, amou
 	_spell_send_to_jail(target, "Knockout Punch")
 
 
-# Every unmortgaged property or claimed tax space an opponent of `player`
-# owns that shares the highest current rent (_hypothetical_rent: houses,
-# monopoly doubling, railroad count; utilities at a 12 roll; a tax space's
-# rent is its tax, which its owner collects -- see Tax Haven). Empty if
-# there's none.
+# Siren's Song: every space that would cost `player` the most money to land
+# on right now, sharing the highest cost. An opponent's unmortgaged property
+# costs its current rent (_hypothetical_rent: houses, monopoly doubling,
+# railroad count; utilities at a 12 roll); a tax space costs its tax unless
+# `player` has claimed it themselves (Tax Haven). Ownership of the target
+# doesn't matter otherwise, so with no opponent rent above $200 this is
+# Income Tax. Empty only if nothing on the board would cost them anything.
 func _siren_song_candidates(player: Node2D) -> Array[int]:
 	var best: int = 0
 	var result: Array[int] = []
 	for i in board.TOTAL_SPACES:
 		var info: Dictionary = board.get_space_info(i)
 		var space_type: String = info.get("type", "")
-		if space_type != "property" and space_type != "tax":
-			continue
+		var cost: int = 0
 		var owner_id: int = board.spaces[i].owner_id
-		if owner_id == -1 or owner_id == player.player_id or players[owner_id].is_bankrupt or board.spaces[i].is_mortgaged:
+		if space_type == "property":
+			if owner_id == -1 or owner_id == player.player_id or players[owner_id].is_bankrupt or board.spaces[i].is_mortgaged:
+				continue
+			cost = _hypothetical_rent(i)
+		elif space_type == "tax":
+			if owner_id == player.player_id:
+				continue
+			cost = int(info.get("value", 0))
+		else:
 			continue
-		var rent: int = _hypothetical_rent(i) if space_type == "property" else int(info.get("value", 0))
-		if rent > best:
-			best = rent
+		if cost > best:
+			best = cost
 			result.clear()
 			result.append(i)
-		elif rent == best and rent > 0:
+		elif cost == best and cost > 0:
 			result.append(i)
 	return result
 
@@ -6787,7 +6795,7 @@ func _prepare_sirens_song(caster: Node2D, level: int) -> Callable:
 func _resolve_sirens_song(caster: Node2D, level: int, amount: int) -> void:
 	caster.money += amount
 	caster.siren_song_active = true
-	_log("%s's Siren's Song (Level %d): they gain $%d, and their next roll this turn is drawn to the highest-rent opponent property." % [PLAYER_NAMES[caster.player_id], level, amount])
+	_log("%s's Siren's Song (Level %d): they gain $%d, and their next roll this turn is drawn to the space that would cost them the most." % [PLAYER_NAMES[caster.player_id], level, amount])
 	_update_player_panels()
 
 
