@@ -2842,6 +2842,12 @@ func _perform_roll(die1: int, die2: int) -> void:
 func _move_player(player: Node2D, roll: int) -> bool:
 	# Ensnaring Roots / Stabilized Portal adjust the roll before anything moves.
 	roll = _apply_pre_move_landmarks(player, roll)
+	# A roll cut to 0 (never below) means the player stays put: no move, and
+	# no second landing on the space they're already on.
+	if roll <= 0:
+		dice_label.text += "\nThe roll is 0 -- no movement."
+		_log("%s's roll is 0, so they don't move." % PLAYER_NAMES[player.player_id])
+		return false
 	if await _move_and_land(player, roll):
 		return true
 	# Landmarks on the space landed on react once the landing has resolved.
