@@ -2647,7 +2647,18 @@ func _update_spell_stack_display() -> void:
 			cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			cap.max_lines_visible = 2
-			cap.add_theme_font_size_override("font_size", 14)
+			# Shrink the text until its longest word fits the strip of card
+			# that shows, so a name like "Boardwalk" never breaks mid-word.
+			var cap_w: float = card_w * (1.0 if i == n - 1 else 0.5)
+			var cap_font: int = 14
+			var font: Font = cap.get_theme_font("font")
+			var longest: String = ""
+			for word in cap.text.replace("\u00a0", " ").split(" "):
+				if word.length() > longest.length():
+					longest = word
+			while cap_font > 9 and font.get_string_size("→ " + longest, HORIZONTAL_ALIGNMENT_LEFT, -1, cap_font).x > cap_w - 4.0:
+				cap_font -= 1
+			cap.add_theme_font_size_override("font_size", cap_font)
 			cap.add_theme_color_override("font_color", _caster_color(int(target.get("caster", -1))).lightened(0.25))
 			cap.add_theme_color_override("font_outline_color", Color(0.06, 0.06, 0.08))
 			cap.add_theme_constant_override("outline_size", 4)
