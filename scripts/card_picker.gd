@@ -132,7 +132,7 @@ func _do_open(prompt: String, entries: Array, mandatory: bool, skip_text: String
 		if caption != "":
 			var box := VBoxContainer.new()
 			box.add_theme_constant_override("separation", 6)
-			var cap_font: int = 26 if _large else 18
+			var cap_font: int = 52 if _large else 18
 			var label := RichTextLabel.new()
 			label.bbcode_enabled = true
 			label.fit_content = true
@@ -183,7 +183,7 @@ func _reveal(nodes: Array[Control], answered_box: Array) -> void:
 
 
 const GRID_GAP: float = 20.0
-const CAPTION_H: float = 40.0
+const CAPTION_H: float = 72.0
 # Everything in the large popup that isn't the card grid: margins, prompt
 # label, separators, button row.
 const LARGE_CHROME_H: float = 190.0
