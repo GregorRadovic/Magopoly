@@ -2650,6 +2650,12 @@ func _perform_roll(die1: int, die2: int) -> void:
 # successfully paying off what they owed does NOT cancel the extra turn --
 # they're still in the game, so a rolled double still earns another go.
 func _move_player(player: Node2D, roll: int) -> bool:
+	# A roll cut to 0 (never below) means the player stays put: no move, and
+	# no second landing on the space they're already on.
+	if roll <= 0:
+		dice_label.text += "\nThe roll is 0 -- no movement."
+		_log("%s's roll is 0, so they don't move." % PLAYER_NAMES[player.player_id])
+		return false
 	var new_space_raw: int = player.current_space + roll
 	# A big enough roll (roll-multiplier spells like Unstable Portal) can carry
 	# a player past Go more than once in one move -- $200 and a spell draw for
