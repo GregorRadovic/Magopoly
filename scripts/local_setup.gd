@@ -29,6 +29,10 @@ const BLITZSTART_MAX_PLAYERS: int = 4
 @onready var blitzstart_limit_dialog: AcceptDialog = $BlitzStartLimitDialog
 
 var type_options: Array[OptionButton] = []
+# Each seat's playing-piece dropdown (no two active seats may share one).
+var marker_options: Array[OptionButton] = []
+# The seats that were in play at the last _refresh_markers().
+var _was_active: Array[int] = []
 var expansion_picker: ExpansionPicker
 var hero_mode_checkbox: CheckBox
 
@@ -36,6 +40,7 @@ var hero_mode_checkbox: CheckBox
 func _ready() -> void:
 	for i in GameState.MAX_PLAYERS:
 		type_options.append(_build_player_row(i))
+	_refresh_markers()
 	start_button.pressed.connect(_on_start_pressed)
 	back_button.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/start_menu.tscn"))
 	hero_mode_checkbox = _hero_mode_checkbox()
@@ -64,8 +69,57 @@ func _build_player_row(index: int) -> OptionButton:
 	for opt_label in TYPE_LABELS:
 		opt.add_item(opt_label)
 	opt.selected = DEFAULT_SELECTIONS[index]
+	opt.item_selected.connect(func(_i: int) -> void: _refresh_markers())
 	row.add_child(opt)
+
+	var marker_opt: OptionButton = PlayerMarkers.make_option(PlayerMarkers.LIST[index])
+	marker_opt.item_selected.connect(func(_i: int) -> void: _refresh_markers())
+	row.add_child(marker_opt)
+	marker_options.append(marker_opt)
 	return opt
+
+
+func _seat_active(i: int) -> bool:
+	return TYPE_VALUES[type_options[i].selected] != GameState.PlayerType.DISABLED
+
+
+# Keeps the playing pieces unique across the seats in play: a seat switched
+# back on whose piece someone else now has takes the first free one, and
+# every dropdown greys out what the other active seats are using. A Disabled
+# seat's dropdown is off and doesn't hold its piece.
+func _refresh_markers() -> void:
+	if marker_options.size() < type_options.size():
+		return
+	# Seats already in play keep their pieces; a seat just switched on whose
+	# piece was taken meanwhile is the one that moves to a free piece.
+	var order: Array[int] = []
+	for i in marker_options.size():
+		if _seat_active(i) and _was_active.has(i):
+			order.append(i)
+	for i in marker_options.size():
+		if _seat_active(i) and not _was_active.has(i):
+			order.append(i)
+	var taken: Array[String] = []
+	for i in order:
+		var m: String = PlayerMarkers.selected(marker_options[i])
+		if taken.has(m):
+			for free in PlayerMarkers.LIST:
+				if not taken.has(free):
+					m = free
+					break
+			PlayerMarkers.select(marker_options[i], m)
+		taken.append(m)
+	_was_active.clear()
+	for i in order:
+		_was_active.append(i)
+	for i in marker_options.size():
+		var active: bool = _seat_active(i)
+		marker_options[i].disabled = not active
+		var others: Array[String] = []
+		for j in marker_options.size():
+			if j != i and _seat_active(j):
+				others.append(PlayerMarkers.selected(marker_options[j]))
+		PlayerMarkers.set_taken(marker_options[i], others)
 
 
 func _on_start_pressed() -> void:
@@ -86,6 +140,10 @@ func _on_start_pressed() -> void:
 		return
 
 	GameState.player_types = types
+	var picks: Array = []
+	for i in marker_options.size():
+		picks.append(PlayerMarkers.selected(marker_options[i]) if _seat_active(i) else "")
+	GameState.player_markers = PlayerMarkers.make_unique(picks)
 	GameState.expansions = expansion_picker.selected_ids()
 	# The first human seat is this player; it takes their profile name.
 	var overrides: Dictionary = {}

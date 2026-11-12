@@ -106,6 +106,8 @@ func _on_continue() -> void:
 	for i in mini(saved_heroes.size(), heroes.size()):
 		heroes[i] = str(saved_heroes[i])
 	GameState.player_heroes = heroes
+	# Saves from before player markers fill in the defaults.
+	GameState.player_markers = PlayerMarkers.make_unique(cfg.get("markers", PlayerMarkers.defaults()))
 	GameState.admin_mode = bool(cfg.get("admin", false))
 	GameState.quickstart_mode = bool(cfg.get("quick", false))
 	GameState.blitzstart_mode = bool(cfg.get("blitz", false))

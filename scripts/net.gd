@@ -44,6 +44,10 @@ var slots: Array[int] = [
 var slot_peer: Array[int] = [1, 0, 0, 0, 0, 0, 0, 0]
 # peer id -> display name, for the lobby's per-slot status text.
 var peer_names: Dictionary = {1: "Host"}
+# Seat -> chosen playing piece (player_markers.gd). Authoritative on the
+# host, mirrored to clients with the lobby. Seats in play never share one
+# (_fix_markers); an Open / Disabled seat's entry is just a placeholder.
+var marker_picks: Array[String] = PlayerMarkers.defaults()
 
 var online: bool = false
 var hosting: bool = false
@@ -88,6 +92,7 @@ var _started_blitz: bool = false
 var _started_names: Array = []
 var _started_expansions: Array = []
 var _started_heroes: Array = []
+var _started_markers: Array = []
 
 
 func _ready() -> void:
@@ -109,6 +114,7 @@ func host_game(port: int = DEFAULT_PORT) -> bool:
 	hosting = true
 	_reset_slots()
 	peer_names = {1: my_name}
+	marker_picks = PlayerMarkers.defaults()
 	lobby_updated.emit()
 	return true
 
@@ -145,6 +151,7 @@ func leave() -> void:
 	game_started = false
 	hero_select_active = false
 	hero_picks = ["", "", "", "", "", "", "", ""] as Array[String]
+	marker_picks = PlayerMarkers.defaults()
 	_reset_slots()
 	peer_names = {1: my_name}
 	# reconnect_token / last_join_address deliberately survive -- a client that
@@ -235,7 +242,7 @@ func _try_reconnect(id: int, client_name: String, token: String) -> void:
 	if old_id > 1 and multiplayer.get_peers().has(old_id):
 		multiplayer.multiplayer_peer.disconnect_peer(old_id)
 	player_reconnected.emit(slot, id)
-	_recv_start.rpc_id(id, _started_types, GameState.slot_peer, _started_admin, _started_quick, _started_blitz, _started_names, _started_expansions, _started_heroes)
+	_recv_start.rpc_id(id, _started_types, GameState.slot_peer, _started_admin, _started_quick, _started_blitz, _started_names, _started_expansions, _started_heroes, _started_markers)
 
 
 # Host: called just before deliberately kicking a seat, so that player can't
@@ -298,15 +305,97 @@ func _kick(reason: String) -> void:
 
 
 func _broadcast_lobby() -> void:
-	_recv_lobby.rpc(slots, slot_peer, peer_names)
+	_fix_markers()
+	_recv_lobby.rpc(slots, slot_peer, peer_names, marker_picks)
 
 
 @rpc("authority", "reliable")
-func _recv_lobby(new_slots: Array, new_slot_peer: Array, new_names: Dictionary) -> void:
+func _recv_lobby(new_slots: Array, new_slot_peer: Array, new_names: Dictionary, markers: Array = []) -> void:
 	slots = _to_int_array(new_slots)
 	slot_peer = _to_int_array(new_slot_peer)
 	peer_names = new_names.duplicate()
+	for i in mini(markers.size(), SLOT_COUNT):
+		marker_picks[i] = str(markers[i])
 	lobby_updated.emit()
+
+
+# --- Player markers ----------------------------------------------------
+
+func seat_in_play(slot: int) -> bool:
+	return slots[slot] == Slot.HOST or slots[slot] == Slot.TAKEN or slots[slot] == Slot.COMPUTER
+
+
+# Host: seats in play keep their pieces unless two collide, in which case
+# the later seat takes the first free one.
+func _fix_markers() -> void:
+	var taken: Array[String] = []
+	for i in SLOT_COUNT:
+		if not seat_in_play(i):
+			continue
+		if taken.has(marker_picks[i]) or not PlayerMarkers.LIST.has(marker_picks[i]):
+			for m in PlayerMarkers.LIST:
+				if not taken.has(m):
+					marker_picks[i] = m
+					break
+		taken.append(marker_picks[i])
+
+
+# The pieces the other seats in play are using (greyed out in a dropdown).
+func markers_taken_by_others(slot: int) -> Array[String]:
+	var out: Array[String] = []
+	for i in SLOT_COUNT:
+		if i != slot and seat_in_play(i):
+			out.append(marker_picks[i])
+	return out
+
+
+# The seat this machine plays (-1 if none yet).
+func my_slot() -> int:
+	if multiplayer.multiplayer_peer == null:
+		return -1
+	return slot_peer.find(multiplayer.get_unique_id())
+
+
+# This machine's player chose a piece in the lobby. The host records it
+# directly; a client asks the host, which checks it's free.
+func pick_marker(marker: String) -> void:
+	if hosting:
+		_set_marker(0, marker)
+	else:
+		_submit_marker_pick.rpc_id(1, marker)
+
+
+@rpc("any_peer", "reliable")
+func _submit_marker_pick(marker: String) -> void:
+	if not hosting or game_started:
+		return
+	var slot: int = slot_peer.find(multiplayer.get_remote_sender_id())
+	if slot > 0 and slots[slot] == Slot.TAKEN:
+		_set_marker(slot, marker)
+	else:
+		_broadcast_lobby()
+
+
+# Host UI: the host chooses for its own seat and the Computer seats.
+func set_slot_marker(slot: int, marker: String) -> void:
+	if hosting and slot >= 0 and slot < SLOT_COUNT and (slots[slot] == Slot.HOST or slots[slot] == Slot.COMPUTER):
+		_set_marker(slot, marker)
+
+
+func _set_marker(slot: int, marker: String) -> void:
+	if PlayerMarkers.LIST.has(marker) and not markers_taken_by_others(slot).has(marker):
+		marker_picks[slot] = marker
+	# Rebroadcast either way, so a refused pick snaps back on the client.
+	_broadcast_lobby()
+	lobby_updated.emit()
+
+
+func _start_markers() -> Array[String]:
+	_fix_markers()
+	var picks: Array = []
+	for i in SLOT_COUNT:
+		picks.append(marker_picks[i] if seat_in_play(i) else "")
+	return PlayerMarkers.make_unique(picks)
 
 
 # --- Starting the game -------------------------------------------------
@@ -421,11 +510,11 @@ func start_game(admin_mode: bool, quickstart: bool, blitzstart: bool) -> void:
 	var names: Array = _seat_names()
 	var heroes: Array = hero_picks.duplicate() if hero_select_active else []
 	hero_select_active = false
-	_recv_start.rpc(types, slot_peer, admin_mode, quickstart, blitzstart, names, GameState.expansions, heroes)
+	_recv_start.rpc(types, slot_peer, admin_mode, quickstart, blitzstart, names, GameState.expansions, heroes, _start_markers())
 
 
 @rpc("authority", "call_local", "reliable")
-func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bool, blitzstart: bool, names: Array = [], expansions: Array = [], heroes: Array = []) -> void:
+func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bool, blitzstart: bool, names: Array = [], expansions: Array = [], heroes: Array = [], markers: Array = []) -> void:
 	var player_types: Array[GameState.PlayerType] = []
 	for t in types:
 		player_types.append(t)
@@ -450,6 +539,7 @@ func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bo
 		hero_ids[i] = str(heroes[i])
 	GameState.player_heroes = hero_ids
 	GameState.hero_mode = not heroes.is_empty()
+	GameState.player_markers = PlayerMarkers.make_unique(markers if not markers.is_empty() else PlayerMarkers.defaults())
 	hero_select_active = false
 	game_started = true
 	# Host keeps the config so a reconnecting client can be re-sent this same
@@ -461,6 +551,7 @@ func _recv_start(types: Array, peer_map: Array, admin_mode: bool, quickstart: bo
 	_started_names = names.duplicate()
 	_started_expansions = expansions.duplicate()
 	_started_heroes = heroes.duplicate()
+	_started_markers = markers.duplicate()
 	# Client: remember how to get back in, even if the app is closed.
 	if not hosting:
 		Saves.save_session(last_join_address, reconnect_token)
@@ -486,6 +577,7 @@ func resume_hosting(save: Dictionary) -> bool:
 	_started_names = cfg.get("player_names", GameState.default_player_names()).duplicate()
 	_started_expansions = cfg.get("expansions", []).duplicate()
 	_started_heroes = cfg.get("heroes", []).duplicate() if bool(cfg.get("hero_mode", false)) else []
+	_started_markers = cfg.get("markers", PlayerMarkers.defaults()).duplicate()
 	game_started = true
 	var peers: Array[int] = [1, 0, 0, 0, 0, 0, 0, 0]
 	GameState.online = true

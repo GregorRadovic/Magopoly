@@ -38,7 +38,7 @@ static var _cached_public_ip: String = ""
 @onready var blitzstart_checkbox: CheckBox = $VBox/OptionsRow/BlitzstartModeCheckBox
 @onready var blitzstart_limit_dialog: AcceptDialog = $BlitzStartLimitDialog
 
-# Per slot: {status: Label, option: OptionButton}
+# Per slot: {status: Label, option: OptionButton, marker: OptionButton}
 var slot_widgets: Array[Dictionary] = []
 
 var _host_ok: bool = false
@@ -173,7 +173,13 @@ func _build_slot_row(index: int) -> Dictionary:
 		opt.item_selected.connect(_on_slot_kind_selected.bind(index))
 	row.add_child(opt)
 
-	return {"status": status, "option": opt}
+	# The seat's playing piece: the host picks its own and the Computers';
+	# a joined player picks theirs on their own screen (shown here).
+	var marker_opt: OptionButton = PlayerMarkers.make_option(Net.marker_picks[index])
+	marker_opt.item_selected.connect(func(i: int) -> void: Net.set_slot_marker(index, PlayerMarkers.LIST[i]))
+	row.add_child(marker_opt)
+
+	return {"status": status, "option": opt, "marker": marker_opt}
 
 
 func _refresh() -> void:
@@ -182,6 +188,13 @@ func _refresh() -> void:
 	for i in slot_widgets.size():
 		var kind: int = Net.slots[i]
 		(slot_widgets[i]["status"] as Label).text = _slot_status_text(kind, i)
+		var marker_opt: OptionButton = slot_widgets[i]["marker"]
+		PlayerMarkers.select(marker_opt, Net.marker_picks[i])
+		PlayerMarkers.set_taken(marker_opt, Net.markers_taken_by_others(i))
+		# Seats not in play keep the column's space (so the rows line up) but
+		# show no piece.
+		marker_opt.modulate.a = 1.0 if Net.seat_in_play(i) else 0.0
+		marker_opt.disabled = not (kind == Net.Slot.HOST or kind == Net.Slot.COMPUTER)
 		if i == 0:
 			continue
 		var opt: OptionButton = slot_widgets[i]["option"]

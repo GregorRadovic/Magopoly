@@ -62,6 +62,10 @@ static func names_with(overrides: Dictionary) -> Array[String]:
 var hero_mode: bool = false
 var player_heroes: Array[String] = ["", "", "", "", "", "", "", ""]
 
+# Each seat's playing piece (see player_markers.gd) -- all different. Chosen
+# on the setup screens, sent to clients with the start, kept in the autosave.
+var player_markers: Array[String] = PlayerMarkers.defaults()
+
 # Expansion ids (see expansions.gd) whose cards go into this game's Spell
 # Deck, on top of the base cards. Chosen on the setup screen.
 var expansions: Array[String] = []
