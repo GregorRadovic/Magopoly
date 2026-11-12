@@ -451,12 +451,13 @@ const SPELLS: Dictionary = {
 			3: {"description": "Reveal 3 random unowned properties. You may buy any of them; the money goes to Free Parking.", "count": 3, "requires_current_player": true, "requires_not_yet_rolled": true},
 		},
 	},
+	# Slow.
 	"Spiteful Destruction": {
 		"color": "ocean_blue",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 8 Spiteful Destruction.png",
 		"levels": {
-			1: {"description": "As an additional cost, pay $100 to Free Parking. An opponent pays $300 to Free Parking.", "amount": 300, "extra_cost": 100, "timings": ["turn", "roll_response", "spell_response"]},
-			2: {"description": "As an additional cost, pay $100 to Free Parking. An opponent pays $500 to Free Parking.", "amount": 500, "extra_cost": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			1: {"description": "As an additional cost, pay $100 to Free Parking. An opponent pays $300 to Free Parking.", "amount": 300, "extra_cost": 100},
+			2: {"description": "As an additional cost, pay $100 to Free Parking. An opponent pays $500 to Free Parking.", "amount": 500, "extra_cost": 100},
 		},
 	},
 
@@ -469,15 +470,16 @@ const SPELLS: Dictionary = {
 			2: {"description": "Send a player to jail. If this happens in the middle of their roll, cancel the roll.", "timings": ["turn", "roll_response", "spell_response"]},
 		},
 	},
-	# Slow. The payment is charged at the start of each of the jailed
-	# player's own turns -- see _charge_cramped_cell() in main.gd.
+	# Slow. "jail_turns" sets the length of the sentence; the payment is
+	# charged at the start of each of the jailed player's own turns -- see
+	# _charge_cramped_cell() in main.gd.
 	"Cramped Cell": {
 		"color": "sky_blue",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 2 Cramped Cell.png",
 		"levels": {
-			1: {"description": "Send an opponent to jail. For as long as they are in jail, at the start of each of their turns, they pay you $30.", "amount": 30},
-			2: {"description": "Send an opponent to jail. For as long as they are in jail, at the start of each of their turns, they pay you $60.", "amount": 60},
-			3: {"description": "Send an opponent to jail. For as long as they are in jail, at the start of each of their turns, they pay you $100.", "amount": 100},
+			1: {"description": "Send a player to jail for 2 turns. For as long as they are in jail, at the start of their turn, they pay you $50.", "jail_turns": 2, "amount": 50},
+			2: {"description": "Send a player to jail for 4 turns. For as long as they are in jail, at the start of their turn, they pay you $50.", "jail_turns": 4, "amount": 50},
+			3: {"description": "Send a player to jail for 8 turns. For as long as they are in jail, at the start of their turn, they pay you $50.", "jail_turns": 8, "amount": 50},
 		},
 	},
 	"Penance": {
@@ -537,8 +539,8 @@ const SPELLS: Dictionary = {
 		"color": "ocean_blue",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 8 Sirens Song.png",
 		"levels": {
-			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property with the highest rent. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
-			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property with the highest rent. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
+			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property or tax with the highest rent. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
+			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the opponent's property or tax with the highest rent. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
 		},
 	},
 }

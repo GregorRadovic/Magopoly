@@ -4485,7 +4485,7 @@ func _spell_extra_validation(caster: Node2D, spell_name: String, level: int) -> 
 				return "None of %s's opponents are in jail." % who
 		"Siren's Song":
 			if _siren_song_candidates(caster).is_empty():
-				return "No opponent owns an unmortgaged property for %s to be drawn to." % who
+				return "No opponent owns an unmortgaged property or tax space for %s to be drawn to." % who
 	return ""
 
 
@@ -6577,24 +6577,42 @@ func _resolve_bribe_the_guards(caster: Node2D, level: int, target_index: int) ->
 # Cramped Cell (Slow): jails an opponent and attaches a per-turn payment to
 # their stay -- see _charge_cramped_cell() / _begin_turn(). Casting it on
 # someone already in jail just attaches the payment.
+# Cramped Cell (Slow): any player -- the caster included -- goes to jail
+# for the card's number of turns, and owes the caster a payment at the start
+# of each of their turns while there. On someone already in jail it extends
+# their sentence to that length (never shortens it) and adds the payment.
 func _prepare_cramped_cell(caster: Node2D, level: int) -> Callable:
-	var target_index: int = await _pick_opponent_for_spell(caster, "Cramped Cell: choose an opponent to send to Jail.")
+	var entries: Array = []
+	for i in players.size():
+		if players[i].is_bankrupt:
+			continue
+		var label: String = PLAYER_NAMES[i] + (" (you)" if i == caster.player_id else "")
+		entries.append({"index": i, "name": label, "color": PLAYER_COLORS[i]})
+	if entries.is_empty():
+		_toast("There's no player to target.")
+		return Callable()
+	var turns: int = SpellData.SPELLS["Cramped Cell"]["levels"][level].get("jail_turns", JAIL_SENTENCE_TURNS)
+	_pp_open("Cramped Cell: choose a player to send to Jail for %d turns." % turns, entries)
+	var target_index: int = await _pp_result()
 	if target_index == -1:
 		return Callable()
 	_spell_target_player(target_index)
 	var amount: int = SpellData.SPELLS["Cramped Cell"]["levels"][level].get("amount", 0)
-	return _resolve_cramped_cell.bind(caster, level, target_index, amount)
+	return _resolve_cramped_cell.bind(caster, level, target_index, amount, turns)
 
 
-func _resolve_cramped_cell(caster: Node2D, level: int, target_index: int, amount: int) -> void:
+func _resolve_cramped_cell(caster: Node2D, level: int, target_index: int, amount: int, turns: int) -> void:
 	var target: Node2D = players[target_index]
 	if target.is_bankrupt:
 		_log("%s's Cramped Cell (Level %d) fizzles -- %s is out of the game." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index]])
 		return
 	if not target.in_jail:
 		_spell_send_to_jail(target, "Cramped Cell")
-	target.cramped_cell_debts.append({"creditor": caster.player_id, "amount": amount})
-	_log("%s's Cramped Cell (Level %d): %s pays them $%d at the start of each turn while in Jail." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index], amount])
+	target.jail_turns_left = maxi(target.jail_turns_left, turns)
+	# Paying yourself is a no-op, so a self-cast just jails you.
+	if target_index != caster.player_id:
+		target.cramped_cell_debts.append({"creditor": caster.player_id, "amount": amount})
+	_log("%s's Cramped Cell (Level %d): %s is in Jail for %d turns%s." % [PLAYER_NAMES[caster.player_id], level, PLAYER_NAMES[target_index], target.jail_turns_left, "" if target_index == caster.player_id else ", paying %s $%d at the start of each turn there" % [PLAYER_NAMES[caster.player_id], amount]])
 	_update_player_panels()
 
 
@@ -6700,19 +6718,23 @@ func _resolve_knockout_punch(caster: Node2D, level: int, target_index: int, amou
 	_spell_send_to_jail(target, "Knockout Punch")
 
 
-# Every unmortgaged property an opponent of `player` owns that shares the
-# highest current rent (_hypothetical_rent: houses, monopoly doubling,
-# railroad count; utilities at a 12 roll). Empty if there's none.
+# Every unmortgaged property or claimed tax space an opponent of `player`
+# owns that shares the highest current rent (_hypothetical_rent: houses,
+# monopoly doubling, railroad count; utilities at a 12 roll; a tax space's
+# rent is its tax, which its owner collects -- see Tax Haven). Empty if
+# there's none.
 func _siren_song_candidates(player: Node2D) -> Array[int]:
 	var best: int = 0
 	var result: Array[int] = []
 	for i in board.TOTAL_SPACES:
-		if board.get_space_info(i).get("type", "") != "property":
+		var info: Dictionary = board.get_space_info(i)
+		var space_type: String = info.get("type", "")
+		if space_type != "property" and space_type != "tax":
 			continue
 		var owner_id: int = board.spaces[i].owner_id
 		if owner_id == -1 or owner_id == player.player_id or players[owner_id].is_bankrupt or board.spaces[i].is_mortgaged:
 			continue
-		var rent: int = _hypothetical_rent(i)
+		var rent: int = _hypothetical_rent(i) if space_type == "property" else int(info.get("value", 0))
 		if rent > best:
 			best = rent
 			result.clear()
