@@ -3099,7 +3099,7 @@ func _visit_spell_shop(player: Node2D) -> void:
 			var caption: String = "[color=#e23c3c]$50[/color]" if i == sale_index else "$100"
 			entries.append({"index": i, "name": top_cards[i], "icon": load(spell_info.get("icon", "")), "caption": caption})
 		while true:
-			_cp_open("Spell Shop: buy a spell for $100 -- one is on sale for $50 -- or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX, true)
+			_cp_open("Spell Shop: buy ONE spell or Skip.", entries, true, "Skip", SPELL_SHOP_SKIP_INDEX, true)
 			choice = await _cp_result()
 			if choice < 0 or choice >= top_cards.size():
 				choice = SPELL_SHOP_SKIP_INDEX
