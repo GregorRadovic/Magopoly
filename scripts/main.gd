@@ -406,9 +406,25 @@ var _pending_spell_target_label: String = ""
 var _net_spell_target_marks: Array = []
 # Board side (0 bottom, 1 left, 2 top, 3 right) -> display name, for the log.
 const BOARD_SIDE_NAMES: Array[String] = ["Bottom", "Left", "Top", "Right"]
-# Shown next to a player's name in the Players panel while a pending spell
-# targets them (renders via the OS emoji-font fallback, like the ★ markers).
-const SPELL_TARGET_SYMBOL: String = "🎯"
+# A player a pending spell targets gets a "Targeted" badge by their name and
+# a frame around their whole Players-panel entry, both in the casting
+# player's colour (see _style_player_row()).
+const TARGET_BADGE_TEXT: String = "TARGETED"
+const PLAYER_ROW_PICK_COLOR: Color = Color(1.0, 0.82, 0.25)
+# Wraps each player_row.tscn so it can be framed (targeted / pickable).
+var player_row_frames: Array[PanelContainer] = []
+var player_target_badges: Array[Label] = []
+# Choosing a player by clicking their Players-panel entry (_pp_open with
+# player entries): the seats that can be clicked right now, empty otherwise.
+signal player_pick_chosen(index: int)
+var _player_pick_ids: Array[int] = []
+var _player_pick_hover: int = -1
+# Whether the _pp_open now waiting is a panel pick (else the popup list).
+var _pp_panel_mode: bool = false
+# Client mirror of _spell_stack_targets() (from the snapshot).
+var _net_spell_stack_targets: Array = []
+# The trade display's player icons, in front of "<name> gives:".
+var _trader_icons: Array[TextureRect] = []
 
 # The shared Spell Deck every player draws from (game start, and one card
 # whenever anyone passes Go). Every spell that leaves a hand -- resolved,
@@ -518,6 +534,7 @@ func _ready() -> void:
 	# Keep the log panel clear of the board, whatever size the board is.
 	$UI/LogPanel.offset_top = board.BOARD_SIZE + 12.0
 	_build_player_rows()
+	_build_trader_headers()
 	_build_spell_deck()
 	_spawn_players()
 	_response_window_paused_by.resize(players.size())
@@ -958,6 +975,9 @@ func _end_tutorial() -> void:
 #    right-click a card to zoom it at any point in the tutorial.
 # Action steps otherwise let input through untouched.
 func _input(event: InputEvent) -> void:
+	if _player_pick_input(event):
+		get_viewport().set_input_as_handled()
+		return
 	if not _tutorial_active:
 		return
 	# The pause menu is a modal overlay -- let its buttons handle their own
@@ -1182,7 +1202,12 @@ func _tutorial_blocks(action: String) -> bool:
 func _build_player_rows() -> void:
 	for i in GameState.MAX_PLAYERS:
 		var row: VBoxContainer = PLAYER_ROW_SCENE.instantiate()
-		player_list.add_child(row)
+		var frame := PanelContainer.new()
+		frame.name = "PlayerRowFrame%d" % i
+		frame.mouse_filter = Control.MOUSE_FILTER_PASS
+		player_list.add_child(frame)
+		frame.add_child(row)
+		player_row_frames.append(frame)
 		player_rows.append(row)
 		player_row_separators.append(row.get_node("TopSeparator"))
 		var header: Label = row.get_node("HeaderLabel")
@@ -1204,9 +1229,57 @@ func _build_player_rows() -> void:
 		row.remove_child(header)
 		header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		header_row.add_child(header)
+		var badge := Label.new()
+		badge.name = "TargetBadge"
+		badge.text = TARGET_BADGE_TEXT
+		badge.visible = false
+		badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		badge.add_theme_font_size_override("font_size", 18)
+		badge.add_theme_color_override("font_color", Color.WHITE)
+		badge.add_theme_color_override("font_outline_color", Color(0.08, 0.08, 0.1))
+		badge.add_theme_constant_override("outline_size", 4)
+		header_row.add_child(badge)
+		player_target_badges.append(badge)
+		_style_player_row(i)
 		player_properties_flows.append(row.get_node("AssetsRow/PropertiesFlow"))
 		player_spells_flows.append(row.get_node("AssetsRow/SpellsFlow"))
 		player_attunement_flows.append(row.get_node("AssetsRow/AttunementFlow"))
+
+
+# Puts each trade column's header label behind its player's icon:
+# [icon] "<name> gives:".
+func _build_trader_headers() -> void:
+	for label in [trader1_label, trader2_label]:
+		var parent: Node = label.get_parent()
+		var at: int = label.get_index()
+		var box := HBoxContainer.new()
+		box.alignment = BoxContainer.ALIGNMENT_CENTER
+		box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		box.add_theme_constant_override("separation", 8)
+		parent.add_child(box)
+		parent.move_child(box, at)
+		var icon := TextureRect.new()
+		icon.custom_minimum_size = Vector2(32, 32)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		box.add_child(icon)
+		_trader_icons.append(icon)
+		parent.remove_child(label)
+		label.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		box.add_child(label)
+
+
+func _set_trader_headers(p1_index: int, p2_index: int) -> void:
+	var labels: Array[Label] = [trader1_label, trader2_label]
+	var seats: Array[int] = [p1_index, p2_index]
+	for k in 2:
+		var seat: int = seats[k]
+		labels[k].text = "%s gives:" % PLAYER_NAMES[seat]
+		labels[k].add_theme_color_override("font_color", PLAYER_COLORS[seat])
+		if k < _trader_icons.size():
+			_trader_icons[k].texture = player_marker_icons[seat].texture
+			_trader_icons[k].modulate = player_marker_icons[seat].modulate
 
 
 func _spawn_players() -> void:
@@ -1229,6 +1302,7 @@ func _spawn_players() -> void:
 			player.is_bankrupt = true
 			player.visible = false
 			player_rows[i].visible = false
+			player_row_frames[i].visible = false
 			player_row_separators[i].visible = false
 		else:
 			if type == GameState.PlayerType.COMPUTER:
@@ -2336,6 +2410,17 @@ func _spell_stack_names() -> Array:
 	return out
 
 
+# What each stack entry targets (same order as _spell_stack_names()), as
+# {"text": "Player 2", "caster": seat} -- captions under the stack's cards.
+func _spell_stack_targets() -> Array:
+	if GameState.online and not GameState.is_authority():
+		return _net_spell_stack_targets
+	var out: Array = []
+	for entry in _spell_stack:
+		out.append({"text": str(entry.get("target_text", "")), "caster": int(entry.get("caster_id", -1))})
+	return out
+
+
 # Shows the spell(s) currently being cast as big overlapping cards where the
 # trade display normally sits (the two never happen together). Each newer
 # card sits on top of and 50% of a card-width to the right of the previous
@@ -2343,6 +2428,7 @@ func _spell_stack_names() -> Array:
 const SPELL_STACK_CARD_ASPECT: float = 375.0 / 523.0
 const SPELL_STACK_MAX_CARD_W: float = 168.0
 const SPELL_STACK_AVAIL_W: float = 810.0
+const SPELL_STACK_CAPTION_H: float = 46.0
 var _spell_stack_display_cache: Array = []
 
 func _update_spell_stack_display() -> void:
@@ -2350,9 +2436,11 @@ func _update_spell_stack_display() -> void:
 		return
 	_refresh_spell_target_highlights()
 	var names: Array = _spell_stack_names()
-	if names == _spell_stack_display_cache:
+	var targets: Array = _spell_stack_targets()
+	var cache_key: Array = [names.duplicate(), targets.duplicate(true)]
+	if cache_key == _spell_stack_display_cache:
 		return
-	_spell_stack_display_cache = names.duplicate()
+	_spell_stack_display_cache = cache_key
 	var showing: bool = not names.is_empty()
 	spell_cast_display.visible = showing
 	spell_cast_hseparator.visible = showing
@@ -2364,7 +2452,11 @@ func _update_spell_stack_display() -> void:
 	var n: int = names.size()
 	var card_w: float = minf(SPELL_STACK_MAX_CARD_W, SPELL_STACK_AVAIL_W / (0.5 * n + 0.5))
 	var card_h: float = card_w / SPELL_STACK_CARD_ASPECT
-	spell_cast_stack.custom_minimum_size = Vector2(0, card_h)
+	var any_target: bool = false
+	for t in targets:
+		if str(t.get("text", "")) != "":
+			any_target = true
+	spell_cast_stack.custom_minimum_size = Vector2(0, card_h + (SPELL_STACK_CAPTION_H if any_target else 0.0))
 
 	for i in n:
 		var info: Dictionary = SpellData.SPELLS.get(names[i], {})
@@ -2377,6 +2469,22 @@ func _update_spell_stack_display() -> void:
 		tr.position = Vector2(i * card_w * 0.5, 0.0)
 		# Added last = drawn on top, so the newest card overlaps the rest.
 		spell_cast_stack.add_child(tr)
+		# "→ <target>" under the part of the card that shows, in the
+		# caster's colour.
+		var target: Dictionary = targets[i] if i < targets.size() else {}
+		if str(target.get("text", "")) != "":
+			var cap := Label.new()
+			cap.text = "→ %s" % target["text"]
+			cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			cap.clip_text = true
+			cap.add_theme_font_size_override("font_size", 15)
+			cap.add_theme_color_override("font_color", _caster_color(int(target.get("caster", -1))).lightened(0.25))
+			cap.add_theme_color_override("font_outline_color", Color(0.06, 0.06, 0.08))
+			cap.add_theme_constant_override("outline_size", 4)
+			cap.position = Vector2(i * card_w * 0.5, card_h + 4.0)
+			cap.size = Vector2(card_w * (1.0 if i == n - 1 else 0.5), SPELL_STACK_CAPTION_H - 4.0)
+			spell_cast_stack.add_child(cap)
 
 
 # Every spell that's used -- resolved here, countered (_resolve_t2_counter),
@@ -3301,10 +3409,7 @@ func _start_trade(p1_index: int, p2_index: int) -> void:
 	_trade_proposer = p1_index
 	_trade_can_accept = false
 
-	trader1_label.text = PLAYER_NAMES[p1_index]
-	trader1_label.add_theme_color_override("font_color", PLAYER_COLORS[p1_index])
-	trader2_label.text = PLAYER_NAMES[p2_index]
-	trader2_label.add_theme_color_override("font_color", PLAYER_COLORS[p2_index])
+	_set_trader_headers(p1_index, p2_index)
 	trade_hseparator.visible = true
 	trade_display.visible = true
 
@@ -4132,6 +4237,9 @@ func _color_attunement(player: Node2D, color_name: String) -> int:
 
 
 func _on_space_clicked(index: int) -> void:
+	if not _player_pick_ids.is_empty():
+		_show_toast("Click one of the highlighted players.")
+		return
 	# A board pick (_pick_board_space) is armed on this machine: the click
 	# answers it -- only the highlighted spaces count.
 	if not _board_pick_spaces.is_empty():
@@ -4743,17 +4851,18 @@ func _finish_cast(caster: Node2D, spell_name: String, level: int, resolve: Calla
 	var caster_was_paused: bool = caster.player_id >= 0 \
 		and caster.player_id < _response_window_paused_by.size() \
 		and _response_window_paused_by[caster.player_id]
+	var target_text: String = _pending_spell_target_label
+	if target_text == "":
+		target_text = _spell_target_names(_pending_spell_target_marks)
 	_spell_stack.append({
 		"id": stack_id, "caster_id": caster.player_id, "spell_name": spell_name,
 		"level": level, "display_name": display_name, "resolve": resolve,
 		"target_marks": _pending_spell_target_marks.duplicate(true),
+		"target_text": target_text,
 		"caster_was_paused": caster_was_paused,
 	})
 	dice_label.text += "\n%s casts %s!" % [_player_display_name(caster.player_id), display_name]
 	var target_suffix: String = ""
-	var target_text: String = _pending_spell_target_label
-	if target_text == "":
-		target_text = _spell_target_names(_pending_spell_target_marks)
 	if target_text != "":
 		target_suffix = " targeting %s" % target_text
 	_pending_spell_target_marks = []
@@ -4815,12 +4924,12 @@ func _all_stack_target_marks() -> Array:
 	var out: Array = []
 	for entry in _spell_stack:
 		for mark in entry.get("target_marks", []):
-			out.append({"kind": mark["kind"], "id": int(mark["id"])})
+			out.append({"kind": mark["kind"], "id": int(mark["id"]), "caster": int(entry.get("caster_id", -1))})
 	return out
 
 
-# Player ids a spell on the pending stack currently targets -- read by
-# _update_player_panels() to show a target symbol next to the name.
+# Player id -> the casting seat of the newest pending spell targeting them --
+# read by _style_player_row() for the badge and frame.
 var _targeted_player_ids: Dictionary = {}
 
 
@@ -4833,14 +4942,65 @@ func _refresh_spell_target_highlights() -> void:
 	var marks: Array = _net_spell_target_marks if (GameState.online and not GameState.is_authority()) else _all_stack_target_marks()
 	_targeted_player_ids = {}
 	var targeted_spaces: Dictionary = {}
+	# Newer spells come later, so the newest caster's colour wins a tie.
 	for mark in marks:
 		match mark.get("kind", ""):
 			"player":
-				_targeted_player_ids[int(mark["id"])] = true
+				_targeted_player_ids[int(mark["id"])] = int(mark.get("caster", -1))
 			"property":
-				targeted_spaces[int(mark["id"])] = true
+				targeted_spaces[int(mark["id"])] = int(mark.get("caster", -1))
 	for i in board.spaces.size():
-		board.spaces[i].set_targeted(targeted_spaces.has(i))
+		board.spaces[i].set_targeted(targeted_spaces.has(i), _caster_color(targeted_spaces.get(i, -1)))
+	for i in player_row_frames.size():
+		_style_player_row(i)
+
+
+func _caster_color(caster_id: int) -> Color:
+	if caster_id >= 0 and caster_id < PLAYER_COLORS.size():
+		return PLAYER_COLORS[caster_id]
+	return Color(1.0, 0.08, 0.08)
+
+
+# A player's Players-panel entry: a gold frame while it can be clicked to
+# choose them (_player_pick_start), else a frame and "TARGETED" badge in the
+# caster's colour while a pending spell targets them, else plain. The plain
+# style keeps the same margins so nothing shifts when a frame appears.
+func _style_player_row(i: int) -> void:
+	if i >= player_row_frames.size():
+		return
+	var style := StyleBoxFlat.new()
+	style.set_content_margin_all(8)
+	style.set_corner_radius_all(6)
+	style.set_border_width_all(3)
+	style.bg_color = Color(0, 0, 0, 0)
+	style.border_color = Color(0, 0, 0, 0)
+	var badge: Label = player_target_badges[i]
+	var targeted: bool = _targeted_player_ids.has(i)
+	if _player_pick_ids.has(i):
+		var hover: bool = _player_pick_hover == i
+		style.border_color = PLAYER_ROW_PICK_COLOR
+		style.set_border_width_all(5 if hover else 3)
+		style.bg_color = Color(PLAYER_ROW_PICK_COLOR.r, PLAYER_ROW_PICK_COLOR.g, PLAYER_ROW_PICK_COLOR.b, 0.22 if hover else 0.08)
+	elif targeted:
+		var c: Color = _caster_color(int(_targeted_player_ids[i]))
+		style.border_color = c
+		style.set_border_width_all(4)
+		style.bg_color = Color(c.r, c.g, c.b, 0.16)
+		style.shadow_color = Color(c.r, c.g, c.b, 0.55)
+		style.shadow_size = 10
+	player_row_frames[i].add_theme_stylebox_override("panel", style)
+	badge.visible = targeted
+	if targeted:
+		var c: Color = _caster_color(int(_targeted_player_ids[i]))
+		var badge_style := StyleBoxFlat.new()
+		badge_style.bg_color = c.darkened(0.15)
+		badge_style.set_corner_radius_all(5)
+		badge_style.content_margin_left = 10
+		badge_style.content_margin_right = 10
+		badge_style.content_margin_top = 2
+		badge_style.content_margin_bottom = 2
+		badge.add_theme_stylebox_override("normal", badge_style)
+		badge.tooltip_text = "Targeted by %s's spell" % PLAYER_NAMES[int(_targeted_player_ids[i])] if int(_targeted_player_ids[i]) >= 0 else ""
 
 
 # T1 Burn Spell: the caster picks an opponent to target now; the payment
@@ -6934,12 +7094,11 @@ func _update_player_panels() -> void:
 	_refresh_spell_target_highlights()
 	for i in players.size():
 		var pause_marker: String = " (Paused)" if _response_window_paused_by[i] else ""
-		# Small target symbol next to the name while a pending spell targets them.
-		var target_marker: String = " %s" % SPELL_TARGET_SYMBOL if _targeted_player_ids.has(i) else ""
 		var hero_marker: String = ""
 		if GameState.hero_mode and GameState.player_heroes[i] != "":
 			hero_marker = " · %s" % Heroes.hero_name(GameState.player_heroes[i])
-		player_header_labels[i].text = "%s%s%s%s -- $%d" % [_player_display_name(i), hero_marker, target_marker, pause_marker, players[i].money]
+		player_header_labels[i].text = "%s%s%s -- $%d" % [_player_display_name(i), hero_marker, pause_marker, players[i].money]
+		_style_player_row(i)
 
 		var flow: HFlowContainer = player_properties_flows[i]
 		for child in flow.get_children():
@@ -7278,6 +7437,7 @@ func _build_snapshot() -> Dictionary:
 		"debt_cancellable": _debt_cancellable,
 		"spell_stack": _spell_stack_names(),
 		"spell_target_marks": _all_stack_target_marks(),
+		"spell_stack_targets": _spell_stack_targets(),
 		"awaiting_buy": _awaiting_buy_decision,
 		"casting_spell": _casting_spell,
 		"buying_ho": _buying_house_or_unmortgaging,
@@ -7382,6 +7542,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_debt_cancellable = snap.get("debt_cancellable", false)
 	_net_spell_stack_names = snap.get("spell_stack", [])
 	_net_spell_target_marks = snap.get("spell_target_marks", [])
+	_net_spell_stack_targets = snap.get("spell_stack_targets", [])
 	_awaiting_buy_decision = snap.get("awaiting_buy", false)
 	_casting_spell = snap.get("casting_spell", false)
 	_buying_house_or_unmortgaging = snap.get("buying_ho", false)
@@ -7413,10 +7574,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	trade_hseparator.visible = _trading
 	trade_display.visible = _trading
 	if _trading:
-		trader1_label.text = PLAYER_NAMES[_trader1]
-		trader1_label.add_theme_color_override("font_color", PLAYER_COLORS[_trader1])
-		trader2_label.text = PLAYER_NAMES[_trader2]
-		trader2_label.add_theme_color_override("font_color", PLAYER_COLORS[_trader2])
+		_set_trader_headers(_trader1, _trader2)
 		# Don't stomp a box this player is actively editing (see
 		# _refresh_action_buttons for who that is); otherwise mirror the host.
 		if not trader1_money_edit.has_focus():
@@ -7599,7 +7757,84 @@ func _die_pick_local(text: String) -> int:
 
 
 func _on_pick_banner_cancel() -> void:
+	if not _player_pick_ids.is_empty():
+		_player_pick_end(-1)
+		return
 	_board_pick_end(-1)
+
+
+# True when every picker entry is a seat (its button reads as that player's
+# name) -- those picks are made by clicking the player's Players-panel entry.
+func _is_player_entries(entries: Array) -> bool:
+	if entries.is_empty():
+		return false
+	for entry in entries:
+		var idx: int = int(entry.get("index", -1))
+		if idx < 0 or idx >= players.size() or idx >= PLAYER_NAMES.size():
+			return false
+		if not str(entry.get("name", "")).begins_with(PLAYER_NAMES[idx]):
+			return false
+	return true
+
+
+# Choosing a player: the banner shows the prompt (with Cancel unless it's
+# mandatory) and each choosable player's panel entry gets a gold frame;
+# clicking one (see _input) emits player_pick_chosen.
+func _player_pick_start(text: String, entries: Array, mandatory: bool) -> void:
+	if not _player_pick_ids.is_empty():
+		_player_pick_end(-1)
+	_player_pick_ids.clear()
+	for entry in entries:
+		_player_pick_ids.append(int(entry["index"]))
+	_player_pick_hover = -1
+	_show_pick_banner(text, not mandatory)
+	for i in player_row_frames.size():
+		_style_player_row(i)
+
+
+func _player_pick_end(index: int) -> void:
+	if _player_pick_ids.is_empty():
+		return
+	_player_pick_ids.clear()
+	_player_pick_hover = -1
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	_hide_pick_banner()
+	for i in player_row_frames.size():
+		_style_player_row(i)
+	player_pick_chosen.emit(index)
+
+
+# The choosable player whose panel entry is under `pos`, else -1.
+func _player_pick_at(pos: Vector2) -> int:
+	for i in _player_pick_ids:
+		if i < player_row_frames.size() and player_row_frames[i].is_visible_in_tree() \
+				and player_row_frames[i].get_global_rect().has_point(pos):
+			return i
+	return -1
+
+
+# Handled in _input (before the GUI) so a click anywhere on the entry --
+# including on its property / spell cards -- counts as choosing that player.
+func _player_pick_input(event: InputEvent) -> bool:
+	if _player_pick_ids.is_empty():
+		return false
+	if event is InputEventMouseMotion:
+		var hover: int = _player_pick_at(event.position)
+		if hover != _player_pick_hover:
+			var old: int = _player_pick_hover
+			_player_pick_hover = hover
+			Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND if hover != -1 else Input.CURSOR_ARROW)
+			if old != -1:
+				_style_player_row(old)
+			if hover != -1:
+				_style_player_row(hover)
+		return false
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var which: int = _player_pick_at(event.position)
+		if which != -1:
+			_player_pick_end(which)
+			return true
+	return false
 
 
 func _build_pick_banner() -> void:
@@ -7650,7 +7885,11 @@ func _hide_pick_banner() -> void:
 
 func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
 	if _prompt_is_local():
-		player_picker.open(text, entries, mandatory, false, _tutorial_picker_gate())
+		_pp_panel_mode = not _tutorial_active and _is_player_entries(entries)
+		if _pp_panel_mode:
+			_player_pick_start(text, entries, mandatory)
+		else:
+			player_picker.open(text, entries, mandatory, false, _tutorial_picker_gate())
 	else:
 		_net_open_remote("pick", {
 			"text": text, "entries": _net_pack_entries(entries), "mandatory": mandatory,
@@ -7659,6 +7898,9 @@ func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
 
 func _pp_result() -> int:
 	if _prompt_is_local():
+		if _pp_panel_mode:
+			_pp_panel_mode = false
+			return await player_pick_chosen
 		return await player_picker.player_chosen
 	return int(await _net_await_reply())
 
@@ -7767,6 +8009,10 @@ func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
 			confirm_prompt.open(str(payload.get("text", "")))
 			return await confirm_prompt.answered
 		"pick":
+			var pick_entries: Array = _net_unpack_entries(payload.get("entries", []))
+			if _is_player_entries(pick_entries):
+				_player_pick_start(str(payload.get("text", "")), pick_entries, bool(payload.get("mandatory", false)))
+				return await player_pick_chosen
 			player_picker.open(str(payload.get("text", "")),
 				_net_unpack_entries(payload.get("entries", [])),
 				bool(payload.get("mandatory", false)), true)

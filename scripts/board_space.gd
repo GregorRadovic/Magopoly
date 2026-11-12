@@ -110,6 +110,7 @@ var is_mortgaged: bool = false
 # the last child so it draws on top of the tile. Toggled by set_targeted().
 var target_outline: Panel = null
 var _targeted: bool = false
+var _target_color: Color = Color.RED
 
 # Wizard Vision "you'll land here" highlight -- a translucent tint + border in
 # the moving player's colour. Built in code; sits under the target frame.
@@ -149,7 +150,7 @@ func _build_target_outline() -> void:
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0, 0, 0, 0)
 	style.border_color = TARGET_OUTLINE_COLOR
-	style.set_border_width_all(4)
+	style.set_border_width_all(5)
 	target_outline.add_theme_stylebox_override("panel", style)
 	add_child(target_outline)
 	_position_target_outline()
@@ -232,13 +233,18 @@ func _update_pick_overlay() -> void:
 	pick_overlay.add_theme_stylebox_override("panel", style)
 
 
-# Called by main.gd's _refresh_spell_target_highlights().
-func set_targeted(value: bool) -> void:
-	if _targeted == value:
+# Called by main.gd's _refresh_spell_target_highlights(). `color` is the
+# casting player's colour, so it's clear whose spell it is.
+func set_targeted(value: bool, color: Color = TARGET_OUTLINE_COLOR) -> void:
+	if _targeted == value and (not value or _target_color == color):
 		return
 	_targeted = value
+	_target_color = color
 	if target_outline:
 		target_outline.visible = value
+		var style: StyleBoxFlat = target_outline.get_theme_stylebox("panel")
+		style.border_color = color
+		style.bg_color = Color(color.r, color.g, color.b, 0.12)
 
 
 func _on_click_area_gui_input(event: InputEvent) -> void:
