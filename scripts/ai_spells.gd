@@ -78,6 +78,25 @@ var _master_plan_second: int = 0
 # ask "what would one more Attunement let me cast?").
 var _att_bonus: Dictionary = {}
 var _att_bonus_all: int = 0
+# Memo for one decision: the board doesn't change while a bot is thinking,
+# so net worths, square values, card ratings etc. are worked out once.
+# Cleared by _think() at the start of every decision.
+var _memo: Dictionary = {}
+# Set MAGO_AI_TRACE=1 to print each bot decision to stderr (debugging).
+var _trace: bool = OS.get_environment("MAGO_AI_TRACE") != ""
+
+
+func _t(msg: String) -> void:
+	if _trace:
+		printerr("AITRACE %d %s" % [Time.get_ticks_msec(), msg])
+
+
+func _think() -> void:
+	_memo.clear()
+
+
+func _memo_get(key) -> Variant:
+	return _memo.get(key)
 
 
 func _init(m) -> void:
@@ -97,10 +116,13 @@ func play_turn_spells(p: Node2D, phase: String) -> void:
 	for _i in MAX_TURN_CASTS:
 		if not _still_my_turn(p):
 			return
+		_think()
 		var best: Dictionary = _best_option(p, phase, failed)
 		if best.is_empty() or best["score"] < _turn_threshold(p, best):
 			return
+		_t("turn %s seat=%d %s L%d" % [phase, p.player_id, best["spell"], best["level"]])
 		var ok: bool = await _execute(p, best, false)
+		_t("turn cast done ok=%s" % ok)
 		if not ok:
 			failed[best["spell"]] = true
 
@@ -113,6 +135,7 @@ func raise_money_with_spells(p: Node2D, amount: int) -> void:
 	for _i in 3:
 		if p.is_bankrupt or p.money >= amount or main._returning_to_menu:
 			return
+		_think()
 		var best: Dictionary = _best_option(p, "debt", failed)
 		if best.is_empty() or best.get("cash", 0.0) < 40.0:
 			return
@@ -127,6 +150,7 @@ func raise_money_with_spells(p: Node2D, amount: int) -> void:
 func consider_reactions() -> void:
 	if not _active() or main._casting_spell or main._resolving_stack or not main._response_window_open:
 		return
+	_think()
 	var best: Dictionary = {}
 	var best_seat: int = -1
 	var best_key: String = ""
@@ -155,11 +179,14 @@ func consider_reactions() -> void:
 	if not _reacted.has(best_seat):
 		_reacted[best_seat] = {}
 	_reacted[best_seat][best_key] = true
+	_t("react seat=%d %s L%d" % [best_seat, best["spell"], best["level"]])
 	await _execute(main.players[best_seat], best, true)
+	_t("react done seat=%d" % best_seat)
 
 
 # Magic Forest: discard the card it values least.
 func pick_discard(p: Node2D) -> int:
+	_think()
 	var worst: int = 0
 	var worst_worth: float = INF
 	for i in p.spell_hand.size():
@@ -173,6 +200,7 @@ func pick_discard(p: Node2D) -> int:
 # Spell Shop: the card it values most, if that beats the price by a margin
 # and it can spare the money. Returns the index, or main.SPELL_SHOP_SKIP_INDEX.
 func pick_shop_buy(p: Node2D, cards: Array, sale_index: int) -> int:
+	_think()
 	var best: int = main.SPELL_SHOP_SKIP_INDEX
 	var best_margin: float = 0.0
 	for i in cards.size():
@@ -214,6 +242,7 @@ func note_cast(p: Node2D, spell: String, level: int, stack_id: int, plan: Dictio
 # plus that kind's entries / spaces}. During a planned cast the plan's
 # answers are used in order; anything else falls back to sensible defaults.
 func answer(q: Dictionary) -> Variant:
+	_think()
 	var kind: String = q.get("kind", "")
 	if _planning:
 		var queue: Array = _plan.get("answers", {}).get(kind, [])
@@ -351,7 +380,7 @@ func _typical_value(spell: String, level: int) -> float:
 # Counterfeit Currency on a $20 rent).
 func _react_threshold(option: Dictionary) -> float:
 	if option["spell"] in COUNTER_SPELLS:
-		return COUNTER_MIN
+		return 0.0  # _eval_counter already required COUNTER_MIN of harm
 	return maxf(REACT_MIN, HELD_WORTH.get(option["spell"], 0.0))
 
 
@@ -399,7 +428,10 @@ func _best_option(p: Node2D, phase: String, failed: Dictionary) -> Dictionary:
 			if burns_needed > 0:
 				# Burn the least useful cards of that color.
 				var ranked: Array = burnable.duplicate()
-				ranked.sort_custom(func(a, b): return card_worth(p, p.spell_hand[a]) < card_worth(p, p.spell_hand[b]))
+				var worth: Dictionary = {}
+				for k in ranked:
+					worth[k] = card_worth(p, p.spell_hand[k])
+				ranked.sort_custom(func(a, b): return worth[a] < worth[b])
 				for k in burns_needed:
 					burn_list.append(ranked[k])
 					score -= card_worth(p, p.spell_hand[ranked[k]]) + BURN_MARGIN
@@ -469,6 +501,16 @@ func _explain(p: Node2D, text: String) -> void:
 # ============================================================================
 
 func card_worth(p: Node2D, spell: String) -> float:
+	var key: String = "cw:%d:%s" % [p.player_id, spell]
+	var cached = _memo_get(key)
+	if cached != null:
+		return cached
+	var w: float = _card_worth(p, spell)
+	_memo[key] = w
+	return w
+
+
+func _card_worth(p: Node2D, spell: String) -> float:
 	var held: float = HELD_WORTH.get(spell, CARD_WORTH)
 	var info: Dictionary = SpellData.SPELLS.get(spell, {})
 	var attune: int = main._color_attunement(p, info.get("color", "")) + 1
@@ -522,6 +564,16 @@ func _prop_targetable(p: Node2D, i: int) -> bool:
 
 
 func net_worth(o: Node2D) -> float:
+	var key: String = "nw:%d" % o.player_id
+	var cached = _memo_get(key)
+	if cached != null:
+		return cached
+	var w: float = _net_worth(o)
+	_memo[key] = w
+	return w
+
+
+func _net_worth(o: Node2D) -> float:
 	var w: float = float(o.money)
 	for i in o.owned_property_indices:
 		var info: Dictionary = _info(i)
@@ -558,6 +610,16 @@ func _leader(p: Node2D) -> Node2D:
 func _harm_weight(p: Node2D, o: Node2D) -> float:
 	if o == null or o == p:
 		return 0.0
+	var key: String = "hw:%d:%d" % [p.player_id, o.player_id]
+	var cached = _memo_get(key)
+	if cached != null:
+		return cached
+	var w: float = _harm_weight_uncached(p, o)
+	_memo[key] = w
+	return w
+
+
+func _harm_weight_uncached(p: Node2D, o: Node2D) -> float:
 	var opps: Array = _opponents(p, false)
 	if opps.is_empty():
 		return 0.0
@@ -658,16 +720,32 @@ func _can_spend(p: Node2D, cost: float) -> bool:
 # Being in Jail is good once the board is dangerous (you skip paying rent),
 # bad before that (you can't buy anything).
 func jail_value(p: Node2D) -> float:
+	var key: String = "jv:%d" % p.player_id
+	var cached = _memo_get(key)
+	if cached != null:
+		return cached
 	var danger: int = 0
 	for i in _total_spaces():
 		var s: Node2D = _space(i)
 		if s.owner_id != -1 and s.owner_id != p.player_id:
 			danger = maxi(danger, main._hypothetical_rent(i))
-	return 40.0 if danger >= 300 else -50.0
+	var v: float = 40.0 if danger >= 300 else -50.0
+	_memo[key] = v
+	return v
 
 
 # What landing on square i is worth to p right now.
 func space_value(p: Node2D, i: int) -> float:
+	var key: String = "sv:%d:%d" % [p.player_id, i]
+	var cached = _memo_get(key)
+	if cached != null:
+		return cached
+	var v: float = _space_value(p, i)
+	_memo[key] = v
+	return v
+
+
+func _space_value(p: Node2D, i: int) -> float:
 	var info: Dictionary = _info(i)
 	var s: Node2D = _space(i)
 	match info.get("type", ""):
@@ -832,6 +910,15 @@ func _roll_prob(d: int) -> float:
 # ============================================================================
 
 func evaluate(p: Node2D, spell: String, level: int, phase: String) -> Dictionary:
+	var key: String = "ev:%d:%s:%d:%s" % [p.player_id, spell, level, phase]
+	var cached = _memo_get(key)
+	if cached == null:
+		cached = _evaluate(p, spell, level, phase)
+		_memo[key] = cached
+	return cached.duplicate(true)
+
+
+func _evaluate(p: Node2D, spell: String, level: int, phase: String) -> Dictionary:
 	var li: Dictionary = SpellData.SPELLS[spell]["levels"][level]
 	var amount: float = float(li.get("amount", 0))
 	var turn: bool = phase in ["pre_roll", "post_roll", "debt", "worth"]
@@ -1767,7 +1854,11 @@ func _eval_landmark(p: Node2D, spell: String, _level: int, li: Dictionary) -> Di
 # What one more Attunement (per color in `bonus`, or `all` to every color)
 # would add to the best other turn spell in hand.
 func _upgrade_gain(p: Node2D, bonus: Dictionary, all: int, except: String) -> float:
-	var before: float = _best_other_value(p, except, {}, 0)
+	var key: String = "ug0:%d:%s" % [p.player_id, except]
+	var before = _memo_get(key)
+	if before == null:
+		before = _best_other_value(p, except, {}, 0)
+		_memo[key] = before
 	var after: float = _best_other_value(p, except, bonus, all)
 	return after - before
 
@@ -1802,12 +1893,13 @@ func _eval_counter(p: Node2D, spell: String, level: int) -> Dictionary:
 	if spell in ["Counterbalance", "Deny Rights"] and int(entry["level"]) != level:
 		return {}
 	var harm: float = -_spell_effect_on(p, entry)
-	if harm <= 0.0:
+	if harm < COUNTER_MIN:
 		return {}
-	var v: float = harm
+	# Spend the least valuable counter that does the job.
+	var v: float = harm - 0.3 * float(HELD_WORTH.get(spell, CARD_WORTH))
 	if spell == "Spell Mastery" and level == 2:
 		v += 60.0  # and the bot keeps the countered card
-	return {"value": v, "answers": {"pick": [int(entry["id"])]}, "why": "%s's %s would cost it about $%d." % [main.PLAYER_NAMES[int(entry["caster_id"])], entry["display_name"], int(harm)]}
+	return {"value": v, "answers": {"pick": [int(entry["id"])]}, "why": "stops %s's %s, which it rates as a $%d hit." % [main.PLAYER_NAMES[int(entry["caster_id"])], entry["display_name"], int(harm)]}
 
 
 # Roughly what a spell on the stack will do to p, in dollars (negative =

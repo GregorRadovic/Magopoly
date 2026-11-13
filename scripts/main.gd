@@ -2169,14 +2169,19 @@ func _ai_mortgage_check(player: Node2D) -> void:
 			var space: Node2D = board.spaces[space_index]
 			if not space.is_mortgaged:
 				continue
-			var price: int = board.get_space_info(space_index).get("price", 0)
-			if player.money < _unmortgage_value(price):
+			# Terminus (space 0) has no "price" of its own -- read it the way
+			# _unmortgage_property() does, or it looks free and the loop
+			# retries it forever.
+			if player.money < _unmortgage_value(_terminus_aware_price(space_index)):
 				continue
 			candidates.append(space_index)
 		if candidates.is_empty():
 			return
-		candidates.sort_custom(func(a, b): return board.get_space_info(a).get("price", 0) > board.get_space_info(b).get("price", 0))
+		candidates.sort_custom(func(a, b): return _terminus_aware_price(a) > _terminus_aware_price(b))
+		var before: int = player.money
 		_unmortgage_property(candidates[0])
+		if player.money == before:
+			return  # refused -- don't spin on it
 
 
 func _on_admin_pressed() -> void:
@@ -2523,7 +2528,10 @@ func _ai_mortgage_properties(player: Node2D, needed: int) -> void:
 		if candidates.is_empty():
 			return
 		candidates.sort_custom(func(a, b): return _terminus_aware_price(a) > _terminus_aware_price(b))
+		var before: int = player.money
 		_mortgage_property(candidates[0])
+		if player.money == before:
+			return  # refused -- don't spin on it
 
 
 # Sells one house at a time from whichever of the AI's properties currently
@@ -2543,7 +2551,10 @@ func _ai_sell_houses(player: Node2D, needed: int) -> void:
 		if candidates.is_empty():
 			return
 		candidates.sort_custom(func(a, b): return board.get_space_info(a).get("price", 0) > board.get_space_info(b).get("price", 0))
+		var before: int = player.money
 		_sell_house(candidates[0])
+		if player.money == before:
+			return  # refused -- don't spin on it
 
 
 # The rent a property would charge right now if someone landed on it, given
@@ -2672,7 +2683,10 @@ func _ai_house_check(player: Node2D) -> void:
 		var option: int = _ai_best_house_option(player, worst_case)
 		if option == -1:
 			return
+		var before: int = board.spaces[option].house_count
 		_buy_house(option)
+		if board.spaces[option].house_count == before:
+			return  # refused -- don't spin on it
 
 
 # The two Instant Timings implemented so far both open this same shared
