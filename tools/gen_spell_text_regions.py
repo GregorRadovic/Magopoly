@@ -12,8 +12,8 @@ the text box into segments:
   post   -- text after the last level that isn't a wrapped continuation of
             it (Tax Haven's "(You no longer pay ...)")
 
-The trailing ":" of a segment is trimmed (it introduces the levels, it isn't
-part of the effect); a sentence's closing "." stays highlighted with it. Rects are stored normalized to the card size (0-1), so
+Every highlighted line is covered whole, end-of-line punctuation (":" "."
+")" and the like) included. Rects are stored normalized to the card size (0-1), so
 they scale with however large the card is drawn.
 
 Requirements: tesseract on PATH, and `pip install pillow`.
@@ -75,37 +75,6 @@ def ocr_lines(png_path):
     return crop, ordered
 
 
-def trim_trailing_punct(word, crop):
-    """Drop a trailing ':' from the word's box by finding its glyph cluster in
-    the upscaled crop. (A '.' ends the effect's sentence, so it's kept.)"""
-    if not word["text"] or word["text"][-1] != ":":
-        return word
-    l, t, w, h = word["px"]
-    cols = []
-    for x in range(l, l + w):
-        cols.append(any(crop.getpixel((x, y)) < 110 for y in range(t, t + h)))
-    # Rightmost dark cluster = the punctuation; cut just left of the gap before it.
-    x = len(cols) - 1
-    while x >= 0 and not cols[x]:
-        x -= 1
-    right = x
-    while x >= 0 and cols[x]:
-        x -= 1
-    if right - x > 0.3 * h:
-        # Too wide for a lone '.' / ':' -- it's touching the letter before
-        # it (e.g. "if:"), so just cut a punctuation-sized slice instead.
-        new = dict(word)
-        new["w"] = (right + 1 - 0.2 * h) / SCALE
-        return new
-    while x >= 0 and not cols[x]:
-        x -= 1
-    if x <= 0:
-        return word
-    new = dict(word)
-    new["w"] = (x + 1) / SCALE
-    return new
-
-
 def badge_box(ws, crop):
     """A pseudo-word covering the whole circled badge at the start of a level
     line -- the OCR box only covers the digit, not the grey circle around it."""
@@ -159,8 +128,7 @@ def segment(lines, crop):
         prev_text = ws[-1]["text"]
         if ws[0]["x"] >= LEVEL_LINE_MIN_X:
             # Keep the whole line, badge included, and widen it to the badge's
-            # full circle (badge_box goes first so trimming still hits the
-            # line's real last word).
+            # full circle.
             badge = badge_box(ws, crop)
             levels.append([([badge] if badge else []) + list(ws)])
         elif levels and not post and not sentence_done:
@@ -171,10 +139,7 @@ def segment(lines, crop):
             pre.append(ws)
 
     def words_of(seg_lines):
-        words = [w for ws in seg_lines for w in ws]
-        if words:
-            words[-1] = trim_trailing_punct(words[-1], crop)
-        return words
+        return [w for ws in seg_lines for w in ws]
 
     return (line_rects(words_of(pre)),
             [line_rects(words_of(l)) for l in levels],
