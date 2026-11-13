@@ -5,6 +5,21 @@ const PLAYER_ROW_SCENE: PackedScene = preload("res://scenes/player_row.tscn")
 const MINI_CARD_SCENE: PackedScene = preload("res://scenes/mini_property_card.tscn")
 const MINI_SPELL_CARD_SCENE: PackedScene = preload("res://scenes/mini_spell_card.tscn")
 const CARDBACK_TEXTURE: Texture2D = preload("res://Magopoly Assets/Cardback.jpg")
+# Zoom cards for the non-property spaces (_show_property_details). Taxes get
+# an asset card built from their icon; Magic Forest and the Spell Shop have
+# full card art of their own.
+const MAGIC_FOREST_CARD: Texture2D = preload("res://Magopoly Assets/Icons/Magic Forest.png")
+const SPELL_SHOP_CARD: Texture2D = preload("res://Magopoly Assets/Icons/Shop.png")
+const TAX_ICONS: Dictionary = {
+	"Income Tax": preload("res://Magopoly Assets/Icons/Income Tax.png"),
+	"Luxury Tax": preload("res://Magopoly Assets/Icons/Luxury Tax.png"),
+}
+# How big a property's card is drawn in the buy prompt.
+const BUY_PROMPT_CARD_SCALE: float = 0.72
+# Dice tumble this long, then settle; the piece then walks its roll over
+# MOVE_DURATION_SEC (however many spaces that is).
+const DICE_TUMBLE_SEC: float = 0.5
+const MOVE_DURATION_SEC: float = 1.0
 
 # The base Spell Deck (defined in expansions.gd, alongside the expansions a
 # game can add on top -- see GameState.expansions and _build_spell_deck()).
@@ -675,6 +690,8 @@ var _debt_outcome: String = ""
 # fields let _sell_house_or_mortgage() reopen the same buy prompt afterward.
 var _awaiting_buy_decision: bool = false
 var _pending_buy_property_name: String = ""
+# The space being offered (its card is shown in the buy prompt), or -1.
+var _pending_buy_space: int = -1
 var _pending_buy_price: int = 0
 
 # Set while a trade is in progress. Trader1 is whoever clicked Trade (always
@@ -2977,7 +2994,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	_die1 = die1
 	_die2 = die2
 	_roll_seq += 1
-	dice_roller.roll(die1, die2, _response_window_seconds() * 0.5)
+	dice_roller.roll(die1, die2, DICE_TUMBLE_SEC)
 	dice_label.text = "%s rolled: %d + %d = %d" % [_player_display_name(current_player), die1, die2, roll]
 	_log("%s rolled %d + %d = %d." % [PLAYER_NAMES[current_player], die1, die2, roll])
 	var started_double: bool = _dice_are_doubles()
@@ -3122,6 +3139,45 @@ func _perform_roll(die1: int, die2: int) -> void:
 # doubles-triggered extra turn. Debt collection that ends in the player
 # successfully paying off what they owed does NOT cancel the extra turn --
 # they're still in the game, so a rolled double still earns another go.
+# Walks a player's piece forward `steps` spaces from `from_space`, hopping
+# space to space so the whole walk takes MOVE_DURATION_SEC. (Only the
+# piece moves -- current_space is already set by the caller.)
+func _walk_player(player: Node2D, from_space: int, steps: int) -> void:
+	if steps <= 0:
+		player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+		return
+	# The host's per-frame snapshot (_process) carries this to clients.
+	_walks[player.player_id] = [from_space, steps]
+	await _animate_walk(player, from_space, steps)
+	_walks.erase(player.player_id)
+
+
+# Client: plays a walk the host is doing (from the snapshot's "walk").
+func _client_walk(player: Node2D, from_space: int, steps: int) -> void:
+	_walks[player.player_id] = [from_space, steps]
+	await _animate_walk(player, from_space, steps)
+	_walks.erase(player.player_id)
+	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+
+
+func _animate_walk(player: Node2D, from_space: int, steps: int) -> void:
+	var offset: Vector2 = MARKER_OFFSETS[player.player_id]
+	var hop: float = MOVE_DURATION_SEC / float(steps)
+	var tween: Tween = create_tween()
+	var offset_now: Vector2 = MARKER_OFFSETS[player.player_id]
+	player.position = board.get_space_center(from_space) + offset_now
+	for i in range(1, steps + 1):
+		var space: int = (from_space + i) % board.TOTAL_SPACES
+		tween.tween_property(player, "position", board.get_space_center(space) + offset, hop) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	await tween.finished
+	player.position = board.get_space_center(player.current_space) + offset
+
+
+# Players whose piece is walking right now: id -> [from_space, steps].
+var _walks: Dictionary = {}
+
+
 func _move_player(player: Node2D, roll: int) -> bool:
 	# Ensnaring Roots / Stabilized Portal adjust the roll before anything moves.
 	roll = _apply_pre_move_landmarks(player, roll)
@@ -3164,8 +3220,11 @@ func _move_and_land(player: Node2D, roll: int) -> bool:
 	if await _process_passing_effects(player, player.current_space, roll):
 		return true
 
+	var from_space: int = player.current_space
 	player.current_space = new_space_raw % board.TOTAL_SPACES
-	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+	await _walk_player(player, from_space, roll)
+	if _returning_to_menu or not is_inside_tree():
+		return true
 	_log("%s landed on %s." % [PLAYER_NAMES[player.player_id], _property_name(player.current_space)])
 
 	# Pilgrimage purchases come first, then whatever the landing does.
@@ -3242,7 +3301,7 @@ func _move_and_land(player: Node2D, roll: int) -> bool:
 			# yes AND actually has the money -- it keeps re-asking (letting
 			# them sell houses / mortgage in between) until either that's
 			# true or they say no.
-			var wants_to_buy: bool = await _ask_buy_property(property_name, effective_price)
+			var wants_to_buy: bool = await _ask_buy_property(property_name, effective_price, player.current_space)
 			if wants_to_buy:
 				var final_price: int = _apply_haggling_discount(player, price)
 				player.money -= final_price
@@ -4088,7 +4147,12 @@ func _ai_propose_trade(ai_id: int, target_id: int, offer_index: int, want_index:
 	_trade2_offered.append(want_index)
 	_update_player_panels()
 	_send_trade_offer()
-	await trade_concluded
+	# When the other side is a Computer too, it answers inside
+	# _send_trade_offer() -- the trade is already over (and trade_concluded
+	# already emitted) by the time we get here. Waiting for that signal again
+	# would hang this AI's turn forever.
+	if _trading:
+		await trade_concluded
 
 
 # Called when a modified counter-offer comes back to an AI in a trade it
@@ -4412,7 +4476,7 @@ func _on_declare_bankruptcy_pressed() -> void:
 # drops into a raise-money window (sell houses / mortgage / trade / cast a
 # spell) with a Cancel that comes back here. Only an explicit "No", or a
 # "Yes" they can afford (already, or after raising it), returns.
-func _ask_buy_property(property_name: String, price: int) -> bool:
+func _ask_buy_property(property_name: String, price: int, space_index: int = -1) -> bool:
 	if players[current_player].is_ai:
 		# Always wants the property; mortgages (never sells houses) to
 		# cover the price if it's short, and gives up only if that's not
@@ -4428,12 +4492,13 @@ func _ask_buy_property(property_name: String, price: int) -> bool:
 	_awaiting_buy_decision = true
 	_pending_buy_property_name = property_name
 	_pending_buy_price = price
+	_pending_buy_space = space_index
 	_refresh_action_buttons()
 	confirm_prompt.suppress_auto_decline = true
 	var player: Node2D = players[current_player]
 	var result: bool = false
 	while true:
-		_cf_open("Buy %s for $%d?" % [property_name, price])
+		_cf_open("Buy %s for $%d?" % [property_name, price], space_index)
 		var yes: bool = await _cf_result()
 		if not yes:
 			break
@@ -4459,7 +4524,7 @@ func _reassert_buy_prompt_if_needed() -> void:
 	# Only meaningful for a prompt shown locally -- a buy decision routed to a
 	# remote player lives on their screen, not behind a host board click.
 	if _awaiting_buy_decision and _prompt_is_local() and not confirm_prompt.visible:
-		_cf_open("Buy %s for $%d?" % [_pending_buy_property_name, _pending_buy_price])
+		_cf_open("Buy %s for $%d?" % [_pending_buy_property_name, _pending_buy_price], _pending_buy_space)
 
 
 # Completes a spell-driven property purchase (Promised Land, The Cult of
@@ -4736,14 +4801,25 @@ func _show_property_details(index: int) -> void:
 		return
 
 	if color_name == "utility" and info.has("rent_multipliers"):
-		var multipliers: Array = info["rent_multipliers"]
-		var lines: Array[String] = [
-			"If one Utility is owned, rent is %d times amount shown on dice." % multipliers[0],
-			"If both Utilities are owned, rent is %d times amount shown on dice." % multipliers[1],
-			"Mortgage Value: $%d" % mortgage_value,
-			"Unmortgage Value: $%d" % unmortgage_value,
-		]
-		asset_card.show_card(info.get("name", ""), load(info.get("icon", "")), lines)
+		asset_card.show_card(info.get("name", ""), load(info.get("icon", "")), _utility_card_lines(info["rent_multipliers"], price))
+		return
+
+	match info.get("type", ""):
+		"tax":
+			# "Pay $200" -- the same card whether or not someone owns it.
+			var tax_name: String = info.get("name", "")
+			var tax_lines: Array[String] = ["Pay $%d" % int(info.get("value", 0))]
+			asset_card.show_card(tax_name, TAX_ICONS.get(tax_name), tax_lines)
+			return
+		"magic_forest":
+			spell_card.show_card(MAGIC_FOREST_CARD)
+			return
+		"spell_shop":
+			spell_card.show_card(SPELL_SHOP_CARD)
+			return
+	# Go, Jail, Free Parking and Go To Jail: the tile's own art is its card.
+	if index % 10 == 0 and board.spaces[index].tile_texture != null:
+		spell_card.show_card(board.spaces[index].tile_texture)
 		return
 
 	var space_name: String = info.get("name", "Space %d" % index)
@@ -4761,7 +4837,42 @@ func _show_property_details(index: int) -> void:
 # name). `base_rents` is the 4-tier [1,2,3,4]-railroad rent array; the 5th
 # tier is always TERMINUS_FIVE_RAILROAD_RENT.
 func _show_railroad_card(title: String, base_rents: Array, price: int, icon: Texture2D) -> void:
-	var lines: Array[String] = [
+	asset_card.show_card(title, icon, _railroad_card_lines(base_rents, price))
+
+
+# A small copy of space `index`'s card (title deed, railroad or utility
+# card) for the buy prompt, or null for a space without one.
+func _space_card_view(index: int) -> Control:
+	if index < 0 or index >= board.TOTAL_SPACES:
+		return null
+	var info: Dictionary = board.get_space_info(index)
+	var color_name: String = info.get("color", "")
+	var price: int = info.get("price", 0)
+	if info.has("rents") and color_name != "railroad" and color_name != "utility":
+		property_card.fill(info.get("name", ""), board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY),
+			info["rents"], price, board.HOUSE_COSTS_BY_COLOR.get(color_name, 0),
+			_mortgage_value(price), _unmortgage_value(price))
+		return property_card.card_view(BUY_PROMPT_CARD_SCALE)
+	if color_name == "railroad" and info.has("rents"):
+		asset_card.fill(info.get("name", ""), load(info.get("icon", "")), _railroad_card_lines(info["rents"], price))
+		return asset_card.card_view(BUY_PROMPT_CARD_SCALE)
+	if color_name == "utility" and info.has("rent_multipliers"):
+		asset_card.fill(info.get("name", ""), load(info.get("icon", "")), _utility_card_lines(info["rent_multipliers"], price))
+		return asset_card.card_view(BUY_PROMPT_CARD_SCALE)
+	return null
+
+
+func _utility_card_lines(multipliers: Array, price: int) -> Array[String]:
+	return [
+		"If one Utility is owned, rent is %d times amount shown on dice." % multipliers[0],
+		"If both Utilities are owned, rent is %d times amount shown on dice." % multipliers[1],
+		"Mortgage Value: $%d" % _mortgage_value(price),
+		"Unmortgage Value: $%d" % _unmortgage_value(price),
+	]
+
+
+func _railroad_card_lines(base_rents: Array, price: int) -> Array[String]:
+	return [
 		"Rent: $%d" % base_rents[0],
 		"If 2 Railroads are owned: $%d" % base_rents[1],
 		"If 3 Railroads are owned: $%d" % base_rents[2],
@@ -4770,7 +4881,6 @@ func _show_railroad_card(title: String, base_rents: Array, price: int, icon: Tex
 		"Mortgage Value: $%d" % _mortgage_value(price),
 		"Unmortgage Value: $%d" % _unmortgage_value(price),
 	]
-	asset_card.show_card(title, icon, lines)
 
 
 # What a non-property tile does, for its inspection popup. "" for tiles with
@@ -9020,6 +9130,9 @@ func _build_snapshot() -> Dictionary:
 			"in_jail": p.in_jail,
 			"jail_turns": p.jail_turns_left,
 			"doubles": p.consecutive_doubles,
+			# Mid-walk (_walk_player): where from and how far, so a client
+			# animates the same walk instead of jumping.
+			"walk": _walks.get(p.player_id, []),
 			"bankrupt": p.is_bankrupt,
 			"is_ai": p.is_ai,
 			"is_placeholder": p.is_placeholder_ai,
@@ -9123,6 +9236,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	for i in mini(player_states.size(), players.size()):
 		var ps: Dictionary = player_states[i]
 		var p: Node2D = players[i]
+		var space_before: int = p.current_space
 		p.money = ps.get("money", p.money)
 		p.current_space = ps.get("space", p.current_space)
 		p.in_jail = ps.get("in_jail", false)
@@ -9138,7 +9252,11 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		p.temp_attunement = (ps.get("attunement", {}) as Dictionary).duplicate()
 		p.cramped_cell_debts = _cramped_cell_from_save(ps.get("cramped_cell", []))
 		p.fated_ending = _fated_ending_from_save(ps.get("fated_ending", {}))
-		p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
+		var walk: Array = ps.get("walk", [])
+		if walk.size() == 2 and space_before != p.current_space and not _walks.has(i):
+			_client_walk(p, int(walk[0]), int(walk[1]))
+		elif not _walks.has(i):
+			p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
 
 	var space_states: Array = snap.get("spaces", [])
 	for i in mini(space_states.size(), board.spaces.size()):
@@ -9225,7 +9343,7 @@ func _apply_dice_animation(d1: int, d2: int, seq: int) -> void:
 		return
 	if seq != _roll_seq:
 		_roll_seq = seq
-		dice_roller.roll(d1, d2, _response_window_seconds() * 0.5)
+		dice_roller.roll(d1, d2, DICE_TUMBLE_SEC)
 	if not _roll_in_flight or _response_window_paused_by.has(true):
 		dice_roller.finish_now()
 
@@ -9292,15 +9410,16 @@ func _peer_for_slot(slot: int) -> int:
 
 # --- confirm_prompt (yes / no) ----------------------------------------
 
-func _cf_open(text: String) -> void:
+# card_space: show that space's card above the question (the buy prompt).
+func _cf_open(text: String, card_space: int = -1) -> void:
 	if _prompt_is_local():
 		# Sticky: a yes/no the game is actively waiting on must never be
 		# resolved by the app losing focus (Godot auto-hides popups on
 		# alt-tab, which would otherwise fire popup_hide -> "No").
 		confirm_prompt.sticky = true
-		confirm_prompt.open(text, _tutorial_confirm_gate())
+		confirm_prompt.open(text, _tutorial_confirm_gate(), _space_card_view(card_space))
 	else:
-		_net_open_remote("confirm", {"text": text})
+		_net_open_remote("confirm", {"text": text, "space": card_space})
 
 
 func _cf_result() -> bool:
@@ -9662,7 +9781,7 @@ func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
 	match kind:
 		"confirm":
 			confirm_prompt.sticky = true
-			confirm_prompt.open(str(payload.get("text", "")))
+			confirm_prompt.open(str(payload.get("text", "")), Callable(), _space_card_view(int(payload.get("space", -1))))
 			return await confirm_prompt.answered
 		"pick":
 			var pick_entries: Array = _net_unpack_entries(payload.get("entries", []))
