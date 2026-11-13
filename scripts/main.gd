@@ -8034,7 +8034,10 @@ func _pick_property_space(caster: Node2D, prompt: String, filter: Callable) -> i
 # cancelled.
 func _pick_die_value(prompt: String, _color: Color = Color.WHITE) -> int:
 	var v: int
-	if _prompt_is_local():
+	if _prompt_is_ai():
+		_ai_prompt_open("face", {"text": prompt})
+		v = int(_ai_prompt_take())
+	elif _prompt_is_local():
 		v = await _face_pick_local(prompt)
 	else:
 		_net_open_remote("face", {"text": prompt})
