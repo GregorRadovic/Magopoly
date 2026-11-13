@@ -32,7 +32,7 @@ const BOARD_SIZE: float = 2.0 * CORNER_SIZE + 9.0 * EDGE_THIN
 # backward from Go, i.e. TOTAL_SPACES - 2 == 38.
 const SPACE_DATA: Dictionary = {
 	0: {"name": "GO"},
-	1: {"name": "Mediter- ranean Avenue", "type": "property", "price": 60, "rents": [2, 10, 30, 90, 160, 250], "color": "brown"},
+	1: {"name": "Mediterranean Avenue", "label": "Mediter- ranean Avenue", "type": "property", "price": 60, "rents": [2, 10, 30, 90, 160, 250], "color": "brown"},
 	2: {"name": "Spell Shop", "type": "spell_shop"},
 	3: {"name": "Baltic Avenue", "type": "property", "price": 60, "rents": [4, 20, 60, 180, 320, 450], "color": "brown"},
 	4: {"name": "Income Tax", "type": "tax", "value": 200},
@@ -149,7 +149,7 @@ func _generate_board() -> void:
 		space.tile_size = rect.size
 		space.index = i
 		var info: Dictionary = get_space_info(i)
-		space.label_text = info.get("name", "")
+		space.label_text = info.get("label", info.get("name", ""))
 		var color_name: String = info.get("color", "")
 		if color_name != "":
 			space.banner_color = COLOR_GROUP_COLORS.get(color_name, Color(0, 0, 0, 0))
