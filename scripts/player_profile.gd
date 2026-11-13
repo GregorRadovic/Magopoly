@@ -19,10 +19,29 @@ const BODY: String = "Margin/VBox/Body/"
 @onready var stats_label: RichTextLabel = get_node(BODY + "Record/VBox/StatsLabel")
 @onready var history_label: RichTextLabel = get_node(BODY + "Record/VBox/HistoryLabel")
 
+const XP_AWARD_SCENE: PackedScene = preload("res://scenes/xp_award.tscn")
+# A cheat: levels the profile straight up to the highest unlock, playing the
+# usual level-up screen for each level on the way.
+var unlock_all_button: Button
+
 const NAME_HINT: String = "Shown to other players online, and on your seat in local games."
 
 
 func _ready() -> void:
+	# The cheat button sits beside the big "Level N".
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 24)
+	var parent: Node = level_label.get_parent()
+	parent.add_child(row)
+	parent.move_child(row, level_label.get_index())
+	parent.remove_child(level_label)
+	row.add_child(level_label)
+	unlock_all_button = Button.new()
+	unlock_all_button.text = "Unlock all levels"
+	unlock_all_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	unlock_all_button.add_theme_font_size_override("font_size", 20)
+	unlock_all_button.pressed.connect(_unlock_all_levels)
+	row.add_child(unlock_all_button)
 	back_button.pressed.connect(_go_back)
 	save_name_button.pressed.connect(_save_name)
 	name_edit.text_submitted.connect(func(_t: String) -> void: _save_name())
@@ -49,8 +68,39 @@ func _refresh() -> void:
 		progress_hint.text = "Halfway there -- finish one more game to reach level %d." % (level + 1)
 
 	unlocks_label.text = _unlocks_text(level)
+	unlock_all_button.disabled = level >= _max_unlock_level()
 	stats_label.text = _stats_text(profile["stats"])
 	history_label.text = _history_text(profile["history"])
+
+
+# Level 25, or higher if something unlocks later than that.
+const CHEAT_LEVEL: int = 25
+
+
+func _max_unlock_level() -> int:
+	var top: int = CHEAT_LEVEL
+	for u in Saves.all_unlocks():
+		top = maxi(top, int(u["level"]))
+	return top
+
+
+func _unlock_all_levels() -> void:
+	var profile: Dictionary = Saves.load_profile()
+	var xp_before: int = profile["xp"]
+	var xp_after: int = _max_unlock_level() * 2
+	if xp_before >= xp_after:
+		return
+	profile["xp"] = xp_after
+	Saves._write(Saves.PROFILE_PATH, profile)
+	unlock_all_button.disabled = true
+	var award: Control = XP_AWARD_SCENE.instantiate()
+	add_child(award)
+	award.fill_seconds_per_level = 0.35
+	award.closed.connect(func() -> void:
+		award.queue_free()
+		_refresh())
+	award.show_award("Unlocking everything!", null, xp_before, xp_after)
+	award.result_label.text = "Cheat: straight to level %d" % (xp_after / 2)
 
 
 func _refresh_save_button() -> void:

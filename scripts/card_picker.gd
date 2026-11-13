@@ -58,7 +58,20 @@ var _revealing: bool = false
 @onready var cancel_button: Button = $VBox/ButtonRow/CancelButton
 
 
+# Shown instead of prompt_label when the prompt has BBCode in it (Magic
+# Forest's bold, larger "Discard").
+var _rich_prompt: RichTextLabel
+
+
 func _ready() -> void:
+	_rich_prompt = RichTextLabel.new()
+	_rich_prompt.bbcode_enabled = true
+	_rich_prompt.fit_content = true
+	_rich_prompt.scroll_active = false
+	_rich_prompt.autowrap_mode = TextServer.AUTOWRAP_OFF
+	_rich_prompt.visible = false
+	prompt_label.get_parent().add_child(_rich_prompt)
+	prompt_label.get_parent().move_child(_rich_prompt, prompt_label.get_index() + 1)
 	skip_button.pressed.connect(_on_skip)
 	hide_button.pressed.connect(_on_hide_pressed)
 	cancel_button.pressed.connect(_on_cancel)
@@ -98,8 +111,15 @@ func _do_open(prompt: String, entries: Array, mandatory: bool, skip_text: String
 	skip_button.text = skip_text
 	hide_button.visible = _large
 	prompt_label.text = prompt
+	var rich: bool = "[" in prompt
+	prompt_label.visible = not rich
+	_rich_prompt.visible = rich
 
 	var prompt_size: int = 32 if _large else 24
+	if rich:
+		_rich_prompt.add_theme_font_size_override("normal_font_size", prompt_size)
+		_rich_prompt.add_theme_font_size_override("bold_font_size", prompt_size)
+		_rich_prompt.text = "[center]%s[/center]" % prompt
 	var button_size: int = 24 if _large else 20
 	var button_min: Vector2 = Vector2(240, 58) if _large else Vector2(200, 50)
 	prompt_label.add_theme_font_size_override("font_size", prompt_size)

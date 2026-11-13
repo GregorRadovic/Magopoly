@@ -45,6 +45,11 @@ var _size: Vector2i = POPUP_SIZE
 func _ready() -> void:
 	yes_button.pressed.connect(_on_yes)
 	no_button.pressed.connect(_on_no)
+	# Y / N answer the prompt while it has the keyboard.
+	yes_button.shortcut = _key_shortcut(KEY_Y)
+	no_button.shortcut = _key_shortcut(KEY_N)
+	yes_button.shortcut_in_tooltip = false
+	no_button.shortcut_in_tooltip = false
 	popup_hide.connect(_on_popup_hide)
 	set_process(false)
 	_card_holder = CenterContainer.new()
@@ -113,6 +118,14 @@ func _set_card(card: Control) -> void:
 	var width: float = maxf(CARD_LAYOUT_MIN_WIDTH, maxf(card_size.x, CARD_BUTTON_SIZE.x) + 2.0 * CARD_LAYOUT_MARGIN)
 	# Height 0: the popup grows to fit what's in it.
 	_size = Vector2i(roundi(width), 0)
+
+
+func _key_shortcut(key: Key) -> Shortcut:
+	var ev := InputEventKey.new()
+	ev.keycode = key
+	var sc := Shortcut.new()
+	sc.events = [ev]
+	return sc
 
 
 # A coloured, rounded button (card layout), or back to the theme's default.
