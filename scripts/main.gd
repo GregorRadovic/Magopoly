@@ -3297,12 +3297,19 @@ func _perform_roll(die1: int, die2: int) -> void:
 			player.jail_turns_left -= 1
 			if player.jail_turns_left <= 0:
 				var jail_fee: int = 50
-				player.money -= jail_fee
-				free_parking_amount += jail_fee
-				_release_from_jail(player)
-				dice_label.text += "\nSentence served, paid $%d to Free Parking." % jail_fee
-				_log_payment(current_player, jail_fee, "Free Parking")
-				_log("%s left Jail." % PLAYER_NAMES[current_player])
+				if jail_fee > player.money:
+					# Can't cover the fine: raise it like any other debt
+					# (sell / mortgage / trade), or go bankrupt.
+					dice_label.text += "\nSentence served. Owes $%d to leave Jail." % jail_fee
+					await _collect_debt(player, jail_fee, null)
+				else:
+					player.money -= jail_fee
+					free_parking_amount += jail_fee
+					dice_label.text += "\nSentence served, paid $%d to Free Parking." % jail_fee
+					_log_payment(current_player, jail_fee, "Free Parking")
+				if not player.is_bankrupt:
+					_release_from_jail(player)
+					_log("%s left Jail." % PLAYER_NAMES[current_player])
 			else:
 				dice_label.text += "\nStill in Jail. %d turn(s) left." % player.jail_turns_left
 	elif _jail_released_mid_roll:
