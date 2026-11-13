@@ -2859,6 +2859,9 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# opens; the player must pause it within the window (see _unhandled_input).
 	if _tutorial_active and _tutorial_expected_action == "roll":
 		_tutorial_advance()
+	# The piece walks its roll as soon as the dice settle, while the window
+	# is still open; a pause or a changed roll snaps it back.
+	_preview_walk(player, _roll_seq)
 	await _ensure_response_window("roll", current_player)
 	if _returning_to_menu or not is_inside_tree():
 		return
@@ -2869,8 +2872,18 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# Tutorial: still on "press_space" once the window has closed = the player
 	# never paused. Rewind and let them roll again.
 	if _tutorial_active and _tutorial_expected_action == "press_space":
+		_cancel_preview_walk()
 		_tutorial_rewind_roll()
 		return
+	# A short window can close mid-walk: let a still-valid walk finish.
+	while not _preview.is_empty() and not bool(_preview.get("done", false)) and _current_roll == int(_preview["steps"]):
+		await get_tree().process_frame
+		if _returning_to_menu or not is_inside_tree():
+			return
+	# The early walk only stands if the move it showed is the one that's
+	# actually about to happen (_move_player then skips walking again).
+	if not _preview_matches(player, roll) or _roll_cancelled or (player.in_jail and not _dice_are_doubles()):
+		_cancel_preview_walk()
 
 	# Belt-and-suspenders: _prompt_slot is only ever meant to be set mid
 	# _begin_spell_cast (routing that caster's own level/target pickers).
@@ -2935,6 +2948,8 @@ func _perform_roll(die1: int, die2: int) -> void:
 	if player.in_jail:
 		grants_extra_turn = false
 
+	# Whatever happened, no early walk outlives the roll it belonged to.
+	_cancel_preview_walk()
 	if grants_extra_turn:
 		dice_label.text += "\nExtra turn!"
 	elif player.is_bankrupt:
@@ -2954,6 +2969,61 @@ func _perform_roll(die1: int, die2: int) -> void:
 # doubles-triggered extra turn. Debt collection that ends in the player
 # successfully paying off what they owed does NOT cancel the extra turn --
 # they're still in the game, so a rolled double still earns another go.
+# The walk shown during a roll's reaction window: {"player", "from", "steps",
+# "done"} while one is under way or finished, else empty.
+var _preview: Dictionary = {}
+
+
+# Starts walking `player` as soon as the dice settle (DICE_TUMBLE_SEC), then
+# keeps watching until the window closes: if anyone pauses, or a spell
+# changes the roll, the piece snaps back to where it started. A piece in
+# Jail only walks on doubles. `seq` ties this to one roll (_roll_seq).
+func _preview_walk(player: Node2D, seq: int) -> void:
+	await get_tree().create_timer(DICE_TUMBLE_SEC).timeout
+	if not _roll_in_flight or _roll_seq != seq or _response_window_paused_by.has(true):
+		return
+	if player.in_jail and not _dice_are_doubles():
+		return
+	var steps: int = _current_roll
+	var from: int = player.current_space
+	if steps <= 0:
+		return
+	_preview = {"player": player.player_id, "from": from, "steps": steps, "done": false}
+	_walks[player.player_id] = [from, steps]
+	var tween: Tween = _walk_tween(player, from, steps)
+	_preview_tween = tween
+	while _roll_seq == seq and not _preview.is_empty():
+		if _roll_in_flight and (_response_window_paused_by.has(true) or _current_roll != steps or player.current_space != from):
+			_cancel_preview_walk()
+			return
+		if not tween.is_valid() or not tween.is_running():
+			_preview["done"] = true
+			if not _roll_in_flight:
+				return
+		await get_tree().process_frame
+
+
+# Whether the early walk (finished) shows exactly this move.
+func _preview_matches(player: Node2D, steps: int) -> bool:
+	return not _preview.is_empty() and bool(_preview.get("done", false)) \
+		and int(_preview["player"]) == player.player_id and int(_preview["steps"]) == steps \
+		and int(_preview["from"]) == player.current_space
+
+
+# Undoes the early walk: the piece goes straight back to its real space.
+func _cancel_preview_walk() -> void:
+	if _preview.is_empty():
+		return
+	var id: int = int(_preview["player"])
+	_preview.clear()
+	_walks.erase(id)
+	if _preview_tween and _preview_tween.is_valid():
+		_preview_tween.kill()
+	if id >= 0 and id < players.size():
+		players[id].position = board.get_space_center(players[id].current_space) + MARKER_OFFSETS[id]
+var _preview_tween: Tween = null
+
+
 # Walks a player's piece forward `steps` spaces from `from_space`, hopping
 # space to space so the whole walk takes MOVE_DURATION_SEC. (Only the
 # piece moves -- current_space is already set by the caller.)
@@ -2967,15 +3037,39 @@ func _walk_player(player: Node2D, from_space: int, steps: int) -> void:
 	_walks.erase(player.player_id)
 
 
-# Client: plays a walk the host is doing (from the snapshot's "walk").
-func _client_walk(player: Node2D, from_space: int, steps: int) -> void:
-	_walks[player.player_id] = [from_space, steps]
-	await _animate_walk(player, from_space, steps)
-	_walks.erase(player.player_id)
-	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+# Client: mirrors the host's walks from the snapshot's "walk" entry -- plays
+# each new one, holds the piece where it ended while the host still lists it
+# (an early walk waiting on the reaction window), and puts the piece back on
+# its real space once the host drops it (finished, or snapped back).
+var _client_walk_key: Dictionary = {}
+var _client_tweens: Dictionary = {}
+
+
+func _client_apply_walk(player: Node2D, walk: Array) -> void:
+	var id: int = player.player_id
+	if walk.size() == 2:
+		if _client_walk_key.get(id, []) != walk:
+			if _client_tweens.has(id) and _client_tweens[id].is_valid():
+				_client_tweens[id].kill()
+			_client_walk_key[id] = walk.duplicate()
+			_client_tweens[id] = _walk_tween(player, int(walk[0]), int(walk[1]))
+		return
+	if _client_walk_key.has(id):
+		if _client_tweens.has(id) and _client_tweens[id].is_valid():
+			_client_tweens[id].kill()
+		_client_walk_key.erase(id)
+		_client_tweens.erase(id)
+	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[id]
 
 
 func _animate_walk(player: Node2D, from_space: int, steps: int) -> void:
+	var tween: Tween = _walk_tween(player, from_space, steps)
+	await tween.finished
+	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+
+
+# The hop-by-hop tween for a walk (MOVE_DURATION_SEC in all), started now.
+func _walk_tween(player: Node2D, from_space: int, steps: int) -> Tween:
 	var offset: Vector2 = MARKER_OFFSETS[player.player_id]
 	var hop: float = MOVE_DURATION_SEC / float(steps)
 	var tween: Tween = create_tween()
@@ -2985,8 +3079,7 @@ func _animate_walk(player: Node2D, from_space: int, steps: int) -> void:
 		var space: int = (from_space + i) % board.TOTAL_SPACES
 		tween.tween_property(player, "position", board.get_space_center(space) + offset, hop) \
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	await tween.finished
-	player.position = board.get_space_center(player.current_space) + offset
+	return tween
 
 
 # Players whose piece is walking right now: id -> [from_space, steps].
@@ -3019,8 +3112,15 @@ func _move_player(player: Node2D, roll: int) -> bool:
 		_update_player_panels()
 
 	var from_space: int = player.current_space
+	var walked_early: bool = _preview_matches(player, roll)
 	player.current_space = new_space_raw % board.TOTAL_SPACES
-	await _walk_player(player, from_space, roll)
+	if walked_early:
+		# Already walked there during the reaction window.
+		_preview.clear()
+		_walks.erase(player.player_id)
+		player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+	else:
+		await _walk_player(player, from_space, roll)
 	if _returning_to_menu or not is_inside_tree():
 		return true
 	_log("%s landed on %s." % [PLAYER_NAMES[player.player_id], _property_name(player.current_space)])
@@ -7793,7 +7893,6 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	for i in mini(player_states.size(), players.size()):
 		var ps: Dictionary = player_states[i]
 		var p: Node2D = players[i]
-		var space_before: int = p.current_space
 		p.money = ps.get("money", p.money)
 		p.current_space = ps.get("space", p.current_space)
 		p.in_jail = ps.get("in_jail", false)
@@ -7808,11 +7907,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		p.spell_hand = _net_string_array(ps.get("hand", []))
 		p.temp_attunement = (ps.get("attunement", {}) as Dictionary).duplicate()
 		p.cramped_cell_debts = _cramped_cell_from_save(ps.get("cramped_cell", []))
-		var walk: Array = ps.get("walk", [])
-		if walk.size() == 2 and space_before != p.current_space and not _walks.has(i):
-			_client_walk(p, int(walk[0]), int(walk[1]))
-		elif not _walks.has(i):
-			p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
+		_client_apply_walk(p, ps.get("walk", []))
 
 	var space_states: Array = snap.get("spaces", [])
 	for i in mini(space_states.size(), board.spaces.size()):
