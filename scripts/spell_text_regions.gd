@@ -476,7 +476,7 @@ const REGIONS: Dictionary = {
 		"post": [],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/B 1 1 Dodge.png": {
-		"pre": [Rect2(0.0907, 0.6802, 0.2880, 0.0368)],
+		"pre": [Rect2(0.0907, 0.6802, 0.3013, 0.0368)],
 		"levels": {
 			1: [Rect2(0.0933, 0.7337, 0.4313, 0.0354)],
 			2: [Rect2(0.0927, 0.7892, 0.7407, 0.0373), Rect2(0.0920, 0.8279, 0.4347, 0.0306)],
@@ -484,7 +484,7 @@ const REGIONS: Dictionary = {
 		"post": [],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/B 2 1 Master Plan.png": {
-		"pre": [Rect2(0.0900, 0.6315, 0.6040, 0.0325)],
+		"pre": [Rect2(0.0900, 0.6315, 0.6153, 0.0325)],
 		"levels": {
 			1: [Rect2(0.0927, 0.6802, 0.6860, 0.0335), Rect2(0.0920, 0.7146, 0.5040, 0.0315)],
 			2: [Rect2(0.0927, 0.7629, 0.7953, 0.0325), Rect2(0.0913, 0.7973, 0.4007, 0.0330)],
@@ -502,7 +502,7 @@ const REGIONS: Dictionary = {
 		"post": [Rect2(0.0907, 0.8370, 0.8120, 0.0359), Rect2(0.0920, 0.8743, 0.7953, 0.0359)],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/B 4 1 Seize the Opportunity.png": {
-		"pre": [Rect2(0.0933, 0.6534, 0.7807, 0.0368), Rect2(0.0920, 0.6917, 0.4880, 0.0359)],
+		"pre": [Rect2(0.0933, 0.6534, 0.7807, 0.0368), Rect2(0.0920, 0.6917, 0.5020, 0.0359)],
 		"levels": {
 			1: [Rect2(0.0927, 0.7433, 0.6373, 0.0354)],
 			2: [Rect2(0.0927, 0.7988, 0.6533, 0.0387)],
@@ -520,7 +520,7 @@ const REGIONS: Dictionary = {
 		"post": [],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/B 6 1 Veto.png": {
-		"pre": [Rect2(0.0907, 0.6726, 0.2887, 0.0368)],
+		"pre": [Rect2(0.0907, 0.6726, 0.3013, 0.0368)],
 		"levels": {
 			1: [Rect2(0.0933, 0.7261, 0.5140, 0.0354)],
 			2: [Rect2(0.0927, 0.7796, 0.6480, 0.0354)],
@@ -529,7 +529,7 @@ const REGIONS: Dictionary = {
 		"post": [],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/B 7 1 Go For the Kill.png": {
-		"pre": [Rect2(0.0907, 0.6343, 0.7713, 0.0368), Rect2(0.0913, 0.6726, 0.7553, 0.0368), Rect2(0.0907, 0.7108, 0.5713, 0.0359)],
+		"pre": [Rect2(0.0907, 0.6343, 0.7713, 0.0368), Rect2(0.0913, 0.6726, 0.7553, 0.0368), Rect2(0.0907, 0.7108, 0.5853, 0.0359)],
 		"levels": {
 			1: [Rect2(0.0927, 0.7629, 0.1967, 0.0349)],
 			2: [Rect2(0.0927, 0.8179, 0.1967, 0.0354)],
@@ -538,7 +538,7 @@ const REGIONS: Dictionary = {
 		"post": [],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/B 8 1 Fated Ending.png": {
-		"pre": [Rect2(0.0933, 0.6616, 0.7640, 0.0368), Rect2(0.0913, 0.6993, 0.6867, 0.0373)],
+		"pre": [Rect2(0.0933, 0.6616, 0.7640, 0.0368), Rect2(0.0913, 0.6993, 0.6987, 0.0373)],
 		"levels": {
 			1: [Rect2(0.0927, 0.7529, 0.4253, 0.0378)],
 			2: [Rect2(0.0927, 0.8064, 0.7893, 0.0392), Rect2(0.0920, 0.8470, 0.4940, 0.0306)],
@@ -572,7 +572,7 @@ const REGIONS: Dictionary = {
 		"post": [],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/C 4 1 Fragile Goods.png": {
-		"pre": [Rect2(0.0907, 0.6291, 0.4280, 0.0330)],
+		"pre": [Rect2(0.0907, 0.6291, 0.4393, 0.0330)],
 		"levels": {
 			1: [Rect2(0.0927, 0.6745, 0.2760, 0.0315)],
 			2: [Rect2(0.0933, 0.7223, 0.2753, 0.0315)],
@@ -608,7 +608,7 @@ const REGIONS: Dictionary = {
 		"post": [],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/C 8 1 Lethargy.png": {
-		"pre": [Rect2(0.0933, 0.6726, 0.4500, 0.0368)],
+		"pre": [Rect2(0.0933, 0.6726, 0.4620, 0.0368)],
 		"levels": {
 			1: [Rect2(0.0933, 0.7261, 0.6067, 0.0373)],
 			2: [Rect2(0.0927, 0.7796, 0.6073, 0.0387)],
@@ -616,7 +616,7 @@ const REGIONS: Dictionary = {
 		"post": [Rect2(0.0913, 0.8370, 0.3727, 0.0296)],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/D 1 1 Landmine.png": {
-		"pre": [Rect2(0.0907, 0.6620, 0.7020, 0.0363), Rect2(0.0907, 0.6998, 0.7653, 0.0368), Rect2(0.0907, 0.7457, 0.1693, 0.0287)],
+		"pre": [Rect2(0.0907, 0.6620, 0.7020, 0.0363), Rect2(0.0907, 0.6998, 0.7653, 0.0368), Rect2(0.0907, 0.7457, 0.1827, 0.0287)],
 		"levels": {
 			1: [Rect2(0.0927, 0.7911, 0.1967, 0.0354)],
 			2: [Rect2(0.0927, 0.8446, 0.1967, 0.0354)],
@@ -651,7 +651,7 @@ const REGIONS: Dictionary = {
 		"post": [],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/D 5 1 Contested Battlefield.png": {
-		"pre": [Rect2(0.0920, 0.6401, 0.7953, 0.0277), Rect2(0.0913, 0.6668, 0.7827, 0.0277), Rect2(0.0913, 0.6936, 0.7987, 0.0277), Rect2(0.0920, 0.7323, 0.7073, 0.0287), Rect2(0.0907, 0.7648, 0.1347, 0.0234)],
+		"pre": [Rect2(0.0920, 0.6401, 0.7953, 0.0277), Rect2(0.0913, 0.6668, 0.7827, 0.0277), Rect2(0.0913, 0.6936, 0.7987, 0.0277), Rect2(0.0920, 0.7323, 0.7073, 0.0287), Rect2(0.0907, 0.7648, 0.1433, 0.0234)],
 		"levels": {
 			1: [Rect2(0.0900, 0.7968, 0.1653, 0.0277)],
 		},
@@ -667,7 +667,7 @@ const REGIONS: Dictionary = {
 		"post": [],
 	},
 	"res://Magopoly Assets/Magopoly Expansions/D 7 1 Ensnaring Roots.png": {
-		"pre": [Rect2(0.0907, 0.6534, 0.6547, 0.0368), Rect2(0.0913, 0.6917, 0.5407, 0.0349)],
+		"pre": [Rect2(0.0907, 0.6534, 0.6547, 0.0368), Rect2(0.0913, 0.6917, 0.5547, 0.0349)],
 		"levels": {
 			1: [Rect2(0.0927, 0.7433, 0.5733, 0.0392)],
 			2: [Rect2(0.0927, 0.7988, 0.5733, 0.0382)],
