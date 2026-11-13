@@ -26,9 +26,20 @@ var sticky: bool = false
 # handles any feedback).
 var _gate: Callable = Callable()
 
+@onready var vbox: VBoxContainer = $VBox
 @onready var prompt_label: Label = $VBox/PromptLabel
+@onready var buttons_row: HBoxContainer = $VBox/Buttons
 @onready var yes_button: Button = $VBox/Buttons/YesButton
 @onready var no_button: Button = $VBox/Buttons/NoButton
+
+# Card layout (the buy prompt): a picture of the property on top, the
+# question under it, then a green Yes over a red No.
+const CARD_BUTTON_SIZE: Vector2 = Vector2(340, 60)
+const CARD_LAYOUT_MIN_WIDTH: float = 440.0
+const CARD_LAYOUT_MARGIN: float = 24.0
+var _card_holder: CenterContainer
+var _card_buttons: VBoxContainer
+var _size: Vector2i = POPUP_SIZE
 
 
 func _ready() -> void:
@@ -36,14 +47,100 @@ func _ready() -> void:
 	no_button.pressed.connect(_on_no)
 	popup_hide.connect(_on_popup_hide)
 	set_process(false)
+	_card_holder = CenterContainer.new()
+	_card_holder.visible = false
+	vbox.add_child(_card_holder)
+	vbox.move_child(_card_holder, 0)
+	_card_buttons = VBoxContainer.new()
+	_card_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	_card_buttons.add_theme_constant_override("separation", 12)
+	_card_buttons.visible = false
+	vbox.add_child(_card_buttons)
 
 
-func open(prompt: String, gate: Callable = Callable()) -> void:
+# card: an optional picture shown above the question (see the buy prompt);
+# without one this is the plain two-button prompt.
+func open(prompt: String, gate: Callable = Callable(), card: Control = null) -> void:
 	prompt_label.text = prompt
 	_answered = false
 	_gate = gate
-	popup_centered(POPUP_SIZE)
+	_set_card(card)
+	popup_centered(_size)
 	set_process(sticky or gate.is_valid())
+
+
+func _set_card(card: Control) -> void:
+	for child in _card_holder.get_children():
+		_card_holder.remove_child(child)
+		child.queue_free()
+	var with_card: bool = card != null
+	_card_holder.visible = with_card
+	_card_buttons.visible = with_card
+	buttons_row.visible = not with_card
+	var target: Container = _card_buttons if with_card else buttons_row
+	for btn in [yes_button, no_button]:
+		if btn.get_parent() != target:
+			btn.get_parent().remove_child(btn)
+			target.add_child(btn)
+	_style_button(yes_button, Color(0.16, 0.56, 0.26) if with_card else Color.TRANSPARENT)
+	_style_button(no_button, Color(0.74, 0.2, 0.2) if with_card else Color.TRANSPARENT)
+	if not with_card:
+		prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		prompt_label.remove_theme_font_size_override("font_size")
+		vbox.remove_theme_constant_override("separation")
+		remove_theme_stylebox_override("panel")
+		for btn in [yes_button, no_button]:
+			btn.size_flags_horizontal = Control.SIZE_FILL
+		vbox.position = Vector2(24, 24)
+		vbox.size = Vector2(412, 182)
+		_size = POPUP_SIZE
+		return
+	_card_holder.add_child(card)
+	# Solid, so the board doesn't show through behind the card.
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.13, 0.13, 0.15, 0.98)
+	bg.border_color = Color(0.35, 0.36, 0.42)
+	bg.set_border_width_all(2)
+	bg.set_corner_radius_all(10)
+	bg.set_content_margin_all(CARD_LAYOUT_MARGIN)
+	add_theme_stylebox_override("panel", bg)
+	for btn in [yes_button, no_button]:
+		btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	prompt_label.add_theme_font_size_override("font_size", 24)
+	vbox.add_theme_constant_override("separation", 16)
+	var card_size: Vector2 = card.custom_minimum_size
+	var width: float = maxf(CARD_LAYOUT_MIN_WIDTH, maxf(card_size.x, CARD_BUTTON_SIZE.x) + 2.0 * CARD_LAYOUT_MARGIN)
+	# Height 0: the popup grows to fit what's in it.
+	_size = Vector2i(roundi(width), 0)
+
+
+# A coloured, rounded button (card layout), or back to the theme's default.
+func _style_button(btn: Button, color: Color) -> void:
+	if color == Color.TRANSPARENT:
+		for state in ["normal", "hover", "pressed", "focus"]:
+			btn.remove_theme_stylebox_override(state)
+		btn.remove_theme_font_size_override("font_size")
+		btn.remove_theme_color_override("font_color")
+		btn.remove_theme_color_override("font_hover_color")
+		btn.custom_minimum_size = Vector2(168, 58)
+		return
+	for state in ["normal", "hover", "pressed", "focus"]:
+		var box := StyleBoxFlat.new()
+		box.set_corner_radius_all(8)
+		match state:
+			"hover": box.bg_color = color.lightened(0.15)
+			"pressed": box.bg_color = color.darkened(0.15)
+			"focus":
+				box.bg_color = Color(0, 0, 0, 0)
+				box.border_color = Color(1, 1, 1, 0.6)
+				box.set_border_width_all(2)
+			_: box.bg_color = color
+		btn.add_theme_stylebox_override(state, box)
+	btn.add_theme_font_size_override("font_size", 26)
+	btn.add_theme_color_override("font_color", Color.WHITE)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.custom_minimum_size = CARD_BUTTON_SIZE
 
 
 func _on_yes() -> void:
@@ -81,9 +178,9 @@ func _on_popup_hide() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_IN and sticky and not _answered and not visible:
-		popup_centered(POPUP_SIZE)
+		popup_centered(_size)
 
 
 func _process(_delta: float) -> void:
 	if sticky and not _answered and not visible and DisplayServer.window_is_focused():
-		popup_centered(POPUP_SIZE)
+		popup_centered(_size)
