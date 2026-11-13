@@ -94,6 +94,22 @@ theme_override_font_sizes/font_size = 24
 button_pressed = true
 text = "Show"
 
+[node name="ResponseTimeRow" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="ResponseTimeLabel" type="Label" parent="VBox/ResponseTimeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 24
+text = "Response Time"
+
+[node name="ResponseTimeOption" type="OptionButton" parent="VBox/ResponseTimeRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(240, 48)
+theme_override_font_sizes/font_size = 24
+
 [node name="HostTools" type="VBoxContainer" parent="VBox"]
 visible = false
 layout_mode = 2

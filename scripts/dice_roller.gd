@@ -40,7 +40,7 @@ func roll(die1: int, die2: int, duration_sec: float) -> void:
 	_shown = [randi_range(1, 6), randi_range(1, 6)]
 	_rolling = true
 	_visible_dice = true
-	_end_msec = Time.get_ticks_msec() + int(maxf(0.05, duration_sec) * 1000.0)
+	_end_msec = GameState.now_msec() + int(maxf(0.05, duration_sec) * 1000.0)
 	_next_shuffle_msec = 0
 	queue_redraw()
 
@@ -106,7 +106,7 @@ func clear_dice() -> void:
 func _process(_delta: float) -> void:
 	if not _rolling:
 		return
-	var now: int = Time.get_ticks_msec()
+	var now: int = GameState.now_msec()
 	if now >= _end_msec:
 		finish_now()
 		return

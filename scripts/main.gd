@@ -22,9 +22,9 @@ const BUY_PROMPT_CARD_SCALE: float = 0.72
 # snaps the piece back to its start; once everyone's unpaused the walk
 # starts over from the beginning. See _update_roll_walk().
 const DICE_TUMBLE_SEC: float = 0.5
+# ROLL_WALK_SEC is only the default: the Response Time setting picks the
+# real length (_walk_seconds()).
 const ROLL_WALK_SEC: float = 1.5
-# Any other move (a spell moving a player): one walk this long.
-const MOVE_DURATION_SEC: float = 1.5
 
 # The base Spell Deck (defined in expansions.gd, alongside the expansions a
 # game can add on top -- see GameState.expansions and _build_spell_deck()).
@@ -552,6 +552,24 @@ func _clear_wv_landing_highlight() -> void:
 	_wv_landing_index = -1
 
 
+# Response Time (Settings): how long a roll's walk -- and its reaction window
+# -- lasts after the dice. Online, everyone uses the host's (snapshot).
+var _response_time: float = ROLL_WALK_SEC
+var _net_response_time: float = -1.0
+
+
+func _on_response_time_changed(sec: float) -> void:
+	_response_time = sec
+
+
+func _walk_seconds() -> float:
+	if _tutorial_active:
+		return ROLL_WALK_SEC  # the tutorials are scripted around 1.5 s
+	if GameState.online and not GameState.is_authority() and _net_response_time >= 0.0:
+		return _net_response_time
+	return _response_time
+
+
 func _on_wizard_vision_changed(on: bool) -> void:
 	_wizard_vision_enabled = on
 	_update_wizard_vision()
@@ -746,6 +764,8 @@ func _ready() -> void:
 	pause_settings_menu.pause_option_changed.connect(_on_pause_option_changed)
 	_wizard_vision_enabled = pause_settings_menu.wizard_vision_on
 	pause_settings_menu.wizard_vision_changed.connect(_on_wizard_vision_changed)
+	_response_time = pause_settings_menu.load_response_time()
+	pause_settings_menu.response_time_changed.connect(_on_response_time_changed)
 	if GameState.online and not GameState.is_authority():
 		_net_report_pause_option.rpc_id(1, _pause_option)
 	pause_menu.set_settings_menu(pause_settings_menu)
@@ -1106,7 +1126,7 @@ func _tutorial_apply_current_step() -> void:
 	if _tutorial_expected_action in ["await_manastone", "await_adrenaline"]:
 		if _response_window_paused_by.size() > 0:
 			_response_window_paused_by[0] = false
-		_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
+		_window_deadline_msec = GameState.now_msec() + int(_response_window_seconds() * 1000.0)
 		_refresh_action_buttons()
 		_update_player_panels()
 	if _tutorial_expected_action == "opponent_turn":
@@ -2785,9 +2805,11 @@ func _response_window_seconds() -> float:
 		if GameState.tutorial_kind == "basic":
 			return 0.5  # no spells in this one -- the roll's walk sets the pace
 		return 5.0 if _tutorial_expected_action == "press_space" else 1.5
-	# Online, widen the window so a remote player's pause has time to reach
-	# the host before the countdown expires.
-	return RESPONSE_WINDOW_SECONDS * 2.0 if GameState.online else RESPONSE_WINDOW_SECONDS
+	# A spell's reaction window follows Response Time too, but never drops
+	# below half a second (a spell has no dice to buy that time). Online,
+	# widen it so a remote player's pause has time to reach the host.
+	var seconds: float = maxf(DICE_TUMBLE_SEC, _walk_seconds())
+	return seconds * 2.0 if GameState.online else seconds
 
 
 # trigger / trigger_seat drive auto-pause (Pause Options) -- "roll" from
@@ -2795,7 +2817,7 @@ func _response_window_seconds() -> float:
 # itself as each spell comes off the stack.
 func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> void:
 	var seconds: float = _response_window_seconds()
-	_window_deadline_msec = Time.get_ticks_msec() + int(seconds * 1000.0)
+	_window_deadline_msec = GameState.now_msec() + int(seconds * 1000.0)
 	# When a spell's resolution has stalled inside Raise Money mode -- it
 	# charged someone who can't pay and is now awaiting `debt_resolved` -- the
 	# loop that owns the stack is frozen and can't drain anything. A spell the
@@ -2834,13 +2856,13 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 			# Everyone has just unpaused: the walk starts over, and nothing
 			# closes before it's had its full time again.
 			if was_frozen and not frozen and _roll_in_flight:
-				_window_deadline_msec = maxi(_window_deadline_msec, Time.get_ticks_msec() + int(ROLL_WALK_SEC * 1000.0))
+				_window_deadline_msec = maxi(_window_deadline_msec, GameState.now_msec() + int(_walk_seconds() * 1000.0))
 			was_frozen = frozen
 			# A roll's window lasts until its walk arrives (and never less
 			# than the usual window -- the tutorial's longer ones, online's
 			# extra margin).
 			var walk_done: bool = _rw_done and _rw_seq == _roll_seq if _roll_in_flight else true
-			if not frozen and walk_done and Time.get_ticks_msec() >= _window_deadline_msec:
+			if not frozen and walk_done and GameState.now_msec() >= _window_deadline_msec:
 				break
 			await get_tree().process_frame
 
@@ -2871,7 +2893,7 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 		# resolves, kept so the player sees the response window a real game
 		# would give them here even though there's nothing left to do.
 		_response_window_open = true
-		_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
+		_window_deadline_msec = GameState.now_msec() + int(_response_window_seconds() * 1000.0)
 		_response_window_paused_by.fill(false)
 		var resolved_caster: int = int(resolved.get("caster_id", -1))
 		# A player who cast this spell while paused gets paused again now, so
@@ -3344,7 +3366,7 @@ func _update_roll_walk() -> void:
 	if not _roll_in_flight or current_player < 0 or current_player >= players.size():
 		return
 	var roller: Node2D = players[current_player]
-	var now: int = Time.get_ticks_msec()
+	var now: int = GameState.now_msec()
 	if _rw_seq != _roll_seq or _rw_player != current_player:
 		# A new roll: the dice tumble once, then the walk can start.
 		_rw_seq = _roll_seq
@@ -3364,7 +3386,8 @@ func _update_roll_walk() -> void:
 		return
 	if _rw_start_msec == -1:
 		_rw_start_msec = now
-	var t: float = clampf(float(now - _rw_start_msec) / (ROLL_WALK_SEC * 1000.0), 0.0, 1.0)
+	var walk_msec: float = _walk_seconds() * 1000.0
+	var t: float = 1.0 if walk_msec <= 0.0 else clampf(float(now - _rw_start_msec) / walk_msec, 0.0, 1.0)
 	_rw_done = t >= 1.0
 	# A roll that won't move anyone (cancelled, or a jail roll that isn't
 	# doubles) still takes the same time -- the piece just stays put.
@@ -3397,7 +3420,7 @@ func _snap_to_space(player: Node2D) -> void:
 
 
 # Walks a player's piece forward `steps` spaces from `from_space`, hopping
-# space to space so the whole walk takes MOVE_DURATION_SEC. (Only the
+# space to space so the whole walk takes _walk_seconds(). (Only the
 # piece moves -- current_space is already set by the caller.)
 func _walk_player(player: Node2D, from_space: int, steps: int) -> void:
 	if steps <= 0:
@@ -3440,10 +3463,10 @@ func _animate_walk(player: Node2D, from_space: int, steps: int) -> void:
 	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
 
 
-# The hop-by-hop tween for a walk (MOVE_DURATION_SEC in all), started now.
+# The hop-by-hop tween for a walk (_walk_seconds() in all), started now.
 func _walk_tween(player: Node2D, from_space: int, steps: int) -> Tween:
 	var offset: Vector2 = MARKER_OFFSETS[player.player_id]
-	var hop: float = MOVE_DURATION_SEC / float(steps)
+	var hop: float = maxf(0.0, _walk_seconds()) / float(steps)
 	var tween: Tween = create_tween()
 	var offset_now: Vector2 = MARKER_OFFSETS[player.player_id]
 	player.position = board.get_space_center(from_space) + offset_now
@@ -9462,6 +9485,7 @@ func _build_snapshot() -> Dictionary:
 		"debt_cancellable": _debt_cancellable,
 		"spell_stack": _spell_stack_names(),
 		"spell_target_marks": _all_stack_target_marks(),
+		"response_time": _response_time,
 		"spell_stack_targets": _spell_stack_targets(),
 		"awaiting_buy": _awaiting_buy_decision,
 		"casting_spell": _casting_spell,
@@ -9570,6 +9594,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_debt_cancellable = snap.get("debt_cancellable", false)
 	_net_spell_stack_names = snap.get("spell_stack", [])
 	_net_spell_target_marks = snap.get("spell_target_marks", [])
+	_net_response_time = float(snap.get("response_time", -1.0))
 	_net_spell_stack_targets = snap.get("spell_stack_targets", [])
 	_awaiting_buy_decision = snap.get("awaiting_buy", false)
 	_casting_spell = snap.get("casting_spell", false)
