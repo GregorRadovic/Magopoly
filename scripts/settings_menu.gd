@@ -24,12 +24,20 @@ signal unpause_player_requested
 signal pause_option_changed(option: int)
 # Fired when the Wizard Vision checkbox is toggled (main.gd reacts live).
 signal wizard_vision_changed(on: bool)
+# Fired when Response Time changes (main.gd reacts live).
+signal response_time_changed(seconds: float)
+
+# Response Time: how long a rolled piece walks -- and so how long everyone
+# has to pause and react -- after the dice's fixed 0.5 s tumble. In an
+# online game the host's choice is the one that counts.
+const RESPONSE_TIMES: Array[float] = [0.0, 0.5, 1.0, 1.5]
+const DEFAULT_RESPONSE_TIME: float = 1.5
 
 enum PauseOption { MANUAL, HALF_CONTROL, FULL_CONTROL }
 const PAUSE_OPTION_LABELS: Array[String] = ["Manual", "Half-Control", "Full Control"]
 
 const CONFIG_PATH: String = "user://settings.cfg"
-const POPUP_SIZE: Vector2i = Vector2i(560, 430)
+const POPUP_SIZE: Vector2i = Vector2i(560, 490)
 # Extra height when the Host tools section is showing.
 const HOST_TOOLS_EXTRA_HEIGHT: int = 270
 
@@ -51,6 +59,7 @@ const RESOLUTIONS: Array[Vector2i] = [
 @onready var music_volume_value: Label = $VBox/MusicVolumeRow/MusicVolumeValue
 @onready var pause_option_button: OptionButton = $VBox/PauseOptionsRow/PauseOptionButton
 @onready var wizard_vision_check: CheckBox = $VBox/WizardVisionRow/WizardVisionCheck
+@onready var response_time_option: OptionButton = $VBox/ResponseTimeRow/ResponseTimeOption
 @onready var host_tools: VBoxContainer = $VBox/HostTools
 @onready var kick_player_button: Button = $VBox/HostTools/KickPlayerButton
 @onready var take_player_turn_button: Button = $VBox/HostTools/TakePlayerTurnButton
@@ -84,6 +93,15 @@ func _ready() -> void:
 	wizard_vision_on = load_wizard_vision()
 	wizard_vision_check.button_pressed = wizard_vision_on
 	wizard_vision_check.toggled.connect(_on_wizard_vision_toggled)
+
+	for sec in RESPONSE_TIMES:
+		response_time_option.add_item((String.num(sec) + "s") if sec > 0.0 else "0s (dice only)")
+	response_time_option.selected = maxi(0, RESPONSE_TIMES.find(load_response_time()))
+	response_time_option.tooltip_text = "How long the piece walks after the dice land -- the time everyone has to pause and react. (The dice always take 0.5 s on top.)"
+	response_time_option.item_selected.connect(func(i: int) -> void:
+		var sec: float = RESPONSE_TIMES[i]
+		_save_response_time(sec)
+		response_time_changed.emit(sec))
 
 	host_tools.visible = false
 	kick_player_button.pressed.connect(func() -> void:
@@ -178,6 +196,21 @@ static func _save_pause_option(option: int) -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(CONFIG_PATH)
 	cfg.set_value("gameplay", "pause_option", option)
+	cfg.save(CONFIG_PATH)
+
+
+static func load_response_time() -> float:
+	var cfg := ConfigFile.new()
+	if cfg.load(CONFIG_PATH) != OK:
+		return DEFAULT_RESPONSE_TIME
+	var sec: float = float(cfg.get_value("gameplay", "response_time", DEFAULT_RESPONSE_TIME))
+	return sec if RESPONSE_TIMES.has(sec) else DEFAULT_RESPONSE_TIME
+
+
+static func _save_response_time(sec: float) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(CONFIG_PATH)
+	cfg.set_value("gameplay", "response_time", sec)
 	cfg.save(CONFIG_PATH)
 
 

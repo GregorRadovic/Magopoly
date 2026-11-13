@@ -16,10 +16,15 @@ const TAX_ICONS: Dictionary = {
 }
 # How big a property's card is drawn in the buy prompt.
 const BUY_PROMPT_CARD_SCALE: float = 0.72
-# Dice tumble this long, then settle; the piece then walks its roll over
-# MOVE_DURATION_SEC (however many spaces that is).
+# A roll: the dice tumble once for DICE_TUMBLE_SEC, then the piece walks its
+# roll over ROLL_WALK_SEC -- and that walk IS the reaction window: it ends
+# when the piece arrives. Any pause (or a spell being cast / resolving)
+# snaps the piece back to its start; once everyone's unpaused the walk
+# starts over from the beginning. See _update_roll_walk().
 const DICE_TUMBLE_SEC: float = 0.5
-const MOVE_DURATION_SEC: float = 1.0
+# ROLL_WALK_SEC is only the default: the Response Time setting picks the
+# real length (_walk_seconds()).
+const ROLL_WALK_SEC: float = 1.5
 
 # The base Spell Deck (defined in expansions.gd, alongside the expansions a
 # game can add on top -- see GameState.expansions and _build_spell_deck()).
@@ -315,6 +320,8 @@ var player_row_separators: Array[HSeparator] = []
 
 var players: Array[Node2D] = []
 var current_player: int = 0
+# Computer players' spell strategy (casting, reacting, answering prompts).
+var ai_spells: AiSpells = AiSpells.new(self)
 # Set once the current player has rolled (and that roll's landing has fully
 # resolved) for a turn that isn't earning a doubles-driven extra roll. A
 # turn doesn't end just because you've rolled -- houses, unmortgaging,
@@ -478,47 +485,6 @@ func _update_wizard_vision() -> void:
 
 
 # --- Rolling token animation (purely cosmetic) ------------------------------
-# While a roll is in flight the roller's token slides along the Wizard Vision
-# route from its start tile to where the roll will put it, taking exactly one
-# response window (_response_window_seconds()) whatever the distance. Any
-# pause snaps it back to the start; once everyone unpauses it sets off again
-# (and _ensure_response_window() gives it a full window to arrive). The real
-# move in _move_player() then places the token for good. Runs on clients too,
-# from their mirrored roll / pause state.
-var _token_anim_start_msec: int = -1
-var _token_anim_seq: int = -1
-var _token_anim_player: int = -1
-
-
-func _animate_roll_token() -> void:
-	if not _roll_in_flight or current_player < 0 or current_player >= players.size():
-		_token_anim_player = -1
-		return
-	var roller: Node2D = players[current_player]
-	# A jail roll that isn't doubles goes nowhere, and neither does a roll
-	# cancelled by being sent to Jail mid-roll.
-	if _roll_cancelled or (roller.in_jail and not _dice_are_doubles()):
-		return
-	var start_spot: Vector2 = board.get_space_center(roller.current_space) + MARKER_OFFSETS[roller.player_id]
-	var now: int = Time.get_ticks_msec()
-	if _token_anim_seq != _roll_seq or _token_anim_player != current_player:
-		_token_anim_seq = _roll_seq
-		_token_anim_player = current_player
-		_token_anim_start_msec = now
-	if _response_window_paused_by.has(true) or _casting_spell:
-		roller.position = start_spot
-		_token_anim_start_msec = -1
-		return
-	if _token_anim_start_msec == -1:
-		_token_anim_start_msec = now
-	var steps: int = _apply_pre_move_landmarks(roller, _current_roll, true)
-	if steps <= 0:
-		roller.position = start_spot
-		return
-	var t: float = clampf(float(now - _token_anim_start_msec) / (_response_window_seconds() * 1000.0), 0.0, 1.0)
-	roller.position = _point_along(_wizard_vision_path(roller, steps), t)
-
-
 # The point `t` (0..1) of the way along `route`, by distance.
 func _point_along(route: PackedVector2Array, t: float) -> Vector2:
 	if route.size() == 1:
@@ -547,8 +513,8 @@ const WV_LAP_OFFSET: float = 14.0
 func _wizard_vision_path(player: Node2D, steps: int) -> PackedVector2Array:
 	var start: int = player.current_space
 	var marker: Vector2 = MARKER_OFFSETS[player.player_id]
-	# Anchored on the start tile rather than the token itself, which slides
-	# along this route while the roll is in flight (_animate_roll_token()).
+	# Anchored on the start tile rather than the token itself, which walks
+	# this route while the roll is in flight (_update_roll_walk()).
 	var route := PackedVector2Array([board.get_space_center(start) + marker])
 	for s in range(1, steps + 1):
 		var index: int = (start + s) % board.TOTAL_SPACES
@@ -586,6 +552,24 @@ func _clear_wv_landing_highlight() -> void:
 	if _wv_landing_index != -1 and _wv_landing_index < board.spaces.size():
 		board.spaces[_wv_landing_index].set_landing_highlight(false)
 	_wv_landing_index = -1
+
+
+# Response Time (Settings): how long a roll's walk -- and its reaction window
+# -- lasts after the dice. Online, everyone uses the host's (snapshot).
+var _response_time: float = ROLL_WALK_SEC
+var _net_response_time: float = -1.0
+
+
+func _on_response_time_changed(sec: float) -> void:
+	_response_time = sec
+
+
+func _walk_seconds() -> float:
+	if _tutorial_active:
+		return ROLL_WALK_SEC  # the tutorials are scripted around 1.5 s
+	if GameState.online and not GameState.is_authority() and _net_response_time >= 0.0:
+		return _net_response_time
+	return _response_time
 
 
 func _on_wizard_vision_changed(on: bool) -> void:
@@ -754,6 +738,7 @@ func _ready() -> void:
 	$UI/LogPanel.offset_top = board.BOARD_SIZE + 12.0
 	_build_player_rows()
 	_build_trader_headers()
+	_build_unowned_deck()
 	_build_spell_deck()
 	_spawn_players()
 	for p in players:
@@ -781,6 +766,8 @@ func _ready() -> void:
 	pause_settings_menu.pause_option_changed.connect(_on_pause_option_changed)
 	_wizard_vision_enabled = pause_settings_menu.wizard_vision_on
 	pause_settings_menu.wizard_vision_changed.connect(_on_wizard_vision_changed)
+	_response_time = pause_settings_menu.load_response_time()
+	pause_settings_menu.response_time_changed.connect(_on_response_time_changed)
 	if GameState.online and not GameState.is_authority():
 		_net_report_pause_option.rpc_id(1, _pause_option)
 	pause_menu.set_settings_menu(pause_settings_menu)
@@ -855,6 +842,30 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.keycode == KEY_B and not buy_house_unmortgage_button.disabled:
 		_on_buy_house_unmortgage_pressed()
 		return
+
+	# R presses Roll / End Turn and T opens a trade, like clicking them. Y / N
+	# answer the trade being negotiated (Offer / Accept, Decline) -- and a
+	# Yes / No prompt, if one is up without having taken the keyboard itself
+	# (confirm_prompt's own buttons carry Y / N shortcuts too).
+	if event.keycode == KEY_R and not roll_button.disabled:
+		_on_roll_pressed()
+		return
+	if event.keycode == KEY_T and not trade_button.disabled and not _trading:
+		_on_trade_pressed()
+		return
+	if event.keycode in [KEY_Y, KEY_N]:
+		var yes: bool = event.keycode == KEY_Y
+		if confirm_prompt.visible:
+			if yes:
+				confirm_prompt._on_yes()
+			else:
+				confirm_prompt._on_no()
+			return
+		if _trading and trade_display.visible:
+			var button: Button = offer_trade_button if yes else decline_trade_button
+			if not button.disabled:
+				button.pressed.emit()
+			return
 
 	# Enter presses the Roll / End Turn button. Space is deliberately NOT bound
 	# to it (roll_button has focus_mode NONE) -- Space is the response-window
@@ -1117,7 +1128,7 @@ func _tutorial_apply_current_step() -> void:
 	if _tutorial_expected_action in ["await_manastone", "await_adrenaline"]:
 		if _response_window_paused_by.size() > 0:
 			_response_window_paused_by[0] = false
-		_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
+		_window_deadline_msec = GameState.now_msec() + int(_response_window_seconds() * 1000.0)
 		_refresh_action_buttons()
 		_update_player_panels()
 	if _tutorial_expected_action == "opponent_turn":
@@ -1541,6 +1552,195 @@ func _build_player_rows() -> void:
 		player_properties_flows.append(row.get_node("AssetsRow/PropertiesFlow"))
 		player_spells_flows.append(row.get_node("AssetsRow/SpellsFlow"))
 		player_attunement_flows.append(row.get_node("AssetsRow/AttunementFlow"))
+
+
+# Makes an action-panel button stand out (amber fill, gold border), or puts
+# it back to the theme's look.
+func _set_button_highlight(button: Button, on: bool) -> void:
+	if not on:
+		for state in ["normal", "hover", "pressed"]:
+			button.remove_theme_stylebox_override(state)
+		button.remove_theme_color_override("font_color")
+		button.remove_theme_color_override("font_hover_color")
+		return
+	for state in ["normal", "hover", "pressed"]:
+		var box := StyleBoxFlat.new()
+		box.bg_color = Color(0.85, 0.55, 0.1) if state == "normal" else (Color(0.95, 0.65, 0.15) if state == "hover" else Color(0.7, 0.45, 0.08))
+		box.border_color = Color(1.0, 0.85, 0.35)
+		box.set_border_width_all(3)
+		box.set_corner_radius_all(6)
+		button.add_theme_stylebox_override(state, box)
+	button.add_theme_color_override("font_color", Color.WHITE)
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
+
+
+# Gold frame on a property card in a player's row while it's offered in the
+# trade being negotiated.
+func _add_trade_outline(card: Control) -> void:
+	var frame := Panel.new()
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
+	frame.offset_left = -3
+	frame.offset_top = -3
+	frame.offset_right = 3
+	frame.offset_bottom = 3
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0, 0, 0, 0)
+	style.border_color = Color(1.0, 0.82, 0.25)
+	style.set_border_width_all(3)
+	style.set_corner_radius_all(3)
+	frame.add_theme_stylebox_override("panel", style)
+	card.add_child(frame)
+
+
+# --- Unowned Properties deck ---------------------------------------------
+# A little card stack to the left of the Free Parking total showing how many
+# properties the bank still has; clicking it lays them all out as cards
+# (board order, railroads next, utilities last). Clicking one zooms it.
+const UNOWNED_DECK_SIZE: Vector2 = Vector2(74, 96)
+const UNOWNED_CARD_SCALE: float = 0.36
+var _unowned_deck_count: Label
+var _unowned_popup: PopupPanel
+var _unowned_title: Label
+var _unowned_flow: HFlowContainer
+
+
+func _build_unowned_deck() -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 22)
+	var parent: Node = free_parking_label.get_parent()
+	parent.add_child(row)
+	parent.move_child(row, free_parking_label.get_index())
+	parent.remove_child(free_parking_label)
+
+	var deck := Button.new()
+	deck.name = "UnownedDeck"
+	deck.flat = true
+	deck.custom_minimum_size = UNOWNED_DECK_SIZE + Vector2(8, 8)
+	deck.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	deck.tooltip_text = "Unowned properties -- click to look through them"
+	deck.focus_mode = Control.FOCUS_NONE
+	deck.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	deck.pressed.connect(_open_unowned_deck)
+	# Two cards peeking out behind the top one make it read as a deck.
+	for k in [2, 1, 0]:
+		var card := Panel.new()
+		card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.97, 0.96, 0.92) if k == 0 else Color(0.82, 0.81, 0.77)
+		style.border_color = Color(0.25, 0.25, 0.28)
+		style.set_border_width_all(2)
+		style.set_corner_radius_all(6)
+		card.add_theme_stylebox_override("panel", style)
+		card.position = Vector2(k * 4, 8 - k * 4)
+		card.size = UNOWNED_DECK_SIZE
+		deck.add_child(card)
+		if k == 0:
+			var vbox := VBoxContainer.new()
+			vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+			vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+			vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			card.add_child(vbox)
+			var caption := Label.new()
+			caption.text = "Unowned"
+			caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			caption.add_theme_font_size_override("font_size", 13)
+			caption.add_theme_color_override("font_color", Color(0.3, 0.3, 0.33))
+			vbox.add_child(caption)
+			_unowned_deck_count = Label.new()
+			_unowned_deck_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			_unowned_deck_count.add_theme_font_size_override("font_size", 34)
+			_unowned_deck_count.add_theme_color_override("font_color", Color(0.1, 0.1, 0.12))
+			vbox.add_child(_unowned_deck_count)
+	row.add_child(deck)
+	row.add_child(free_parking_label)
+
+	_unowned_popup = PopupPanel.new()
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.13, 0.13, 0.15, 0.98)
+	bg.border_color = Color(0.35, 0.36, 0.42)
+	bg.set_border_width_all(2)
+	bg.set_corner_radius_all(10)
+	bg.set_content_margin_all(20)
+	_unowned_popup.add_theme_stylebox_override("panel", bg)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 14)
+	_unowned_popup.add_child(box)
+	_unowned_title = Label.new()
+	_unowned_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_unowned_title.add_theme_font_size_override("font_size", 28)
+	box.add_child(_unowned_title)
+	var hint := Label.new()
+	hint.text = "Click a card to see it full size."
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 16)
+	hint.add_theme_color_override("font_color", Color(0.65, 0.7, 0.8))
+	box.add_child(hint)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(scroll)
+	_unowned_flow = HFlowContainer.new()
+	_unowned_flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_unowned_flow.alignment = FlowContainer.ALIGNMENT_CENTER
+	_unowned_flow.add_theme_constant_override("h_separation", 12)
+	_unowned_flow.add_theme_constant_override("v_separation", 12)
+	scroll.add_child(_unowned_flow)
+	$UI.add_child(_unowned_popup)
+
+
+# Every property nobody owns: board order, then railroads, then utilities.
+func _unowned_properties() -> Array[int]:
+	var streets: Array[int] = []
+	var railroads: Array[int] = []
+	var utilities: Array[int] = []
+	for i in board.TOTAL_SPACES:
+		var info: Dictionary = board.get_space_info(i)
+		if info.get("type", "") != "property" or board.spaces[i].owner_id != -1:
+			continue
+		match info.get("color", ""):
+			"railroad": railroads.append(i)
+			"utility": utilities.append(i)
+			_: streets.append(i)
+	return streets + railroads + utilities
+
+
+func _refresh_unowned_deck() -> void:
+	if _unowned_deck_count:
+		_unowned_deck_count.text = str(_unowned_properties().size())
+
+
+func _open_unowned_deck() -> void:
+	for child in _unowned_flow.get_children():
+		_unowned_flow.remove_child(child)
+		child.queue_free()
+	var spaces: Array[int] = _unowned_properties()
+	_unowned_title.text = "Unowned Properties (%d)" % spaces.size()
+	if spaces.is_empty():
+		var none := Label.new()
+		none.text = "The bank has nothing left -- every property is owned."
+		_unowned_flow.add_child(none)
+	for space_index in spaces:
+		var view: Control = _space_card_view_scaled(space_index, UNOWNED_CARD_SCALE)
+		if view == null:
+			continue
+		# A flat button over the card catches the click.
+		var hit := Button.new()
+		hit.flat = true
+		hit.focus_mode = Control.FOCUS_NONE
+		hit.set_anchors_preset(Control.PRESET_FULL_RECT)
+		hit.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		hit.tooltip_text = board.get_space_info(space_index).get("name", "")
+		hit.pressed.connect(_show_property_details.bind(space_index))
+		view.add_child(hit)
+		_unowned_flow.add_child(view)
+	var vp: Vector2 = Vector2(get_viewport().get_visible_rect().size)
+	var card: Vector2 = Vector2(440, 600) * UNOWNED_CARD_SCALE
+	var cols: int = mini(8, maxi(1, spaces.size()))
+	var rows: int = maxi(1, ceili(float(spaces.size()) / cols))
+	var w: float = cols * card.x + (cols - 1) * 12 + 60
+	var h: float = minf(vp.y * 0.88, rows * card.y + (rows - 1) * 12 + 140)
+	_unowned_popup.popup_centered(Vector2i(roundi(w), roundi(h)))
 
 
 # Puts each trade column's header label behind its player's icon:
@@ -1974,6 +2174,9 @@ func _advance_turn() -> void:
 # (_net_ai_takeover_watchdog) can tell "AI turn in progress" from "AI seat
 # stranded on the End Turn step after a disconnect".
 var _ai_turn_running: bool = false
+# Set whenever a reaction window opens or something new lands in one (a roll,
+# a cast, a spell resolving): Computer players get a fresh look at it.
+var _ai_react_dirty: bool = false
 
 
 func _run_ai_turn() -> void:
@@ -1999,6 +2202,12 @@ func _run_ai_turn_body() -> void:
 			return
 		_refresh_action_buttons()
 		await get_tree().create_timer(0.6).timeout
+		# Spells first: anything worth casting before the dice (movement
+		# spells like Unstable Portal only work now) -- scripts/ai_spells.gd.
+		if not players[ai_index].is_placeholder_ai:
+			await ai_spells.play_turn_spells(players[ai_index], "pre_roll")
+			if current_player != ai_index or players[ai_index].is_bankrupt or _returning_to_menu or not is_inside_tree():
+				return
 		var die1: int = randi_range(1, 6)
 		var die2: int = randi_range(1, 6)
 		await _perform_roll(die1, die2)
@@ -2006,6 +2215,10 @@ func _run_ai_turn_body() -> void:
 			return
 		if _awaiting_end_turn:
 			await get_tree().create_timer(0.6).timeout
+			if not players[ai_index].is_placeholder_ai:
+				await ai_spells.play_turn_spells(players[ai_index], "post_roll")
+				if current_player != ai_index or players[ai_index].is_bankrupt or _returning_to_menu or not is_inside_tree():
+					return
 			await _ai_run_end_of_turn_checks(players[ai_index])
 			if current_player != ai_index or players[ai_index].is_bankrupt:
 				return
@@ -2060,14 +2273,19 @@ func _ai_mortgage_check(player: Node2D) -> void:
 			var space: Node2D = board.spaces[space_index]
 			if not space.is_mortgaged:
 				continue
-			var price: int = board.get_space_info(space_index).get("price", 0)
-			if player.money < _unmortgage_value(price):
+			# Terminus (space 0) has no "price" of its own -- read it the way
+			# _unmortgage_property() does, or it looks free and the loop
+			# retries it forever.
+			if player.money < _unmortgage_value(_terminus_aware_price(space_index)):
 				continue
 			candidates.append(space_index)
 		if candidates.is_empty():
 			return
-		candidates.sort_custom(func(a, b): return board.get_space_info(a).get("price", 0) > board.get_space_info(b).get("price", 0))
+		candidates.sort_custom(func(a, b): return _terminus_aware_price(a) > _terminus_aware_price(b))
+		var before: int = player.money
 		_unmortgage_property(candidates[0])
+		if player.money == before:
+			return  # refused -- don't spin on it
 
 
 func _on_admin_pressed() -> void:
@@ -2425,7 +2643,10 @@ func _ai_mortgage_properties(player: Node2D, needed: int) -> void:
 		if candidates.is_empty():
 			return
 		candidates.sort_custom(func(a, b): return _terminus_aware_price(a) > _terminus_aware_price(b))
+		var before: int = player.money
 		_mortgage_property(candidates[0])
+		if player.money == before:
+			return  # refused -- don't spin on it
 
 
 # Sells one house at a time from whichever of the AI's properties currently
@@ -2445,7 +2666,10 @@ func _ai_sell_houses(player: Node2D, needed: int) -> void:
 		if candidates.is_empty():
 			return
 		candidates.sort_custom(func(a, b): return board.get_space_info(a).get("price", 0) > board.get_space_info(b).get("price", 0))
+		var before: int = player.money
 		_sell_house(candidates[0])
+		if player.money == before:
+			return  # refused -- don't spin on it
 
 
 # The rent a property would charge right now if someone landed on it, given
@@ -2574,7 +2798,10 @@ func _ai_house_check(player: Node2D) -> void:
 		var option: int = _ai_best_house_option(player, worst_case)
 		if option == -1:
 			return
+		var before: int = board.spaces[option].house_count
 		_buy_house(option)
+		if board.spaces[option].house_count == before:
+			return  # refused -- don't spin on it
 
 
 # The two Instant Timings implemented so far both open this same shared
@@ -2605,11 +2832,13 @@ func _response_window_seconds() -> float:
 		# A generous window for the moments the player has to react to; snappier
 		# for the tutorial's own auto-resolutions (Migraine, Manastone, etc.).
 		if GameState.tutorial_kind == "basic":
-			return 0.6  # no spells in this one -- nothing to react with
+			return 0.5  # no spells in this one -- the roll's walk sets the pace
 		return 5.0 if _tutorial_expected_action == "press_space" else 1.5
-	# Online, widen the window so a remote player's pause has time to reach
-	# the host before the countdown expires.
-	return RESPONSE_WINDOW_SECONDS * 2.0 if GameState.online else RESPONSE_WINDOW_SECONDS
+	# A spell's reaction window follows Response Time too, but never drops
+	# below half a second (a spell has no dice to buy that time). Online,
+	# widen it so a remote player's pause has time to reach the host.
+	var seconds: float = maxf(DICE_TUMBLE_SEC, _walk_seconds())
+	return seconds * 2.0 if GameState.online else seconds
 
 
 # trigger / trigger_seat drive auto-pause (Pause Options) -- "roll" from
@@ -2617,7 +2846,7 @@ func _response_window_seconds() -> float:
 # itself as each spell comes off the stack.
 func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> void:
 	var seconds: float = _response_window_seconds()
-	_window_deadline_msec = Time.get_ticks_msec() + int(seconds * 1000.0)
+	_window_deadline_msec = GameState.now_msec() + int(seconds * 1000.0)
 	# When a spell's resolution has stalled inside Raise Money mode -- it
 	# charged someone who can't pay and is now awaiting `debt_resolved` -- the
 	# loop that owns the stack is frozen and can't drain anything. A spell the
@@ -2628,11 +2857,13 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 	if (_response_window_open or _resolving_stack) and not drain_only:
 		# A cast landing in a window that's already running still auto-pauses.
 		_apply_auto_pause(trigger, trigger_seat)
+		_ai_react_dirty = true
 		return
 	_response_window_open = true
 	_response_window_paused_by.resize(players.size())
 	_response_window_paused_by.fill(false)
 	_apply_auto_pause(trigger, trigger_seat)
+	_ai_react_dirty = true
 	_refresh_action_buttons()
 	dice_label.text += "\n(Press Space or your player number within %ds to pause from that player's perspective and react with an Instant spell.)" % int(seconds)
 
@@ -2653,13 +2884,24 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 			if _returning_to_menu or not is_inside_tree():
 				return
 			var frozen: bool = _response_window_paused_by.has(true) or _casting_spell
-			# Everyone has just unpaused a roll's window: the rolling token
-			# starts its journey over (_animate_roll_token()), so give it the
-			# full window to get there before the move happens.
+			# Computer players size up what's happening (the roll in flight,
+			# the spell on top of the stack) and may pause to answer it with
+			# an Instant spell -- scripts/ai_spells.gd. Started, not awaited:
+			# its cast sets _casting_spell, which holds this window open.
+			if not frozen and _ai_react_dirty:
+				_ai_react_dirty = false
+				ai_spells.consider_reactions()
+				frozen = _response_window_paused_by.has(true) or _casting_spell
+			# Everyone has just unpaused: the walk starts over, and nothing
+			# closes before it's had its full time again.
 			if was_frozen and not frozen and _roll_in_flight:
-				_window_deadline_msec = maxi(_window_deadline_msec, Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0))
+				_window_deadline_msec = maxi(_window_deadline_msec, GameState.now_msec() + int(_walk_seconds() * 1000.0))
 			was_frozen = frozen
-			if not frozen and Time.get_ticks_msec() >= _window_deadline_msec:
+			# A roll's window lasts until its walk arrives (and never less
+			# than the usual window -- the tutorial's longer ones, online's
+			# extra margin).
+			var walk_done: bool = _rw_done and _rw_seq == _roll_seq if _roll_in_flight else true
+			if not frozen and walk_done and GameState.now_msec() >= _window_deadline_msec:
 				break
 			await get_tree().process_frame
 
@@ -2690,8 +2932,9 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 		# resolves, kept so the player sees the response window a real game
 		# would give them here even though there's nothing left to do.
 		_response_window_open = true
-		_window_deadline_msec = Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0)
+		_window_deadline_msec = GameState.now_msec() + int(_response_window_seconds() * 1000.0)
 		_response_window_paused_by.fill(false)
+		_ai_react_dirty = true
 		var resolved_caster: int = int(resolved.get("caster_id", -1))
 		# A player who cast this spell while paused gets paused again now, so
 		# they keep reacting -- for every Pause Options setting.
@@ -2872,8 +3115,7 @@ func _toggle_pause_for_player(player_index: int) -> void:
 		return
 	_response_window_paused_by[player_index] = not _response_window_paused_by[player_index]
 	if _response_window_paused_by[player_index]:
-		# Pausing during the tumble skips straight to the real faces.
-		dice_roller.finish_now()
+		# (The dice finish their tumble regardless -- see _update_roll_walk.)
 		dice_label.text += "\nPaused from %s's perspective -- press %d to resume." % [PLAYER_NAMES[player_index], player_index + 1]
 	_refresh_action_buttons()
 	_update_player_panels()
@@ -2942,7 +3184,6 @@ func _apply_auto_pause(event: String, trigger_seat: int, force_seat: int = -1) -
 		_response_window_paused_by[seat] = true
 		paused_names.append(PLAYER_NAMES[seat])
 	if not paused_names.is_empty():
-		dice_roller.finish_now()
 		dice_label.text += "\nAuto-paused: %s (press Space / your number to resume)." % ", ".join(paused_names)
 		_refresh_action_buttons()
 		_update_player_panels()
@@ -3051,8 +3292,14 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# Tutorial: still on "press_space" once the window has closed = the player
 	# never paused. Rewind and let them roll again.
 	if _tutorial_active and _tutorial_expected_action == "press_space":
+		_snap_to_space(player)
 		_tutorial_rewind_roll()
 		return
+	# The piece is standing wherever the walk left it; anything other than
+	# the normal move (a cancelled roll, a jail roll that isn't doubles) puts
+	# it back on its real space.
+	if not _roll_walk_arrived(player, _roll_walk_steps(player)) or _roll_cancelled or (player.in_jail and not _dice_are_doubles()):
+		_snap_to_space(player)
 
 	# Belt-and-suspenders: _prompt_slot is only ever meant to be set mid
 	# _begin_spell_cast (routing that caster's own level/target pickers).
@@ -3090,12 +3337,19 @@ func _perform_roll(die1: int, die2: int) -> void:
 			player.jail_turns_left -= 1
 			if player.jail_turns_left <= 0:
 				var jail_fee: int = 50
-				player.money -= jail_fee
-				free_parking_amount += jail_fee
-				_release_from_jail(player)
-				dice_label.text += "\nSentence served, paid $%d to Free Parking." % jail_fee
-				_log_payment(current_player, jail_fee, "Free Parking")
-				_log("%s left Jail." % PLAYER_NAMES[current_player])
+				if jail_fee > player.money:
+					# Can't cover the fine: raise it like any other debt
+					# (sell / mortgage / trade), or go bankrupt.
+					dice_label.text += "\nSentence served. Owes $%d to leave Jail." % jail_fee
+					await _collect_debt(player, jail_fee, null)
+				else:
+					player.money -= jail_fee
+					free_parking_amount += jail_fee
+					dice_label.text += "\nSentence served, paid $%d to Free Parking." % jail_fee
+					_log_payment(current_player, jail_fee, "Free Parking")
+				if not player.is_bankrupt:
+					_release_from_jail(player)
+					_log("%s left Jail." % PLAYER_NAMES[current_player])
 			else:
 				dice_label.text += "\nStill in Jail. %d turn(s) left." % player.jail_turns_left
 	elif _jail_released_mid_roll:
@@ -3139,8 +3393,81 @@ func _perform_roll(die1: int, die2: int) -> void:
 # doubles-triggered extra turn. Debt collection that ends in the player
 # successfully paying off what they owed does NOT cancel the extra turn --
 # they're still in the game, so a rolled double still earns another go.
+# The roll walk (see ROLL_WALK_SEC). Driven every frame from _process() on
+# host and clients alike, purely from the shared roll / pause state, so
+# everyone sees the same walk.
+var _rw_seq: int = -1
+var _rw_player: int = -1
+var _rw_from: int = -1
+var _rw_steps: int = 0
+var _rw_dice_end_msec: int = 0
+var _rw_start_msec: int = -1
+var _rw_done: bool = false
+
+
+func _roll_walk_frozen() -> bool:
+	return _response_window_paused_by.has(true) or _casting_spell or _resolving_stack
+
+
+func _update_roll_walk() -> void:
+	if not _roll_in_flight or current_player < 0 or current_player >= players.size():
+		return
+	var roller: Node2D = players[current_player]
+	var now: int = GameState.now_msec()
+	if _rw_seq != _roll_seq or _rw_player != current_player:
+		# A new roll: the dice tumble once, then the walk can start.
+		_rw_seq = _roll_seq
+		_rw_player = current_player
+		_rw_dice_end_msec = now + int(DICE_TUMBLE_SEC * 1000.0)
+		_rw_start_msec = -1
+		_rw_done = false
+	_rw_from = roller.current_space
+	var start_spot: Vector2 = board.get_space_center(roller.current_space) + MARKER_OFFSETS[roller.player_id]
+	# Still tumbling, or someone's paused: wait on the start tile. (A pause
+	# during the tumble lets the dice finish first; the walk just doesn't
+	# start.)
+	if now < _rw_dice_end_msec or _roll_walk_frozen():
+		_rw_start_msec = -1
+		_rw_done = false
+		roller.position = start_spot
+		return
+	if _rw_start_msec == -1:
+		_rw_start_msec = now
+	var walk_msec: float = _walk_seconds() * 1000.0
+	var t: float = 1.0 if walk_msec <= 0.0 else clampf(float(now - _rw_start_msec) / walk_msec, 0.0, 1.0)
+	_rw_done = t >= 1.0
+	# A roll that won't move anyone (cancelled, or a jail roll that isn't
+	# doubles) still takes the same time -- the piece just stays put.
+	_rw_steps = _roll_walk_steps(roller)
+	if _roll_cancelled or (roller.in_jail and not _dice_are_doubles()) or _rw_steps <= 0:
+		roller.position = start_spot
+		return
+	roller.position = _point_along(_roll_walk_route(roller, _rw_steps), t)
+
+
+# The walk has finished and showed exactly this move.
+func _roll_walk_arrived(player: Node2D, steps: int) -> bool:
+	return _rw_done and _rw_seq == _roll_seq and _rw_player == player.player_id \
+		and _rw_from == player.current_space and _rw_steps == steps
+
+
+# How far the roll walk goes -- the roll as it stands, after any landmark
+# on the way (Ensnaring Roots...) has had its say.
+func _roll_walk_steps(roller: Node2D) -> int:
+	return _apply_pre_move_landmarks(roller, _current_roll, true)
+
+
+# The walk follows the Wizard Vision route (laps pulled inward and all).
+func _roll_walk_route(player: Node2D, steps: int) -> PackedVector2Array:
+	return _wizard_vision_path(player, steps)
+
+
+func _snap_to_space(player: Node2D) -> void:
+	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+
+
 # Walks a player's piece forward `steps` spaces from `from_space`, hopping
-# space to space so the whole walk takes MOVE_DURATION_SEC. (Only the
+# space to space so the whole walk takes _walk_seconds(). (Only the
 # piece moves -- current_space is already set by the caller.)
 func _walk_player(player: Node2D, from_space: int, steps: int) -> void:
 	if steps <= 0:
@@ -3152,17 +3479,41 @@ func _walk_player(player: Node2D, from_space: int, steps: int) -> void:
 	_walks.erase(player.player_id)
 
 
-# Client: plays a walk the host is doing (from the snapshot's "walk").
-func _client_walk(player: Node2D, from_space: int, steps: int) -> void:
-	_walks[player.player_id] = [from_space, steps]
-	await _animate_walk(player, from_space, steps)
-	_walks.erase(player.player_id)
-	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+# Client: mirrors the host's walks from the snapshot's "walk" entry -- plays
+# each new one, holds the piece where it ended while the host still lists it
+# (an early walk waiting on the reaction window), and puts the piece back on
+# its real space once the host drops it (finished, or snapped back).
+var _client_walk_key: Dictionary = {}
+var _client_tweens: Dictionary = {}
+
+
+func _client_apply_walk(player: Node2D, walk: Array) -> void:
+	var id: int = player.player_id
+	if walk.size() == 2:
+		if _client_walk_key.get(id, []) != walk:
+			if _client_tweens.has(id) and _client_tweens[id].is_valid():
+				_client_tweens[id].kill()
+			_client_walk_key[id] = walk.duplicate()
+			_client_tweens[id] = _walk_tween(player, int(walk[0]), int(walk[1]))
+		return
+	if _client_walk_key.has(id):
+		if _client_tweens.has(id) and _client_tweens[id].is_valid():
+			_client_tweens[id].kill()
+		_client_walk_key.erase(id)
+		_client_tweens.erase(id)
+	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[id]
 
 
 func _animate_walk(player: Node2D, from_space: int, steps: int) -> void:
+	var tween: Tween = _walk_tween(player, from_space, steps)
+	await tween.finished
+	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+
+
+# The hop-by-hop tween for a walk (_walk_seconds() in all), started now.
+func _walk_tween(player: Node2D, from_space: int, steps: int) -> Tween:
 	var offset: Vector2 = MARKER_OFFSETS[player.player_id]
-	var hop: float = MOVE_DURATION_SEC / float(steps)
+	var hop: float = maxf(0.0, _walk_seconds()) / float(steps)
 	var tween: Tween = create_tween()
 	var offset_now: Vector2 = MARKER_OFFSETS[player.player_id]
 	player.position = board.get_space_center(from_space) + offset_now
@@ -3170,8 +3521,7 @@ func _animate_walk(player: Node2D, from_space: int, steps: int) -> void:
 		var space: int = (from_space + i) % board.TOTAL_SPACES
 		tween.tween_property(player, "position", board.get_space_center(space) + offset, hop) \
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	await tween.finished
-	player.position = board.get_space_center(player.current_space) + offset
+	return tween
 
 
 # Players whose piece is walking right now: id -> [from_space, steps].
@@ -3221,8 +3571,14 @@ func _move_and_land(player: Node2D, roll: int) -> bool:
 		return true
 
 	var from_space: int = player.current_space
+	var walked_already: bool = _roll_walk_arrived(player, roll)
 	player.current_space = new_space_raw % board.TOTAL_SPACES
-	await _walk_player(player, from_space, roll)
+	if walked_already:
+		# The reaction-window walk already brought the piece here.
+		_rw_player = -1
+		player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
+	else:
+		await _walk_player(player, from_space, roll)
 	if _returning_to_menu or not is_inside_tree():
 		return true
 	_log("%s landed on %s." % [PLAYER_NAMES[player.player_id], _property_name(player.current_space)])
@@ -3479,14 +3835,16 @@ func _visit_magic_forest(player: Node2D) -> void:
 
 	var hand_index: int
 	if player.is_ai:
-		hand_index = randi_range(0, player.spell_hand.size() - 1)
+		# Its least useful card (scripts/ai_spells.gd's card worth).
+		hand_index = ai_spells.pick_discard(player)
 	else:
 		var entries: Array = []
 		for i in player.spell_hand.size():
 			var spell_name: String = player.spell_hand[i]
 			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 			entries.append({"index": i, "name": spell_name, "icon": load(spell_info.get("icon", ""))})
-		_cp_open("Magic Forest: Draw 2 cards, then discard a card.", entries, true, "", -2, true, hand_before)
+		# "Discard" is bold and 1.5x the size of the rest (32 -> 48).
+		_cp_open("Magic Forest: Draw 2 cards, then choose a card to [b][font_size=48]Discard[/font_size][/b].", entries, true, "", -2, true, hand_before)
 		hand_index = await _cp_result()
 
 	var discarded: String = player.spell_hand[hand_index]
@@ -3502,7 +3860,6 @@ func _visit_magic_forest(player: Node2D) -> void:
 # Spell Shop: look at the top 4 cards of the deck; pick one for $100 (to
 # Free Parking) or Skip. One of the shown spells, chosen at random, is on
 # sale for $50 instead. Either way, whatever isn't taken shuffles back in.
-# An AI always skips for now (no purchasing strategy yet).
 func _visit_spell_shop(player: Node2D) -> void:
 	var top_cards: Array[String] = []
 	for i in 4:
@@ -3519,7 +3876,12 @@ func _visit_spell_shop(player: Node2D) -> void:
 	var sale_index: int = randi_range(0, top_cards.size() - 1)
 
 	var choice: int = SPELL_SHOP_SKIP_INDEX
-	if not player.is_ai:
+	if player.is_ai:
+		# Buys the card it rates highest, if that's worth the price and it can
+		# spare the money (scripts/ai_spells.gd).
+		if not player.is_placeholder_ai:
+			choice = ai_spells.pick_shop_buy(player, top_cards, sale_index)
+	else:
 		var entries: Array = []
 		for i in top_cards.size():
 			var spell_info: Dictionary = SpellData.SPELLS.get(top_cards[i], {})
@@ -3657,6 +4019,12 @@ func _raise_money(player: Node2D, amount: int, creditor: Node2D, cancellable: bo
 	dice_label.text += "\n%s: raise $%d (sell houses / mortgage, trade, or cast a spell)." % [_player_display_name(player.player_id), amount]
 
 	if player.is_ai:
+		# A money spell first, if it holds one that helps (Taxes, Smite...) --
+		# scripts/ai_spells.gd. Resolving it may already have settled this.
+		if not player.is_placeholder_ai and not cancellable:
+			await ai_spells.raise_money_with_spells(player, amount)
+			if entry["outcome"] != "":
+				return String(entry["outcome"])
 		# Mortgage what it can first; if that's not enough, start selling
 		# houses (freeing up more properties to mortgage in the process),
 		# then take another pass at mortgaging. Forfeit only if all of that
@@ -3759,7 +4127,7 @@ func _refresh_action_buttons() -> void:
 	# but before the move (a Dodge picker, a debt screen) must not let the
 	# roller press Roll again and start a second roll on top of this one.
 	roll_button.disabled = limited_to_selling or lock or house_mode or _roll_in_flight
-	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
+	roll_button.text = "End Turn (R)" if _awaiting_end_turn else "Roll (R)"
 	admin_button.disabled = limited_to_selling or lock or _awaiting_end_turn or host_only or house_mode
 	admin_properties_button.disabled = limited_to_selling or lock or host_only or house_mode
 	admin_spells_button.disabled = limited_to_selling or lock or host_only or house_mode
@@ -3778,6 +4146,10 @@ func _refresh_action_buttons() -> void:
 	else:
 		declare_bankruptcy_button.text = "Declare Bankruptcy"
 		declare_bankruptcy_button.disabled = _awaiting_buy_decision or lock
+	# While raising money: Sell Houses / Mortgage is how to do it, and for a
+	# purchase Cancel purchase is the way back out -- both stand out.
+	_set_button_highlight(declare_bankruptcy_button, _in_debt and _debt_cancellable)
+	_set_button_highlight(sell_house_mortgage_button, _in_debt and not sell_house_mortgage_button.disabled)
 
 	if _trading:
 		# During a trade only the current proposer's machine has controls;
@@ -3787,7 +4159,7 @@ func _refresh_action_buttons() -> void:
 		decline_trade_button.disabled = not can_propose
 		trader1_money_edit.editable = can_propose
 		trader2_money_edit.editable = can_propose
-		offer_trade_button.text = "Accept Trade" if _trade_can_accept else "Offer Trade"
+		offer_trade_button.text = "Accept Trade (Y)" if _trade_can_accept else "Offer Trade (Y)"
 
 
 func _on_trade_pressed() -> void:
@@ -3948,7 +4320,7 @@ func _mark_trade_modified() -> void:
 
 
 func _update_trade_action_button() -> void:
-	offer_trade_button.text = "Accept Trade" if _trade_can_accept else "Offer Trade"
+	offer_trade_button.text = "Accept Trade (Y)" if _trade_can_accept else "Offer Trade (Y)"
 
 
 # The single action button does double duty: it sends the current terms to
@@ -4843,6 +5215,10 @@ func _show_railroad_card(title: String, base_rents: Array, price: int, icon: Tex
 # A small copy of space `index`'s card (title deed, railroad or utility
 # card) for the buy prompt, or null for a space without one.
 func _space_card_view(index: int) -> Control:
+	return _space_card_view_scaled(index, BUY_PROMPT_CARD_SCALE)
+
+
+func _space_card_view_scaled(index: int, card_scale: float) -> Control:
 	if index < 0 or index >= board.TOTAL_SPACES:
 		return null
 	var info: Dictionary = board.get_space_info(index)
@@ -4852,13 +5228,13 @@ func _space_card_view(index: int) -> Control:
 		property_card.fill(info.get("name", ""), board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY),
 			info["rents"], price, board.HOUSE_COSTS_BY_COLOR.get(color_name, 0),
 			_mortgage_value(price), _unmortgage_value(price))
-		return property_card.card_view(BUY_PROMPT_CARD_SCALE)
+		return property_card.card_view(card_scale)
 	if color_name == "railroad" and info.has("rents"):
 		asset_card.fill(info.get("name", ""), load(info.get("icon", "")), _railroad_card_lines(info["rents"], price))
-		return asset_card.card_view(BUY_PROMPT_CARD_SCALE)
+		return asset_card.card_view(card_scale)
 	if color_name == "utility" and info.has("rent_multipliers"):
 		asset_card.fill(info.get("name", ""), load(info.get("icon", "")), _utility_card_lines(info["rent_multipliers"], price))
-		return asset_card.card_view(BUY_PROMPT_CARD_SCALE)
+		return asset_card.card_view(card_scale)
 	return null
 
 
@@ -5038,6 +5414,60 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 
 	if post_cast.is_valid():
 		await post_cast.call()
+
+
+# A Computer player's cast: the same checks and the same _prepare_ /
+# _finish_cast path as a human's _begin_spell_cast(), minus the level picker.
+# Every target prompt _prepare_spell_cast() raises is answered from `plan`
+# (see AiSpells.answer()). `reaction`: cast in someone's response window, so
+# the bot pauses first, exactly as a human must. Returns true if the spell
+# went onto the stack.
+func _ai_cast_spell(caster: Node2D, hand_index: int, level: int, plan: Dictionary, reaction: bool) -> bool:
+	if _casting_spell or caster.is_bankrupt or _returning_to_menu:
+		return false
+	# Mid-resolution only to earn its way out of a debt that resolution caused
+	# (the same exception a human gets -- see _ensure_response_window).
+	if _resolving_stack and not (_in_debt and caster.player_id == _debt_player_id):
+		return false
+	if hand_index < 0 or hand_index >= caster.spell_hand.size():
+		return false
+	var spell_name: String = caster.spell_hand[hand_index]
+	var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
+	if not spell_info.get("levels", {}).has(level):
+		return false
+	if reaction:
+		if not _response_window_open:
+			return false
+		_response_window_paused_by[caster.player_id] = true
+	var unpause: Callable = func() -> void:
+		if reaction and caster.player_id < _response_window_paused_by.size():
+			_response_window_paused_by[caster.player_id] = false
+	if not _level_timing_allowed(caster, spell_name, level) or _spell_extra_validation(caster, spell_name, level) != "":
+		unpause.call()
+		return false
+	var color_name: String = spell_info.get("color", "")
+	var free_cast: bool = _color_attunement(caster, color_name) < level and _spell_free_cast_allowed(caster, spell_name, level)
+	if _color_attunement(caster, color_name) < level and not free_cast:
+		unpause.call()
+		return false
+
+	_casting_spell = true
+	_prompt_slot = caster.player_id
+	_refresh_action_buttons()
+	ai_spells.begin_plan(plan)
+	var resolve: Callable = await _prepare_spell_cast(caster, hand_index, spell_name, level)
+	ai_spells.end_plan()
+	_casting_spell = false
+	_prompt_slot = -1
+	_refresh_action_buttons()
+	if not resolve.is_valid() or caster.is_bankrupt:
+		unpause.call()
+		return false
+	if free_cast:
+		_log("%s casts %s for free -- its condition is met." % [PLAYER_NAMES[caster.player_id], spell_name])
+	ai_spells.note_cast(caster, spell_name, level, _next_stack_id, plan)
+	await _finish_cast(caster, spell_name, level, resolve)
+	return true
 
 
 # Discards a spell without its effect in exchange for +1 Temporary
@@ -7618,7 +8048,10 @@ func _pick_property_space(caster: Node2D, prompt: String, filter: Callable) -> i
 # cancelled.
 func _pick_die_value(prompt: String, _color: Color = Color.WHITE) -> int:
 	var v: int
-	if _prompt_is_local():
+	if _prompt_is_ai():
+		_ai_prompt_open("face", {"text": prompt})
+		v = int(_ai_prompt_take())
+	elif _prompt_is_local():
 		v = await _face_pick_local(prompt)
 	else:
 		_net_open_remote("face", {"text": prompt})
@@ -8762,6 +9195,7 @@ func _player_display_name(index: int) -> String:
 
 func _update_player_panels() -> void:
 	free_parking_label.text = "Free Parking: $%d" % free_parking_amount
+	_refresh_unowned_deck()
 	_log_ownership_changes()
 	# Ownership banners: re-synced for every space on every panel refresh
 	# rather than tracked at each of the many places ownership can change
@@ -8787,10 +9221,9 @@ func _update_player_panels() -> void:
 		for child in flow.get_children():
 			child.queue_free()
 		for space_index in players[i].owned_property_indices:
-			# Properties currently staged in the trade display have "moved"
-			# there visually, so they're left out of the normal row.
-			if _trading and (_trade1_offered.has(space_index) or _trade2_offered.has(space_index)):
-				continue
+			# A property offered in the trade being negotiated stays here too
+			# (its owner hasn't changed yet), outlined in gold.
+			var in_trade: bool = _trading and (_trade1_offered.has(space_index) or _trade2_offered.has(space_index))
 			var info: Dictionary = board.get_space_info(space_index)
 			# Space 0 held as a property = Terminus Station (a railroad card).
 			var is_terminus: bool = space_index == 0
@@ -8802,15 +9235,16 @@ func _update_player_panels() -> void:
 			mini_card.setup(space_index, mc_name, color, board.spaces[space_index].house_count, board.spaces[space_index].is_mortgaged)
 			mini_card.card_clicked.connect(_on_space_clicked)
 			mini_card.card_right_clicked.connect(_show_property_details)
+			if in_trade:
+				_add_trade_outline(mini_card)
 
 		var spell_flow: HFlowContainer = player_spells_flows[i]
 		for child in spell_flow.get_children():
 			child.queue_free()
 		for hand_index in players[i].spell_hand.size():
-			# Same reasoning as the property filter above -- a spell staged
-			# in the trade display has "moved" there visually.
-			if _trading and ((i == _trader1 and _trade1_spells_offered.has(hand_index)) or (i == _trader2 and _trade2_spells_offered.has(hand_index))):
-				continue
+			# Same as properties above: an offered spell stays in the hand,
+			# outlined in gold.
+			var spell_in_trade: bool = _trading and ((i == _trader1 and _trade1_spells_offered.has(hand_index)) or (i == _trader2 and _trade2_spells_offered.has(hand_index)))
 			var spell_name: String = players[i].spell_hand[hand_index]
 			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 			var face_up: bool = _spell_face_up(i, hand_index)
@@ -8819,7 +9253,7 @@ func _update_player_panels() -> void:
 			mini_spell.setup(hand_index, load(spell_info.get("icon", "")) if face_up else CARDBACK_TEXTURE, face_up)
 			mini_spell.card_clicked.connect(_on_spell_clicked.bind(i))
 			mini_spell.card_right_clicked.connect(_on_spell_right_clicked.bind(i))
-			if _tutorial_active and _tutorial_focus_spells.has(spell_name):
+			if (_tutorial_active and _tutorial_focus_spells.has(spell_name)) or spell_in_trade:
 				mini_spell.set_highlight(true)
 
 		var attunement_flow: HFlowContainer = player_attunement_flows[i]
@@ -9106,7 +9540,7 @@ var _net_ready_peers: Dictionary = {}
 
 
 func _process(_delta: float) -> void:
-	_animate_roll_token()
+	_update_roll_walk()
 	if not (GameState.online and GameState.is_authority()):
 		return
 	_net_ai_takeover_watchdog()
@@ -9166,6 +9600,7 @@ func _build_snapshot() -> Dictionary:
 		"debt_cancellable": _debt_cancellable,
 		"spell_stack": _spell_stack_names(),
 		"spell_target_marks": _all_stack_target_marks(),
+		"response_time": _response_time,
 		"spell_stack_targets": _spell_stack_targets(),
 		"awaiting_buy": _awaiting_buy_decision,
 		"casting_spell": _casting_spell,
@@ -9236,7 +9671,6 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	for i in mini(player_states.size(), players.size()):
 		var ps: Dictionary = player_states[i]
 		var p: Node2D = players[i]
-		var space_before: int = p.current_space
 		p.money = ps.get("money", p.money)
 		p.current_space = ps.get("space", p.current_space)
 		p.in_jail = ps.get("in_jail", false)
@@ -9252,11 +9686,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 		p.temp_attunement = (ps.get("attunement", {}) as Dictionary).duplicate()
 		p.cramped_cell_debts = _cramped_cell_from_save(ps.get("cramped_cell", []))
 		p.fated_ending = _fated_ending_from_save(ps.get("fated_ending", {}))
-		var walk: Array = ps.get("walk", [])
-		if walk.size() == 2 and space_before != p.current_space and not _walks.has(i):
-			_client_walk(p, int(walk[0]), int(walk[1]))
-		elif not _walks.has(i):
-			p.position = board.get_space_center(p.current_space) + MARKER_OFFSETS[i]
+		_client_apply_walk(p, ps.get("walk", []))
 
 	var space_states: Array = snap.get("spaces", [])
 	for i in mini(space_states.size(), board.spaces.size()):
@@ -9279,6 +9709,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_debt_cancellable = snap.get("debt_cancellable", false)
 	_net_spell_stack_names = snap.get("spell_stack", [])
 	_net_spell_target_marks = snap.get("spell_target_marks", [])
+	_net_response_time = float(snap.get("response_time", -1.0))
 	_net_spell_stack_targets = snap.get("spell_stack_targets", [])
 	_awaiting_buy_decision = snap.get("awaiting_buy", false)
 	_casting_spell = snap.get("casting_spell", false)
@@ -9344,7 +9775,7 @@ func _apply_dice_animation(d1: int, d2: int, seq: int) -> void:
 	if seq != _roll_seq:
 		_roll_seq = seq
 		dice_roller.roll(d1, d2, DICE_TUMBLE_SEC)
-	if not _roll_in_flight or _response_window_paused_by.has(true):
+	if not _roll_in_flight:
 		dice_roller.finish_now()
 
 
@@ -9404,6 +9835,34 @@ func _prompt_is_local() -> bool:
 	return not GameState.online or GameState.is_slot_local(_prompt_target())
 
 
+# A prompt meant for a Computer player (a spell it's casting, or a decision a
+# spell it cast leaves to it): answered by its strategy (scripts/ai_spells.gd)
+# instead of opening any popup. Host-only; the tutorial scripts its own
+# opponents, so it's left alone.
+func _prompt_is_ai() -> bool:
+	if _tutorial_active or not GameState.is_authority():
+		return false
+	var t: int = _prompt_target()
+	return t >= 0 and t < players.size() and players[t].is_ai
+
+
+# The open half of a confirm / pick / card prompt records the question for the
+# Computer player; the matching _result() half answers it.
+var _ai_pending_prompt: Dictionary = {}
+
+
+func _ai_prompt_open(kind: String, payload: Dictionary) -> void:
+	payload["kind"] = kind
+	payload["seat"] = _prompt_target()
+	_ai_pending_prompt = payload
+
+
+func _ai_prompt_take() -> Variant:
+	var q: Dictionary = _ai_pending_prompt
+	_ai_pending_prompt = {}
+	return ai_spells.answer(q)
+
+
 func _peer_for_slot(slot: int) -> int:
 	return GameState.slot_peer[slot] if slot >= 0 and slot < GameState.slot_peer.size() else 1
 
@@ -9412,7 +9871,9 @@ func _peer_for_slot(slot: int) -> int:
 
 # card_space: show that space's card above the question (the buy prompt).
 func _cf_open(text: String, card_space: int = -1) -> void:
-	if _prompt_is_local():
+	if _prompt_is_ai():
+		_ai_prompt_open("confirm", {"text": text, "space": card_space})
+	elif _prompt_is_local():
 		# Sticky: a yes/no the game is actively waiting on must never be
 		# resolved by the app losing focus (Godot auto-hides popups on
 		# alt-tab, which would otherwise fire popup_hide -> "No").
@@ -9423,6 +9884,8 @@ func _cf_open(text: String, card_space: int = -1) -> void:
 
 
 func _cf_result() -> bool:
+	if not _ai_pending_prompt.is_empty():
+		return bool(_ai_prompt_take())
 	if _prompt_is_local():
 		return await confirm_prompt.answered
 	return bool(await _net_await_reply())
@@ -9450,6 +9913,9 @@ func _pick_space(text: String, entries: Array, cancellable: bool = true) -> int:
 func _pick_board_space(text: String, spaces: Array[int], cancellable: bool = true) -> int:
 	if spaces.is_empty():
 		return -1
+	if _prompt_is_ai():
+		_ai_prompt_open("board", {"text": text, "spaces": spaces, "cancellable": cancellable})
+		return int(_ai_prompt_take())
 	if _prompt_is_local():
 		return await _board_pick_local(text, spaces, cancellable)
 	_net_open_remote("board", {"text": text, "spaces": spaces, "cancellable": cancellable})
@@ -9458,6 +9924,9 @@ func _pick_board_space(text: String, spaces: Array[int], cancellable: bool = tru
 
 # Which die (1 or 2) the deciding player clicks. Can't be cancelled.
 func _pick_die(text: String) -> int:
+	if _prompt_is_ai():
+		_ai_prompt_open("die", {"text": text})
+		return 2 if int(_ai_prompt_take()) == 2 else 1
 	if _prompt_is_local():
 		return await _die_pick_local(text)
 	_net_open_remote("die", {"text": text})
@@ -9659,7 +10128,9 @@ func _hide_pick_banner() -> void:
 
 
 func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
-	if _prompt_is_local():
+	if _prompt_is_ai():
+		_ai_prompt_open("pick", {"text": text, "entries": entries, "mandatory": mandatory})
+	elif _prompt_is_local():
 		_pp_panel_mode = _is_player_entries(entries)
 		if _pp_panel_mode:
 			_player_pick_start(text, entries, mandatory)
@@ -9672,6 +10143,8 @@ func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
 
 
 func _pp_result() -> int:
+	if not _ai_pending_prompt.is_empty():
+		return int(_ai_prompt_take())
 	if _prompt_is_local():
 		if _pp_panel_mode:
 			_pp_panel_mode = false
@@ -9700,7 +10173,9 @@ func _lp_result() -> int:
 # --- card_picker --------------------------------------------------
 
 func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2, large: bool = false, reveal_from: int = -1) -> void:
-	if _prompt_is_local():
+	if _prompt_is_ai():
+		_ai_prompt_open("card", {"text": text, "entries": entries, "mandatory": mandatory, "skip_index": skip_index})
+	elif _prompt_is_local():
 		card_picker.open(text, entries, mandatory, skip_text, skip_index, false, large, reveal_from)
 	else:
 		_net_open_remote("card", {
@@ -9711,6 +10186,8 @@ func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: 
 
 
 func _cp_result() -> int:
+	if not _ai_pending_prompt.is_empty():
+		return int(_ai_prompt_take())
 	if _prompt_is_local():
 		return await card_picker.card_chosen
 	return int(await _net_await_reply())
@@ -9719,6 +10196,8 @@ func _cp_result() -> int:
 # --- info_prompt (no reply) --------------------------------------
 
 func _info_open(text: String) -> void:
+	if _prompt_is_ai():
+		return
 	if _prompt_is_local():
 		info_prompt.open(text)
 	else:
