@@ -3882,8 +3882,10 @@ func _refresh_action_buttons() -> void:
 	else:
 		declare_bankruptcy_button.text = "Declare Bankruptcy"
 		declare_bankruptcy_button.disabled = _awaiting_buy_decision or lock
-	# Highlighted while it's the way back out of raising money for a purchase.
+	# While raising money: Sell Houses / Mortgage is how to do it, and for a
+	# purchase Cancel purchase is the way back out -- both stand out.
 	_set_button_highlight(declare_bankruptcy_button, _in_debt and _debt_cancellable)
+	_set_button_highlight(sell_house_mortgage_button, _in_debt and not sell_house_mortgage_button.disabled)
 
 	if _trading:
 		# During a trade only the current proposer's machine has controls;
@@ -8769,9 +8771,6 @@ func _build_log_markup() -> void:
 			# Escape Tunnel, Siren's Song) breaks the BBCode parser and the
 			# whole link vanishes from the log.
 			"bbcode": "[url=spell:%s][color=#%s]%s[/color][/url]" % [spell_name.uri_encode(), sc.to_html(false), spell_name],
-			# A period right after the name (it ends the sentence) takes the
-			# spell's colour too -- outside the link, so it isn't underlined.
-			"period": "[color=#%s].[/color]" % sc.to_html(false),
 		})
 	for i in board.SPACE_DATA:
 		var info: Dictionary = board.SPACE_DATA[i]
@@ -8811,9 +8810,6 @@ func _markup_names(text: String) -> String:
 		else:
 			out += hit["bbcode"]
 			i += hit["name"].length()
-			if hit.has("period") and i < text.length() and text[i] == ".":
-				out += hit["period"]
-				i += 1
 	return out
 
 

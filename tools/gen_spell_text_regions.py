@@ -12,8 +12,8 @@ the text box into segments:
   post   -- text after the last level that isn't a wrapped continuation of
             it (Tax Haven's "(You no longer pay ...)")
 
-The trailing ":" / "." of a segment is trimmed, so the highlighted words read
-as the effect itself. Rects are stored normalized to the card size (0-1), so
+The trailing ":" of a segment is trimmed (it introduces the levels, it isn't
+part of the effect); a sentence's closing "." stays highlighted with it. Rects are stored normalized to the card size (0-1), so
 they scale with however large the card is drawn.
 
 Requirements: tesseract on PATH, and `pip install pillow`.
@@ -76,9 +76,9 @@ def ocr_lines(png_path):
 
 
 def trim_trailing_punct(word, crop):
-    """Drop a trailing '.' or ':' from the word's box by finding its glyph
-    cluster in the upscaled crop."""
-    if not word["text"] or word["text"][-1] not in ".:":
+    """Drop a trailing ':' from the word's box by finding its glyph cluster in
+    the upscaled crop. (A '.' ends the effect's sentence, so it's kept.)"""
+    if not word["text"] or word["text"][-1] != ":":
         return word
     l, t, w, h = word["px"]
     cols = []
