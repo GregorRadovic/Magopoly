@@ -16,10 +16,15 @@ const TAX_ICONS: Dictionary = {
 }
 # How big a property's card is drawn in the buy prompt.
 const BUY_PROMPT_CARD_SCALE: float = 0.72
-# Dice tumble this long, then settle; the piece then walks its roll over
-# MOVE_DURATION_SEC (however many spaces that is).
+# A roll: the dice tumble once for DICE_TUMBLE_SEC, then the piece walks its
+# roll over ROLL_WALK_SEC -- and that walk IS the reaction window: it ends
+# when the piece arrives. Any pause (or a spell being cast / resolving)
+# snaps the piece back to its start; once everyone's unpaused the walk
+# starts over from the beginning. See _update_roll_walk().
 const DICE_TUMBLE_SEC: float = 0.5
-const MOVE_DURATION_SEC: float = 1.0
+const ROLL_WALK_SEC: float = 1.5
+# Any other move (a spell moving a player): one walk this long.
+const MOVE_DURATION_SEC: float = 1.5
 
 # The base Spell Deck (defined in expansions.gd, alongside the expansions a
 # game can add on top -- see GameState.expansions and _build_spell_deck()).
@@ -478,47 +483,6 @@ func _update_wizard_vision() -> void:
 
 
 # --- Rolling token animation (purely cosmetic) ------------------------------
-# While a roll is in flight the roller's token slides along the Wizard Vision
-# route from its start tile to where the roll will put it, taking exactly one
-# response window (_response_window_seconds()) whatever the distance. Any
-# pause snaps it back to the start; once everyone unpauses it sets off again
-# (and _ensure_response_window() gives it a full window to arrive). The real
-# move in _move_player() then places the token for good. Runs on clients too,
-# from their mirrored roll / pause state.
-var _token_anim_start_msec: int = -1
-var _token_anim_seq: int = -1
-var _token_anim_player: int = -1
-
-
-func _animate_roll_token() -> void:
-	if not _roll_in_flight or current_player < 0 or current_player >= players.size():
-		_token_anim_player = -1
-		return
-	var roller: Node2D = players[current_player]
-	# A jail roll that isn't doubles goes nowhere, and neither does a roll
-	# cancelled by being sent to Jail mid-roll.
-	if _roll_cancelled or (roller.in_jail and not _dice_are_doubles()):
-		return
-	var start_spot: Vector2 = board.get_space_center(roller.current_space) + MARKER_OFFSETS[roller.player_id]
-	var now: int = Time.get_ticks_msec()
-	if _token_anim_seq != _roll_seq or _token_anim_player != current_player:
-		_token_anim_seq = _roll_seq
-		_token_anim_player = current_player
-		_token_anim_start_msec = now
-	if _response_window_paused_by.has(true) or _casting_spell:
-		roller.position = start_spot
-		_token_anim_start_msec = -1
-		return
-	if _token_anim_start_msec == -1:
-		_token_anim_start_msec = now
-	var steps: int = _apply_pre_move_landmarks(roller, _current_roll, true)
-	if steps <= 0:
-		roller.position = start_spot
-		return
-	var t: float = clampf(float(now - _token_anim_start_msec) / (_response_window_seconds() * 1000.0), 0.0, 1.0)
-	roller.position = _point_along(_wizard_vision_path(roller, steps), t)
-
-
 # The point `t` (0..1) of the way along `route`, by distance.
 func _point_along(route: PackedVector2Array, t: float) -> Vector2:
 	if route.size() == 1:
@@ -547,8 +511,8 @@ const WV_LAP_OFFSET: float = 14.0
 func _wizard_vision_path(player: Node2D, steps: int) -> PackedVector2Array:
 	var start: int = player.current_space
 	var marker: Vector2 = MARKER_OFFSETS[player.player_id]
-	# Anchored on the start tile rather than the token itself, which slides
-	# along this route while the roll is in flight (_animate_roll_token()).
+	# Anchored on the start tile rather than the token itself, which walks
+	# this route while the roll is in flight (_update_roll_walk()).
 	var route := PackedVector2Array([board.get_space_center(start) + marker])
 	for s in range(1, steps + 1):
 		var index: int = (start + s) % board.TOTAL_SPACES
@@ -2819,7 +2783,7 @@ func _response_window_seconds() -> float:
 		# A generous window for the moments the player has to react to; snappier
 		# for the tutorial's own auto-resolutions (Migraine, Manastone, etc.).
 		if GameState.tutorial_kind == "basic":
-			return 0.6  # no spells in this one -- nothing to react with
+			return 0.5  # no spells in this one -- the roll's walk sets the pace
 		return 5.0 if _tutorial_expected_action == "press_space" else 1.5
 	# Online, widen the window so a remote player's pause has time to reach
 	# the host before the countdown expires.
@@ -2867,13 +2831,16 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 			if _returning_to_menu or not is_inside_tree():
 				return
 			var frozen: bool = _response_window_paused_by.has(true) or _casting_spell
-			# Everyone has just unpaused a roll's window: the rolling token
-			# starts its journey over (_animate_roll_token()), so give it the
-			# full window to get there before the move happens.
+			# Everyone has just unpaused: the walk starts over, and nothing
+			# closes before it's had its full time again.
 			if was_frozen and not frozen and _roll_in_flight:
-				_window_deadline_msec = maxi(_window_deadline_msec, Time.get_ticks_msec() + int(_response_window_seconds() * 1000.0))
+				_window_deadline_msec = maxi(_window_deadline_msec, Time.get_ticks_msec() + int(ROLL_WALK_SEC * 1000.0))
 			was_frozen = frozen
-			if not frozen and Time.get_ticks_msec() >= _window_deadline_msec:
+			# A roll's window lasts until its walk arrives (and never less
+			# than the usual window -- the tutorial's longer ones, online's
+			# extra margin).
+			var walk_done: bool = _rw_done and _rw_seq == _roll_seq if _roll_in_flight else true
+			if not frozen and walk_done and Time.get_ticks_msec() >= _window_deadline_msec:
 				break
 			await get_tree().process_frame
 
@@ -3086,8 +3053,7 @@ func _toggle_pause_for_player(player_index: int) -> void:
 		return
 	_response_window_paused_by[player_index] = not _response_window_paused_by[player_index]
 	if _response_window_paused_by[player_index]:
-		# Pausing during the tumble skips straight to the real faces.
-		dice_roller.finish_now()
+		# (The dice finish their tumble regardless -- see _update_roll_walk.)
 		dice_label.text += "\nPaused from %s's perspective -- press %d to resume." % [PLAYER_NAMES[player_index], player_index + 1]
 	_refresh_action_buttons()
 	_update_player_panels()
@@ -3156,7 +3122,6 @@ func _apply_auto_pause(event: String, trigger_seat: int, force_seat: int = -1) -
 		_response_window_paused_by[seat] = true
 		paused_names.append(PLAYER_NAMES[seat])
 	if not paused_names.is_empty():
-		dice_roller.finish_now()
 		dice_label.text += "\nAuto-paused: %s (press Space / your number to resume)." % ", ".join(paused_names)
 		_refresh_action_buttons()
 		_update_player_panels()
@@ -3255,9 +3220,6 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# opens; the player must pause it within the window (see _unhandled_input).
 	if _tutorial_active and _tutorial_expected_action == "roll":
 		_tutorial_advance()
-	# The piece walks its roll as soon as the dice settle, while the window
-	# is still open; a pause or a changed roll snaps it back.
-	_preview_walk(player, _roll_seq)
 	await _ensure_response_window("roll", current_player)
 	if _returning_to_menu or not is_inside_tree():
 		return
@@ -3268,18 +3230,14 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# Tutorial: still on "press_space" once the window has closed = the player
 	# never paused. Rewind and let them roll again.
 	if _tutorial_active and _tutorial_expected_action == "press_space":
-		_cancel_preview_walk()
+		_snap_to_space(player)
 		_tutorial_rewind_roll()
 		return
-	# A short window can close mid-walk: let a still-valid walk finish.
-	while not _preview.is_empty() and not bool(_preview.get("done", false)) and _current_roll == int(_preview["steps"]):
-		await get_tree().process_frame
-		if _returning_to_menu or not is_inside_tree():
-			return
-	# The early walk only stands if the move it showed is the one that's
-	# actually about to happen (_move_player then skips walking again).
-	if not _preview_matches(player, roll) or _roll_cancelled or (player.in_jail and not _dice_are_doubles()):
-		_cancel_preview_walk()
+	# The piece is standing wherever the walk left it; anything other than
+	# the normal move (a cancelled roll, a jail roll that isn't doubles) puts
+	# it back on its real space.
+	if not _roll_walk_arrived(player, _roll_walk_steps(player)) or _roll_cancelled or (player.in_jail and not _dice_are_doubles()):
+		_snap_to_space(player)
 
 	# Belt-and-suspenders: _prompt_slot is only ever meant to be set mid
 	# _begin_spell_cast (routing that caster's own level/target pickers).
@@ -3347,8 +3305,6 @@ func _perform_roll(die1: int, die2: int) -> void:
 	if player.in_jail:
 		grants_extra_turn = false
 
-	# Whatever happened, no early walk outlives the roll it belonged to.
-	_cancel_preview_walk()
 	if grants_extra_turn:
 		dice_label.text += "\nExtra turn!"
 	elif player.is_bankrupt:
@@ -3368,59 +3324,76 @@ func _perform_roll(die1: int, die2: int) -> void:
 # doubles-triggered extra turn. Debt collection that ends in the player
 # successfully paying off what they owed does NOT cancel the extra turn --
 # they're still in the game, so a rolled double still earns another go.
-# The walk shown during a roll's reaction window: {"player", "from", "steps",
-# "done"} while one is under way or finished, else empty.
-var _preview: Dictionary = {}
+# The roll walk (see ROLL_WALK_SEC). Driven every frame from _process() on
+# host and clients alike, purely from the shared roll / pause state, so
+# everyone sees the same walk.
+var _rw_seq: int = -1
+var _rw_player: int = -1
+var _rw_from: int = -1
+var _rw_steps: int = 0
+var _rw_dice_end_msec: int = 0
+var _rw_start_msec: int = -1
+var _rw_done: bool = false
 
 
-# Starts walking `player` as soon as the dice settle (DICE_TUMBLE_SEC), then
-# keeps watching until the window closes: if anyone pauses, or a spell
-# changes the roll, the piece snaps back to where it started. A piece in
-# Jail only walks on doubles. `seq` ties this to one roll (_roll_seq).
-func _preview_walk(player: Node2D, seq: int) -> void:
-	await get_tree().create_timer(DICE_TUMBLE_SEC).timeout
-	if not _roll_in_flight or _roll_seq != seq or _response_window_paused_by.has(true):
+func _roll_walk_frozen() -> bool:
+	return _response_window_paused_by.has(true) or _casting_spell or _resolving_stack
+
+
+func _update_roll_walk() -> void:
+	if not _roll_in_flight or current_player < 0 or current_player >= players.size():
 		return
-	if player.in_jail and not _dice_are_doubles():
+	var roller: Node2D = players[current_player]
+	var now: int = Time.get_ticks_msec()
+	if _rw_seq != _roll_seq or _rw_player != current_player:
+		# A new roll: the dice tumble once, then the walk can start.
+		_rw_seq = _roll_seq
+		_rw_player = current_player
+		_rw_dice_end_msec = now + int(DICE_TUMBLE_SEC * 1000.0)
+		_rw_start_msec = -1
+		_rw_done = false
+	_rw_from = roller.current_space
+	var start_spot: Vector2 = board.get_space_center(roller.current_space) + MARKER_OFFSETS[roller.player_id]
+	# Still tumbling, or someone's paused: wait on the start tile. (A pause
+	# during the tumble lets the dice finish first; the walk just doesn't
+	# start.)
+	if now < _rw_dice_end_msec or _roll_walk_frozen():
+		_rw_start_msec = -1
+		_rw_done = false
+		roller.position = start_spot
 		return
-	var steps: int = _current_roll
-	var from: int = player.current_space
-	if steps <= 0:
+	if _rw_start_msec == -1:
+		_rw_start_msec = now
+	var t: float = clampf(float(now - _rw_start_msec) / (ROLL_WALK_SEC * 1000.0), 0.0, 1.0)
+	_rw_done = t >= 1.0
+	# A roll that won't move anyone (cancelled, or a jail roll that isn't
+	# doubles) still takes the same time -- the piece just stays put.
+	_rw_steps = _roll_walk_steps(roller)
+	if _roll_cancelled or (roller.in_jail and not _dice_are_doubles()) or _rw_steps <= 0:
+		roller.position = start_spot
 		return
-	_preview = {"player": player.player_id, "from": from, "steps": steps, "done": false}
-	_walks[player.player_id] = [from, steps]
-	var tween: Tween = _walk_tween(player, from, steps)
-	_preview_tween = tween
-	while _roll_seq == seq and not _preview.is_empty():
-		if _roll_in_flight and (_response_window_paused_by.has(true) or _current_roll != steps or player.current_space != from):
-			_cancel_preview_walk()
-			return
-		if not tween.is_valid() or not tween.is_running():
-			_preview["done"] = true
-			if not _roll_in_flight:
-				return
-		await get_tree().process_frame
+	roller.position = _point_along(_roll_walk_route(roller, _rw_steps), t)
 
 
-# Whether the early walk (finished) shows exactly this move.
-func _preview_matches(player: Node2D, steps: int) -> bool:
-	return not _preview.is_empty() and bool(_preview.get("done", false)) \
-		and int(_preview["player"]) == player.player_id and int(_preview["steps"]) == steps \
-		and int(_preview["from"]) == player.current_space
+# The walk has finished and showed exactly this move.
+func _roll_walk_arrived(player: Node2D, steps: int) -> bool:
+	return _rw_done and _rw_seq == _roll_seq and _rw_player == player.player_id \
+		and _rw_from == player.current_space and _rw_steps == steps
 
 
-# Undoes the early walk: the piece goes straight back to its real space.
-func _cancel_preview_walk() -> void:
-	if _preview.is_empty():
-		return
-	var id: int = int(_preview["player"])
-	_preview.clear()
-	_walks.erase(id)
-	if _preview_tween and _preview_tween.is_valid():
-		_preview_tween.kill()
-	if id >= 0 and id < players.size():
-		players[id].position = board.get_space_center(players[id].current_space) + MARKER_OFFSETS[id]
-var _preview_tween: Tween = null
+# How far the roll walk goes -- the roll as it stands, after any landmark
+# on the way (Ensnaring Roots...) has had its say.
+func _roll_walk_steps(roller: Node2D) -> int:
+	return _apply_pre_move_landmarks(roller, _current_roll, true)
+
+
+# The walk follows the Wizard Vision route (laps pulled inward and all).
+func _roll_walk_route(player: Node2D, steps: int) -> PackedVector2Array:
+	return _wizard_vision_path(player, steps)
+
+
+func _snap_to_space(player: Node2D) -> void:
+	player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
 
 
 # Walks a player's piece forward `steps` spaces from `from_space`, hopping
@@ -3528,12 +3501,11 @@ func _move_and_land(player: Node2D, roll: int) -> bool:
 		return true
 
 	var from_space: int = player.current_space
-	var walked_early: bool = _preview_matches(player, roll)
+	var walked_already: bool = _roll_walk_arrived(player, roll)
 	player.current_space = new_space_raw % board.TOTAL_SPACES
-	if walked_early:
-		# Already walked there during the reaction window.
-		_preview.clear()
-		_walks.erase(player.player_id)
+	if walked_already:
+		# The reaction-window walk already brought the piece here.
+		_rw_player = -1
 		player.position = board.get_space_center(player.current_space) + MARKER_OFFSETS[player.player_id]
 	else:
 		await _walk_player(player, from_space, roll)
@@ -9430,7 +9402,7 @@ var _net_ready_peers: Dictionary = {}
 
 
 func _process(_delta: float) -> void:
-	_animate_roll_token()
+	_update_roll_walk()
 	if not (GameState.online and GameState.is_authority()):
 		return
 	_net_ai_takeover_watchdog()
@@ -9663,7 +9635,7 @@ func _apply_dice_animation(d1: int, d2: int, seq: int) -> void:
 	if seq != _roll_seq:
 		_roll_seq = seq
 		dice_roller.roll(d1, d2, DICE_TUMBLE_SEC)
-	if not _roll_in_flight or _response_window_paused_by.has(true):
+	if not _roll_in_flight:
 		dice_roller.finish_now()
 
 
