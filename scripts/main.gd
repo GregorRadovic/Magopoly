@@ -320,6 +320,8 @@ var player_row_separators: Array[HSeparator] = []
 
 var players: Array[Node2D] = []
 var current_player: int = 0
+# Computer players' spell strategy (casting, reacting, answering prompts).
+var ai_spells: AiSpells = AiSpells.new(self)
 # Set once the current player has rolled (and that roll's landing has fully
 # resolved) for a turn that isn't earning a doubles-driven extra roll. A
 # turn doesn't end just because you've rolled -- houses, unmortgaging,
@@ -2172,6 +2174,9 @@ func _advance_turn() -> void:
 # (_net_ai_takeover_watchdog) can tell "AI turn in progress" from "AI seat
 # stranded on the End Turn step after a disconnect".
 var _ai_turn_running: bool = false
+# Set whenever a reaction window opens or something new lands in one (a roll,
+# a cast, a spell resolving): Computer players get a fresh look at it.
+var _ai_react_dirty: bool = false
 
 
 func _run_ai_turn() -> void:
@@ -2197,6 +2202,12 @@ func _run_ai_turn_body() -> void:
 			return
 		_refresh_action_buttons()
 		await get_tree().create_timer(0.6).timeout
+		# Spells first: anything worth casting before the dice (movement
+		# spells like Unstable Portal only work now) -- scripts/ai_spells.gd.
+		if not players[ai_index].is_placeholder_ai:
+			await ai_spells.play_turn_spells(players[ai_index], "pre_roll")
+			if current_player != ai_index or players[ai_index].is_bankrupt or _returning_to_menu or not is_inside_tree():
+				return
 		var die1: int = randi_range(1, 6)
 		var die2: int = randi_range(1, 6)
 		await _perform_roll(die1, die2)
@@ -2204,6 +2215,10 @@ func _run_ai_turn_body() -> void:
 			return
 		if _awaiting_end_turn:
 			await get_tree().create_timer(0.6).timeout
+			if not players[ai_index].is_placeholder_ai:
+				await ai_spells.play_turn_spells(players[ai_index], "post_roll")
+				if current_player != ai_index or players[ai_index].is_bankrupt or _returning_to_menu or not is_inside_tree():
+					return
 			await _ai_run_end_of_turn_checks(players[ai_index])
 			if current_player != ai_index or players[ai_index].is_bankrupt:
 				return
@@ -2828,11 +2843,13 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 	if (_response_window_open or _resolving_stack) and not drain_only:
 		# A cast landing in a window that's already running still auto-pauses.
 		_apply_auto_pause(trigger, trigger_seat)
+		_ai_react_dirty = true
 		return
 	_response_window_open = true
 	_response_window_paused_by.resize(players.size())
 	_response_window_paused_by.fill(false)
 	_apply_auto_pause(trigger, trigger_seat)
+	_ai_react_dirty = true
 	_refresh_action_buttons()
 	dice_label.text += "\n(Press Space or your player number within %ds to pause from that player's perspective and react with an Instant spell.)" % int(seconds)
 
@@ -2853,6 +2870,14 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 			if _returning_to_menu or not is_inside_tree():
 				return
 			var frozen: bool = _response_window_paused_by.has(true) or _casting_spell
+			# Computer players size up what's happening (the roll in flight,
+			# the spell on top of the stack) and may pause to answer it with
+			# an Instant spell -- scripts/ai_spells.gd. Started, not awaited:
+			# its cast sets _casting_spell, which holds this window open.
+			if not frozen and _ai_react_dirty:
+				_ai_react_dirty = false
+				ai_spells.consider_reactions()
+				frozen = _response_window_paused_by.has(true) or _casting_spell
 			# Everyone has just unpaused: the walk starts over, and nothing
 			# closes before it's had its full time again.
 			if was_frozen and not frozen and _roll_in_flight:
@@ -2895,6 +2920,7 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 		_response_window_open = true
 		_window_deadline_msec = GameState.now_msec() + int(_response_window_seconds() * 1000.0)
 		_response_window_paused_by.fill(false)
+		_ai_react_dirty = true
 		var resolved_caster: int = int(resolved.get("caster_id", -1))
 		# A player who cast this spell while paused gets paused again now, so
 		# they keep reacting -- for every Pause Options setting.
@@ -3795,7 +3821,8 @@ func _visit_magic_forest(player: Node2D) -> void:
 
 	var hand_index: int
 	if player.is_ai:
-		hand_index = randi_range(0, player.spell_hand.size() - 1)
+		# Its least useful card (scripts/ai_spells.gd's card worth).
+		hand_index = ai_spells.pick_discard(player)
 	else:
 		var entries: Array = []
 		for i in player.spell_hand.size():
@@ -3819,7 +3846,6 @@ func _visit_magic_forest(player: Node2D) -> void:
 # Spell Shop: look at the top 4 cards of the deck; pick one for $100 (to
 # Free Parking) or Skip. One of the shown spells, chosen at random, is on
 # sale for $50 instead. Either way, whatever isn't taken shuffles back in.
-# An AI always skips for now (no purchasing strategy yet).
 func _visit_spell_shop(player: Node2D) -> void:
 	var top_cards: Array[String] = []
 	for i in 4:
@@ -3836,7 +3862,12 @@ func _visit_spell_shop(player: Node2D) -> void:
 	var sale_index: int = randi_range(0, top_cards.size() - 1)
 
 	var choice: int = SPELL_SHOP_SKIP_INDEX
-	if not player.is_ai:
+	if player.is_ai:
+		# Buys the card it rates highest, if that's worth the price and it can
+		# spare the money (scripts/ai_spells.gd).
+		if not player.is_placeholder_ai:
+			choice = ai_spells.pick_shop_buy(player, top_cards, sale_index)
+	else:
 		var entries: Array = []
 		for i in top_cards.size():
 			var spell_info: Dictionary = SpellData.SPELLS.get(top_cards[i], {})
@@ -3974,6 +4005,12 @@ func _raise_money(player: Node2D, amount: int, creditor: Node2D, cancellable: bo
 	dice_label.text += "\n%s: raise $%d (sell houses / mortgage, trade, or cast a spell)." % [_player_display_name(player.player_id), amount]
 
 	if player.is_ai:
+		# A money spell first, if it holds one that helps (Taxes, Smite...) --
+		# scripts/ai_spells.gd. Resolving it may already have settled this.
+		if not player.is_placeholder_ai and not cancellable:
+			await ai_spells.raise_money_with_spells(player, amount)
+			if entry["outcome"] != "":
+				return String(entry["outcome"])
 		# Mortgage what it can first; if that's not enough, start selling
 		# houses (freeing up more properties to mortgage in the process),
 		# then take another pass at mortgaging. Forfeit only if all of that
@@ -5363,6 +5400,60 @@ func _begin_spell_cast(hand_index: int, player_index: int) -> void:
 
 	if post_cast.is_valid():
 		await post_cast.call()
+
+
+# A Computer player's cast: the same checks and the same _prepare_ /
+# _finish_cast path as a human's _begin_spell_cast(), minus the level picker.
+# Every target prompt _prepare_spell_cast() raises is answered from `plan`
+# (see AiSpells.answer()). `reaction`: cast in someone's response window, so
+# the bot pauses first, exactly as a human must. Returns true if the spell
+# went onto the stack.
+func _ai_cast_spell(caster: Node2D, hand_index: int, level: int, plan: Dictionary, reaction: bool) -> bool:
+	if _casting_spell or caster.is_bankrupt or _returning_to_menu:
+		return false
+	# Mid-resolution only to earn its way out of a debt that resolution caused
+	# (the same exception a human gets -- see _ensure_response_window).
+	if _resolving_stack and not (_in_debt and caster.player_id == _debt_player_id):
+		return false
+	if hand_index < 0 or hand_index >= caster.spell_hand.size():
+		return false
+	var spell_name: String = caster.spell_hand[hand_index]
+	var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
+	if not spell_info.get("levels", {}).has(level):
+		return false
+	if reaction:
+		if not _response_window_open:
+			return false
+		_response_window_paused_by[caster.player_id] = true
+	var unpause: Callable = func() -> void:
+		if reaction and caster.player_id < _response_window_paused_by.size():
+			_response_window_paused_by[caster.player_id] = false
+	if not _level_timing_allowed(caster, spell_name, level) or _spell_extra_validation(caster, spell_name, level) != "":
+		unpause.call()
+		return false
+	var color_name: String = spell_info.get("color", "")
+	var free_cast: bool = _color_attunement(caster, color_name) < level and _spell_free_cast_allowed(caster, spell_name, level)
+	if _color_attunement(caster, color_name) < level and not free_cast:
+		unpause.call()
+		return false
+
+	_casting_spell = true
+	_prompt_slot = caster.player_id
+	_refresh_action_buttons()
+	ai_spells.begin_plan(plan)
+	var resolve: Callable = await _prepare_spell_cast(caster, hand_index, spell_name, level)
+	ai_spells.end_plan()
+	_casting_spell = false
+	_prompt_slot = -1
+	_refresh_action_buttons()
+	if not resolve.is_valid() or caster.is_bankrupt:
+		unpause.call()
+		return false
+	if free_cast:
+		_log("%s casts %s for free -- its condition is met." % [PLAYER_NAMES[caster.player_id], spell_name])
+	ai_spells.note_cast(caster, spell_name, level, _next_stack_id, plan)
+	await _finish_cast(caster, spell_name, level, resolve)
+	return true
 
 
 # Discards a spell without its effect in exchange for +1 Temporary
@@ -9727,6 +9818,34 @@ func _prompt_is_local() -> bool:
 	return not GameState.online or GameState.is_slot_local(_prompt_target())
 
 
+# A prompt meant for a Computer player (a spell it's casting, or a decision a
+# spell it cast leaves to it): answered by its strategy (scripts/ai_spells.gd)
+# instead of opening any popup. Host-only; the tutorial scripts its own
+# opponents, so it's left alone.
+func _prompt_is_ai() -> bool:
+	if _tutorial_active or not GameState.is_authority():
+		return false
+	var t: int = _prompt_target()
+	return t >= 0 and t < players.size() and players[t].is_ai
+
+
+# The open half of a confirm / pick / card prompt records the question for the
+# Computer player; the matching _result() half answers it.
+var _ai_pending_prompt: Dictionary = {}
+
+
+func _ai_prompt_open(kind: String, payload: Dictionary) -> void:
+	payload["kind"] = kind
+	payload["seat"] = _prompt_target()
+	_ai_pending_prompt = payload
+
+
+func _ai_prompt_take() -> Variant:
+	var q: Dictionary = _ai_pending_prompt
+	_ai_pending_prompt = {}
+	return ai_spells.answer(q)
+
+
 func _peer_for_slot(slot: int) -> int:
 	return GameState.slot_peer[slot] if slot >= 0 and slot < GameState.slot_peer.size() else 1
 
@@ -9735,7 +9854,9 @@ func _peer_for_slot(slot: int) -> int:
 
 # card_space: show that space's card above the question (the buy prompt).
 func _cf_open(text: String, card_space: int = -1) -> void:
-	if _prompt_is_local():
+	if _prompt_is_ai():
+		_ai_prompt_open("confirm", {"text": text, "space": card_space})
+	elif _prompt_is_local():
 		# Sticky: a yes/no the game is actively waiting on must never be
 		# resolved by the app losing focus (Godot auto-hides popups on
 		# alt-tab, which would otherwise fire popup_hide -> "No").
@@ -9746,6 +9867,8 @@ func _cf_open(text: String, card_space: int = -1) -> void:
 
 
 func _cf_result() -> bool:
+	if not _ai_pending_prompt.is_empty():
+		return bool(_ai_prompt_take())
 	if _prompt_is_local():
 		return await confirm_prompt.answered
 	return bool(await _net_await_reply())
@@ -9773,6 +9896,9 @@ func _pick_space(text: String, entries: Array, cancellable: bool = true) -> int:
 func _pick_board_space(text: String, spaces: Array[int], cancellable: bool = true) -> int:
 	if spaces.is_empty():
 		return -1
+	if _prompt_is_ai():
+		_ai_prompt_open("board", {"text": text, "spaces": spaces, "cancellable": cancellable})
+		return int(_ai_prompt_take())
 	if _prompt_is_local():
 		return await _board_pick_local(text, spaces, cancellable)
 	_net_open_remote("board", {"text": text, "spaces": spaces, "cancellable": cancellable})
@@ -9781,6 +9907,9 @@ func _pick_board_space(text: String, spaces: Array[int], cancellable: bool = tru
 
 # Which die (1 or 2) the deciding player clicks. Can't be cancelled.
 func _pick_die(text: String) -> int:
+	if _prompt_is_ai():
+		_ai_prompt_open("die", {"text": text})
+		return 2 if int(_ai_prompt_take()) == 2 else 1
 	if _prompt_is_local():
 		return await _die_pick_local(text)
 	_net_open_remote("die", {"text": text})
@@ -9982,7 +10111,9 @@ func _hide_pick_banner() -> void:
 
 
 func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
-	if _prompt_is_local():
+	if _prompt_is_ai():
+		_ai_prompt_open("pick", {"text": text, "entries": entries, "mandatory": mandatory})
+	elif _prompt_is_local():
 		_pp_panel_mode = _is_player_entries(entries)
 		if _pp_panel_mode:
 			_player_pick_start(text, entries, mandatory)
@@ -9995,6 +10126,8 @@ func _pp_open(text: String, entries: Array, mandatory: bool = false) -> void:
 
 
 func _pp_result() -> int:
+	if not _ai_pending_prompt.is_empty():
+		return int(_ai_prompt_take())
 	if _prompt_is_local():
 		if _pp_panel_mode:
 			_pp_panel_mode = false
@@ -10023,7 +10156,9 @@ func _lp_result() -> int:
 # --- card_picker --------------------------------------------------
 
 func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: String = "", skip_index: int = -2, large: bool = false, reveal_from: int = -1) -> void:
-	if _prompt_is_local():
+	if _prompt_is_ai():
+		_ai_prompt_open("card", {"text": text, "entries": entries, "mandatory": mandatory, "skip_index": skip_index})
+	elif _prompt_is_local():
 		card_picker.open(text, entries, mandatory, skip_text, skip_index, false, large, reveal_from)
 	else:
 		_net_open_remote("card", {
@@ -10034,6 +10169,8 @@ func _cp_open(text: String, entries: Array, mandatory: bool = false, skip_text: 
 
 
 func _cp_result() -> int:
+	if not _ai_pending_prompt.is_empty():
+		return int(_ai_prompt_take())
 	if _prompt_is_local():
 		return await card_picker.card_chosen
 	return int(await _net_await_reply())
@@ -10042,6 +10179,8 @@ func _cp_result() -> int:
 # --- info_prompt (no reply) --------------------------------------
 
 func _info_open(text: String) -> void:
+	if _prompt_is_ai():
+		return
 	if _prompt_is_local():
 		info_prompt.open(text)
 	else:
