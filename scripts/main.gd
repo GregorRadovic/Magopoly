@@ -3877,7 +3877,12 @@ func _ai_propose_trade(ai_id: int, target_id: int, offer_index: int, want_index:
 	_trade2_offered.append(want_index)
 	_update_player_panels()
 	_send_trade_offer()
-	await trade_concluded
+	# When the other side is a Computer too, it answers inside
+	# _send_trade_offer() -- the trade is already over (and trade_concluded
+	# already emitted) by the time we get here. Waiting for that signal again
+	# would hang this AI's turn forever.
+	if _trading:
+		await trade_concluded
 
 
 # Called when a modified counter-offer comes back to an AI in a trade it
