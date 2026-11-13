@@ -614,6 +614,7 @@ func _ready() -> void:
 	$UI/LogPanel.offset_top = board.BOARD_SIZE + 12.0
 	_build_player_rows()
 	_build_trader_headers()
+	_build_unowned_deck()
 	_build_spell_deck()
 	_spawn_players()
 	_response_window_paused_by.resize(players.size())
@@ -710,6 +711,30 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.keycode == KEY_B and not buy_house_unmortgage_button.disabled:
 		_on_buy_house_unmortgage_pressed()
 		return
+
+	# R presses Roll / End Turn and T opens a trade, like clicking them. Y / N
+	# answer the trade being negotiated (Offer / Accept, Decline) -- and a
+	# Yes / No prompt, if one is up without having taken the keyboard itself
+	# (confirm_prompt's own buttons carry Y / N shortcuts too).
+	if event.keycode == KEY_R and not roll_button.disabled:
+		_on_roll_pressed()
+		return
+	if event.keycode == KEY_T and not trade_button.disabled and not _trading:
+		_on_trade_pressed()
+		return
+	if event.keycode in [KEY_Y, KEY_N]:
+		var yes: bool = event.keycode == KEY_Y
+		if confirm_prompt.visible:
+			if yes:
+				confirm_prompt._on_yes()
+			else:
+				confirm_prompt._on_no()
+			return
+		if _trading and trade_display.visible:
+			var button: Button = offer_trade_button if yes else decline_trade_button
+			if not button.disabled:
+				button.pressed.emit()
+			return
 
 	# Enter presses the Roll / End Turn button. Space is deliberately NOT bound
 	# to it (roll_button has focus_mode NONE) -- Space is the response-window
@@ -1396,6 +1421,195 @@ func _build_player_rows() -> void:
 		player_properties_flows.append(row.get_node("AssetsRow/PropertiesFlow"))
 		player_spells_flows.append(row.get_node("AssetsRow/SpellsFlow"))
 		player_attunement_flows.append(row.get_node("AssetsRow/AttunementFlow"))
+
+
+# Makes an action-panel button stand out (amber fill, gold border), or puts
+# it back to the theme's look.
+func _set_button_highlight(button: Button, on: bool) -> void:
+	if not on:
+		for state in ["normal", "hover", "pressed"]:
+			button.remove_theme_stylebox_override(state)
+		button.remove_theme_color_override("font_color")
+		button.remove_theme_color_override("font_hover_color")
+		return
+	for state in ["normal", "hover", "pressed"]:
+		var box := StyleBoxFlat.new()
+		box.bg_color = Color(0.85, 0.55, 0.1) if state == "normal" else (Color(0.95, 0.65, 0.15) if state == "hover" else Color(0.7, 0.45, 0.08))
+		box.border_color = Color(1.0, 0.85, 0.35)
+		box.set_border_width_all(3)
+		box.set_corner_radius_all(6)
+		button.add_theme_stylebox_override(state, box)
+	button.add_theme_color_override("font_color", Color.WHITE)
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
+
+
+# Gold frame on a property card in a player's row while it's offered in the
+# trade being negotiated.
+func _add_trade_outline(card: Control) -> void:
+	var frame := Panel.new()
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
+	frame.offset_left = -3
+	frame.offset_top = -3
+	frame.offset_right = 3
+	frame.offset_bottom = 3
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0, 0, 0, 0)
+	style.border_color = Color(1.0, 0.82, 0.25)
+	style.set_border_width_all(3)
+	style.set_corner_radius_all(3)
+	frame.add_theme_stylebox_override("panel", style)
+	card.add_child(frame)
+
+
+# --- Unowned Properties deck ---------------------------------------------
+# A little card stack to the left of the Free Parking total showing how many
+# properties the bank still has; clicking it lays them all out as cards
+# (board order, railroads next, utilities last). Clicking one zooms it.
+const UNOWNED_DECK_SIZE: Vector2 = Vector2(74, 96)
+const UNOWNED_CARD_SCALE: float = 0.36
+var _unowned_deck_count: Label
+var _unowned_popup: PopupPanel
+var _unowned_title: Label
+var _unowned_flow: HFlowContainer
+
+
+func _build_unowned_deck() -> void:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 22)
+	var parent: Node = free_parking_label.get_parent()
+	parent.add_child(row)
+	parent.move_child(row, free_parking_label.get_index())
+	parent.remove_child(free_parking_label)
+
+	var deck := Button.new()
+	deck.name = "UnownedDeck"
+	deck.flat = true
+	deck.custom_minimum_size = UNOWNED_DECK_SIZE + Vector2(8, 8)
+	deck.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	deck.tooltip_text = "Unowned properties -- click to look through them"
+	deck.focus_mode = Control.FOCUS_NONE
+	deck.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	deck.pressed.connect(_open_unowned_deck)
+	# Two cards peeking out behind the top one make it read as a deck.
+	for k in [2, 1, 0]:
+		var card := Panel.new()
+		card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.97, 0.96, 0.92) if k == 0 else Color(0.82, 0.81, 0.77)
+		style.border_color = Color(0.25, 0.25, 0.28)
+		style.set_border_width_all(2)
+		style.set_corner_radius_all(6)
+		card.add_theme_stylebox_override("panel", style)
+		card.position = Vector2(k * 4, 8 - k * 4)
+		card.size = UNOWNED_DECK_SIZE
+		deck.add_child(card)
+		if k == 0:
+			var vbox := VBoxContainer.new()
+			vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+			vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+			vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			card.add_child(vbox)
+			var caption := Label.new()
+			caption.text = "Unowned"
+			caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			caption.add_theme_font_size_override("font_size", 13)
+			caption.add_theme_color_override("font_color", Color(0.3, 0.3, 0.33))
+			vbox.add_child(caption)
+			_unowned_deck_count = Label.new()
+			_unowned_deck_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			_unowned_deck_count.add_theme_font_size_override("font_size", 34)
+			_unowned_deck_count.add_theme_color_override("font_color", Color(0.1, 0.1, 0.12))
+			vbox.add_child(_unowned_deck_count)
+	row.add_child(deck)
+	row.add_child(free_parking_label)
+
+	_unowned_popup = PopupPanel.new()
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0.13, 0.13, 0.15, 0.98)
+	bg.border_color = Color(0.35, 0.36, 0.42)
+	bg.set_border_width_all(2)
+	bg.set_corner_radius_all(10)
+	bg.set_content_margin_all(20)
+	_unowned_popup.add_theme_stylebox_override("panel", bg)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 14)
+	_unowned_popup.add_child(box)
+	_unowned_title = Label.new()
+	_unowned_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_unowned_title.add_theme_font_size_override("font_size", 28)
+	box.add_child(_unowned_title)
+	var hint := Label.new()
+	hint.text = "Click a card to see it full size."
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 16)
+	hint.add_theme_color_override("font_color", Color(0.65, 0.7, 0.8))
+	box.add_child(hint)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_child(scroll)
+	_unowned_flow = HFlowContainer.new()
+	_unowned_flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_unowned_flow.alignment = FlowContainer.ALIGNMENT_CENTER
+	_unowned_flow.add_theme_constant_override("h_separation", 12)
+	_unowned_flow.add_theme_constant_override("v_separation", 12)
+	scroll.add_child(_unowned_flow)
+	$UI.add_child(_unowned_popup)
+
+
+# Every property nobody owns: board order, then railroads, then utilities.
+func _unowned_properties() -> Array[int]:
+	var streets: Array[int] = []
+	var railroads: Array[int] = []
+	var utilities: Array[int] = []
+	for i in board.TOTAL_SPACES:
+		var info: Dictionary = board.get_space_info(i)
+		if info.get("type", "") != "property" or board.spaces[i].owner_id != -1:
+			continue
+		match info.get("color", ""):
+			"railroad": railroads.append(i)
+			"utility": utilities.append(i)
+			_: streets.append(i)
+	return streets + railroads + utilities
+
+
+func _refresh_unowned_deck() -> void:
+	if _unowned_deck_count:
+		_unowned_deck_count.text = str(_unowned_properties().size())
+
+
+func _open_unowned_deck() -> void:
+	for child in _unowned_flow.get_children():
+		_unowned_flow.remove_child(child)
+		child.queue_free()
+	var spaces: Array[int] = _unowned_properties()
+	_unowned_title.text = "Unowned Properties (%d)" % spaces.size()
+	if spaces.is_empty():
+		var none := Label.new()
+		none.text = "The bank has nothing left -- every property is owned."
+		_unowned_flow.add_child(none)
+	for space_index in spaces:
+		var view: Control = _space_card_view_scaled(space_index, UNOWNED_CARD_SCALE)
+		if view == null:
+			continue
+		# A flat button over the card catches the click.
+		var hit := Button.new()
+		hit.flat = true
+		hit.focus_mode = Control.FOCUS_NONE
+		hit.set_anchors_preset(Control.PRESET_FULL_RECT)
+		hit.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		hit.tooltip_text = board.get_space_info(space_index).get("name", "")
+		hit.pressed.connect(_show_property_details.bind(space_index))
+		view.add_child(hit)
+		_unowned_flow.add_child(view)
+	var vp: Vector2 = Vector2(get_viewport().get_visible_rect().size)
+	var card: Vector2 = Vector2(440, 600) * UNOWNED_CARD_SCALE
+	var cols: int = mini(8, maxi(1, spaces.size()))
+	var rows: int = maxi(1, ceili(float(spaces.size()) / cols))
+	var w: float = cols * card.x + (cols - 1) * 12 + 60
+	var h: float = minf(vp.y * 0.88, rows * card.y + (rows - 1) * 12 + 140)
+	_unowned_popup.popup_centered(Vector2i(roundi(w), roundi(h)))
 
 
 # Puts each trade column's header label behind its player's icon:
@@ -3375,7 +3589,8 @@ func _visit_magic_forest(player: Node2D) -> void:
 			var spell_name: String = player.spell_hand[i]
 			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 			entries.append({"index": i, "name": spell_name, "icon": load(spell_info.get("icon", ""))})
-		_cp_open("Magic Forest: Draw 2 cards, then discard a card.", entries, true, "", -2, true, hand_before)
+		# "Discard" is bold and 1.5x the size of the rest (32 -> 48).
+		_cp_open("Magic Forest: Draw 2 cards, then choose a card to [b][font_size=48]Discard[/font_size][/b].", entries, true, "", -2, true, hand_before)
 		hand_index = await _cp_result()
 
 	var discarded: String = player.spell_hand[hand_index]
@@ -3648,7 +3863,7 @@ func _refresh_action_buttons() -> void:
 	# but before the move (a Dodge picker, a debt screen) must not let the
 	# roller press Roll again and start a second roll on top of this one.
 	roll_button.disabled = limited_to_selling or lock or house_mode or _roll_in_flight
-	roll_button.text = "End Turn" if _awaiting_end_turn else "Roll"
+	roll_button.text = "End Turn (R)" if _awaiting_end_turn else "Roll (R)"
 	admin_button.disabled = limited_to_selling or lock or _awaiting_end_turn or host_only or house_mode
 	admin_properties_button.disabled = limited_to_selling or lock or host_only or house_mode
 	admin_spells_button.disabled = limited_to_selling or lock or host_only or house_mode
@@ -3667,6 +3882,8 @@ func _refresh_action_buttons() -> void:
 	else:
 		declare_bankruptcy_button.text = "Declare Bankruptcy"
 		declare_bankruptcy_button.disabled = _awaiting_buy_decision or lock
+	# Highlighted while it's the way back out of raising money for a purchase.
+	_set_button_highlight(declare_bankruptcy_button, _in_debt and _debt_cancellable)
 
 	if _trading:
 		# During a trade only the current proposer's machine has controls;
@@ -3676,7 +3893,7 @@ func _refresh_action_buttons() -> void:
 		decline_trade_button.disabled = not can_propose
 		trader1_money_edit.editable = can_propose
 		trader2_money_edit.editable = can_propose
-		offer_trade_button.text = "Accept Trade" if _trade_can_accept else "Offer Trade"
+		offer_trade_button.text = "Accept Trade (Y)" if _trade_can_accept else "Offer Trade (Y)"
 
 
 func _on_trade_pressed() -> void:
@@ -3837,7 +4054,7 @@ func _mark_trade_modified() -> void:
 
 
 func _update_trade_action_button() -> void:
-	offer_trade_button.text = "Accept Trade" if _trade_can_accept else "Offer Trade"
+	offer_trade_button.text = "Accept Trade (Y)" if _trade_can_accept else "Offer Trade (Y)"
 
 
 # The single action button does double duty: it sends the current terms to
@@ -4730,6 +4947,10 @@ func _show_railroad_card(title: String, base_rents: Array, price: int, icon: Tex
 # A small copy of space `index`'s card (title deed, railroad or utility
 # card) for the buy prompt, or null for a space without one.
 func _space_card_view(index: int) -> Control:
+	return _space_card_view_scaled(index, BUY_PROMPT_CARD_SCALE)
+
+
+func _space_card_view_scaled(index: int, card_scale: float) -> Control:
 	if index < 0 or index >= board.TOTAL_SPACES:
 		return null
 	var info: Dictionary = board.get_space_info(index)
@@ -4739,13 +4960,13 @@ func _space_card_view(index: int) -> Control:
 		property_card.fill(info.get("name", ""), board.COLOR_GROUP_COLORS.get(color_name, Color.GRAY),
 			info["rents"], price, board.HOUSE_COSTS_BY_COLOR.get(color_name, 0),
 			_mortgage_value(price), _unmortgage_value(price))
-		return property_card.card_view(BUY_PROMPT_CARD_SCALE)
+		return property_card.card_view(card_scale)
 	if color_name == "railroad" and info.has("rents"):
 		asset_card.fill(info.get("name", ""), load(info.get("icon", "")), _railroad_card_lines(info["rents"], price))
-		return asset_card.card_view(BUY_PROMPT_CARD_SCALE)
+		return asset_card.card_view(card_scale)
 	if color_name == "utility" and info.has("rent_multipliers"):
 		asset_card.fill(info.get("name", ""), load(info.get("icon", "")), _utility_card_lines(info["rent_multipliers"], price))
-		return asset_card.card_view(BUY_PROMPT_CARD_SCALE)
+		return asset_card.card_view(card_scale)
 	return null
 
 
@@ -7463,6 +7684,7 @@ func _player_display_name(index: int) -> String:
 
 func _update_player_panels() -> void:
 	free_parking_label.text = "Free Parking: $%d" % free_parking_amount
+	_refresh_unowned_deck()
 	_log_ownership_changes()
 	# Ownership banners: re-synced for every space on every panel refresh
 	# rather than tracked at each of the many places ownership can change
@@ -7487,10 +7709,9 @@ func _update_player_panels() -> void:
 		for child in flow.get_children():
 			child.queue_free()
 		for space_index in players[i].owned_property_indices:
-			# Properties currently staged in the trade display have "moved"
-			# there visually, so they're left out of the normal row.
-			if _trading and (_trade1_offered.has(space_index) or _trade2_offered.has(space_index)):
-				continue
+			# A property offered in the trade being negotiated stays here too
+			# (its owner hasn't changed yet), outlined in gold.
+			var in_trade: bool = _trading and (_trade1_offered.has(space_index) or _trade2_offered.has(space_index))
 			var info: Dictionary = board.get_space_info(space_index)
 			# Space 0 held as a property = Terminus Station (a railroad card).
 			var is_terminus: bool = space_index == 0
@@ -7502,15 +7723,16 @@ func _update_player_panels() -> void:
 			mini_card.setup(space_index, mc_name, color, board.spaces[space_index].house_count, board.spaces[space_index].is_mortgaged)
 			mini_card.card_clicked.connect(_on_space_clicked)
 			mini_card.card_right_clicked.connect(_show_property_details)
+			if in_trade:
+				_add_trade_outline(mini_card)
 
 		var spell_flow: HFlowContainer = player_spells_flows[i]
 		for child in spell_flow.get_children():
 			child.queue_free()
 		for hand_index in players[i].spell_hand.size():
-			# Same reasoning as the property filter above -- a spell staged
-			# in the trade display has "moved" there visually.
-			if _trading and ((i == _trader1 and _trade1_spells_offered.has(hand_index)) or (i == _trader2 and _trade2_spells_offered.has(hand_index))):
-				continue
+			# Same as properties above: an offered spell stays in the hand,
+			# outlined in gold.
+			var spell_in_trade: bool = _trading and ((i == _trader1 and _trade1_spells_offered.has(hand_index)) or (i == _trader2 and _trade2_spells_offered.has(hand_index)))
 			var spell_name: String = players[i].spell_hand[hand_index]
 			var spell_info: Dictionary = SpellData.SPELLS.get(spell_name, {})
 			var face_up: bool = _spell_face_up(i, hand_index)
@@ -7519,7 +7741,7 @@ func _update_player_panels() -> void:
 			mini_spell.setup(hand_index, load(spell_info.get("icon", "")) if face_up else CARDBACK_TEXTURE, face_up)
 			mini_spell.card_clicked.connect(_on_spell_clicked.bind(i))
 			mini_spell.card_right_clicked.connect(_on_spell_right_clicked.bind(i))
-			if _tutorial_active and _tutorial_focus_spells.has(spell_name):
+			if (_tutorial_active and _tutorial_focus_spells.has(spell_name)) or spell_in_trade:
 				mini_spell.set_highlight(true)
 
 		var attunement_flow: HFlowContainer = player_attunement_flows[i]
@@ -8547,6 +8769,9 @@ func _build_log_markup() -> void:
 			# Escape Tunnel, Siren's Song) breaks the BBCode parser and the
 			# whole link vanishes from the log.
 			"bbcode": "[url=spell:%s][color=#%s]%s[/color][/url]" % [spell_name.uri_encode(), sc.to_html(false), spell_name],
+			# A period right after the name (it ends the sentence) takes the
+			# spell's colour too -- outside the link, so it isn't underlined.
+			"period": "[color=#%s].[/color]" % sc.to_html(false),
 		})
 	for i in board.SPACE_DATA:
 		var info: Dictionary = board.SPACE_DATA[i]
@@ -8586,6 +8811,9 @@ func _markup_names(text: String) -> String:
 		else:
 			out += hit["bbcode"]
 			i += hit["name"].length()
+			if hit.has("period") and i < text.length() and text[i] == ".":
+				out += hit["period"]
+				i += 1
 	return out
 
 

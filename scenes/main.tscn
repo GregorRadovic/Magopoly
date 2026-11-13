@@ -107,7 +107,7 @@ text = "Player 1's turn"
 [node name="RollButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
 focus_mode = 0
-text = "Roll"
+text = "Roll (R)"
 
 [node name="AdminRow" type="HBoxContainer" parent="UI/Panel/VBox"]
 
@@ -151,7 +151,7 @@ text = "Declare Bankruptcy"
 
 [node name="TradeButton" type="Button" parent="UI/Panel/VBox"]
 custom_minimum_size = Vector2(200, 60)
-text = "Trade"
+text = "Trade (T)"
 
 [node name="LogPanel" type="Panel" parent="UI"]
 theme_override_styles/panel = SubResource("LogPanelStyle")
@@ -358,12 +358,12 @@ theme_override_constants/separation = 10
 [node name="OfferTradeButton" type="Button" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeActions"]
 custom_minimum_size = Vector2(0, 50)
 size_flags_horizontal = 3
-text = "Offer Trade"
+text = "Offer Trade (Y)"
 
 [node name="DeclineTradeButton" type="Button" parent="UI/PlayersPanel/VBox/TradeDisplay/TradeActions"]
 custom_minimum_size = Vector2(0, 50)
 size_flags_horizontal = 3
-text = "Decline"
+text = "Decline (N)"
 
 [node name="HSeparatorSpellCast" type="HSeparator" parent="UI/PlayersPanel/VBox"]
 visible = false

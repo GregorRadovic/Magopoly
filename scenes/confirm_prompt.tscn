@@ -20,8 +20,8 @@ layout_mode = 2
 
 [node name="YesButton" type="Button" parent="VBox/Buttons"]
 custom_minimum_size = Vector2(168, 58)
-text = "Yes"
+text = "Yes (Y)"
 
 [node name="NoButton" type="Button" parent="VBox/Buttons"]
 custom_minimum_size = Vector2(168, 58)
-text = "No"
+text = "No (N)"

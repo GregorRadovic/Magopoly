@@ -8,6 +8,9 @@ extends Control
 signal closed
 
 const FILL_SECONDS_PER_LEVEL: float = 1.1
+# How long one level's worth of bar takes to fill; the profile's "Unlock all
+# levels" cheat speeds it up.
+var fill_seconds_per_level: float = FILL_SECONDS_PER_LEVEL
 
 @onready var title_label: Label = $Center/Panel/Margin/VBox/TitleLabel
 @onready var result_label: Label = $Center/Panel/Margin/VBox/ResultLabel
@@ -62,7 +65,7 @@ func _animate(xp_from: int, xp_to: int) -> void:
 		var target: int = mini(xp_to, boundary)
 		var end_value: float = 1.0 if target == boundary else Saves.level_progress(target)
 		var tween := create_tween()
-		tween.tween_property(bar, "value", end_value, FILL_SECONDS_PER_LEVEL * (end_value - bar.value)) \
+		tween.tween_property(bar, "value", end_value, fill_seconds_per_level * (end_value - bar.value)) \
 			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		await tween.finished
 		current = target
@@ -75,6 +78,16 @@ func _animate(xp_from: int, xp_to: int) -> void:
 				bar.value = 0.0
 			level_up_label.text = "Level up!  You're now level %d." % (level + 1)
 			level_up_label.visible = true
+			# Whatever this level unlocks, shown as it's reached.
+			var reached: Array[Dictionary] = Saves.unlocks_between(level, level + 1)
+			if not reached.is_empty():
+				var reached_names: Array[String] = []
+				for u in reached:
+					reached_names.append(str(u["name"]))
+				unlock_label.text = "Unlocked: %s" % ", ".join(reached_names)
+				unlock_label.visible = true
+			else:
+				unlock_label.visible = false
 			await get_tree().process_frame  # let it lay out before reading its size
 			var pop := create_tween()
 			level_up_label.pivot_offset = level_up_label.size / 2.0
