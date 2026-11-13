@@ -95,7 +95,7 @@ func _ready() -> void:
 	wizard_vision_check.toggled.connect(_on_wizard_vision_toggled)
 
 	for sec in RESPONSE_TIMES:
-		response_time_option.add_item(("%gs" % sec) if sec > 0.0 else "0s (dice only)")
+		response_time_option.add_item((String.num(sec) + "s") if sec > 0.0 else "0s (dice only)")
 	response_time_option.selected = maxi(0, RESPONSE_TIMES.find(load_response_time()))
 	response_time_option.tooltip_text = "How long the piece walks after the dice land -- the time everyone has to pause and react. (The dice always take 0.5 s on top.)"
 	response_time_option.item_selected.connect(func(i: int) -> void:
