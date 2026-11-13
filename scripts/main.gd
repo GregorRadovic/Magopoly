@@ -3105,7 +3105,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# The piece is standing wherever the walk left it; anything other than
 	# the normal move (a cancelled roll, a jail roll that isn't doubles) puts
 	# it back on its real space.
-	if not _roll_walk_arrived(player, roll) or _roll_cancelled or (player.in_jail and not _dice_are_doubles()):
+	if not _roll_walk_arrived(player, _roll_walk_steps(player)) or _roll_cancelled or (player.in_jail and not _dice_are_doubles()):
 		_snap_to_space(player)
 
 	# Belt-and-suspenders: _prompt_slot is only ever meant to be set mid
