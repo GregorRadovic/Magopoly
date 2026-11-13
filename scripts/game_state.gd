@@ -85,6 +85,14 @@ var tutorial_mode: bool = false
 # rules) or "spells" (casting spells). See main.gd's _tutorial_steps().
 var tutorial_kind: String = "spells"
 
+
+# The clock the game's own timings run on (response windows, the roll walk,
+# the dice tumble). It's the real clock times Engine.time_scale, so an
+# automated test that speeds the engine up speeds these up with it -- in a
+# normal game time_scale is 1 and this is just Time.get_ticks_msec().
+func now_msec() -> int:
+	return int(Time.get_ticks_usec() / 1000.0 * Engine.time_scale)
+
 # --- Online play (set by Net._recv_start; see net.gd) ------------------
 # True when this session was launched from the online lobby rather than the
 # local Start Menu. Local games leave all of these at their defaults, and
