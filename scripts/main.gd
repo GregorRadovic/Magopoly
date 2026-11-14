@@ -240,7 +240,7 @@ const TUTORIAL_OPPONENT_SPELLS: Array[String] = [
 
 signal debt_resolved
 # Emitted whenever a trade negotiation reaches a conclusion (finalized or
-# declined), so an AI-initiated trade (see _ai_trade_check) can await the
+# declined), so an AI-initiated trade can await the
 # outcome before moving on to its next check.
 signal trade_concluded
 # Emitted by _on_space_clicked() when _picking_promised_land_property is
@@ -623,9 +623,9 @@ var _trade2_spells_offered: Array[int] = []
 # to the other side before it can be accepted.
 var _trade_proposer: int = -1
 var _trade_can_accept: bool = false
-# True only for a trade _ai_trade_check() itself started, so _send_trade_offer()
-# knows to actually evaluate a counter-offer instead of just always declining
-# (that's still what happens for a trade an AI didn't ask for).
+# True only for a trade a Computer player started. They no longer offer
+# trades (see _ai_trade_acceptable), so this stays false; kept so the trade
+# flow's checks of it still read correctly.
 var _ai_initiated_trade: bool = false
 
 # --- Tutorial mode ----------------------------------------------------
@@ -2186,7 +2186,8 @@ func _ai_run_end_of_turn_checks(player: Node2D) -> void:
 	if player.is_placeholder_ai:
 		return
 	_ai_mortgage_check(player)
-	await _ai_trade_check(player)
+	# No trade offers any more (they kept proposing the same one) -- a
+	# Computer player only answers trades; see _ai_trade_acceptable().
 	_ai_house_check(player)
 
 
@@ -4261,13 +4262,9 @@ func _send_trade_offer() -> void:
 	# controls to the other player's machine (and off this one).
 	_refresh_action_buttons()
 	if players[responder].is_ai:
-		if _ai_initiated_trade:
-			# Evaluate whatever the other side just sent back -- see
-			# _ai_evaluate_trade_counter_offer() for what it'll accept.
-			_ai_evaluate_trade_counter_offer(responder)
+		if _ai_trade_acceptable(responder):
+			_finalize_trade()
 		else:
-			# A trade it didn't ask for itself; it has no negotiation logic
-			# for that yet, so it just says no.
 			_on_decline_trade_pressed()
 
 
@@ -4359,109 +4356,37 @@ func _on_decline_trade_pressed() -> void:
 	_end_trade()
 
 
-# b) TradeCheck: for every color set the AI is exactly one property short of
-# completing, offers a trade for the missing property if another player
-# owns it (does nothing if it's unowned). Only chases the sets that were
-# nearly complete at the start of the check -- a trade completed along the
-# way doesn't trigger re-scanning for newly-opened opportunities this turn.
-func _ai_trade_check(player: Node2D) -> void:
-	for color_name in _ai_nearly_completed_sets(player):
-		if player.is_bankrupt:
-			return
-		var group: Array = board.get_color_group(color_name)
-		var missing_index: int = -1
-		for space_index in group:
-			if board.spaces[space_index].owner_id != player.player_id:
-				missing_index = space_index
+# A Computer player's whole trading policy: it never makes offers, and it
+# accepts a trade only if the properties it gets complete a color set it
+# doesn't already have (a monopoly) and it isn't asked to pay any money.
+# Everything else is declined.
+func _ai_trade_acceptable(ai_index: int) -> bool:
+	var is_first: bool = ai_index == _trader1
+	var ai_money_edit: LineEdit = trader1_money_edit if is_first else trader2_money_edit
+	if maxi(0, int(ai_money_edit.text)) > 0:
+		return false
+	var gives: Array[int] = _trade1_offered if is_first else _trade2_offered
+	var gets: Array[int] = _trade2_offered if is_first else _trade1_offered
+	if gets.is_empty():
+		return false
+	var pid: int = players[ai_index].player_id
+	var after: Array[int] = players[ai_index].owned_property_indices.duplicate()
+	for i in gives:
+		after.erase(i)
+	for i in gets:
+		if not after.has(i):
+			after.append(i)
+	for color_name in REAL_PROPERTY_COLORS:
+		if _owns_full_color_group(pid, color_name):
+			continue
+		var complete: bool = true
+		for i in board.get_color_group(color_name):
+			if not after.has(i):
+				complete = false
 				break
-		if missing_index == -1:
-			continue
-		var owner_id: int = board.spaces[missing_index].owner_id
-		if owner_id == -1 or owner_id == player.player_id or players[owner_id].is_bankrupt:
-			continue
-		var offer_index: int = _ai_pick_trade_offer(player, color_name)
-		if offer_index == -1:
-			continue
-		await _ai_propose_trade(player.player_id, owner_id, offer_index, missing_index)
-
-
-# Color sets where the AI owns every property but exactly one.
-func _ai_nearly_completed_sets(player: Node2D) -> Array[String]:
-	var result: Array[String] = []
-	for color_name in PROPERTY_COLOR_ORDER:
-		var group: Array = board.get_color_group(color_name)
-		if group.size() <= 1:
-			continue
-		var owned_count: int = 0
-		for space_index in group:
-			if board.spaces[space_index].owner_id == player.player_id:
-				owned_count += 1
-		if owned_count == group.size() - 1:
-			result.append(color_name)
-	return result
-
-
-# The most expensive property the AI can safely offer away in exchange for
-# `target_color`: never one from that same set (defeats the point of the
-# trade), never one from a set it already owns outright (protects its
-# monopolies), and never one with houses anywhere in its group (the trade
-# UI won't allow that anyway).
-func _ai_pick_trade_offer(player: Node2D, target_color: String) -> int:
-	var candidates: Array[int] = []
-	for space_index in player.owned_property_indices:
-		var color_name: String = board.get_space_info(space_index).get("color", "")
-		if color_name == target_color:
-			continue
-		if _owns_full_color_group(player.player_id, color_name):
-			continue
-		if _max_houses_in_group(color_name, player.player_id) > 0:
-			continue
-		candidates.append(space_index)
-	if candidates.is_empty():
-		return -1
-	candidates.sort_custom(func(a, b): return board.get_space_info(a).get("price", 0) > board.get_space_info(b).get("price", 0))
-	return candidates[0]
-
-
-func _ai_propose_trade(ai_id: int, target_id: int, offer_index: int, want_index: int) -> void:
-	_ai_initiated_trade = true
-	_start_trade(ai_id, target_id)
-	_trade1_offered.append(offer_index)
-	_trade2_offered.append(want_index)
-	_update_player_panels()
-	_send_trade_offer()
-	# When the other side is a Computer too, it answers inside
-	# _send_trade_offer() -- the trade is already over (and trade_concluded
-	# already emitted) by the time we get here. Waiting for that signal again
-	# would hang this AI's turn forever.
-	if _trading:
-		await trade_concluded
-
-
-# Called when a modified counter-offer comes back to an AI in a trade it
-# itself started (see _ai_trade_check). It only ever accepts a clean
-# one-for-one property swap with no money attached, and only if what it
-# would be giving away still respects the same rules that governed its
-# original offer. Anything else -- more properties, any money, or a
-# property from a protected set -- gets declined.
-func _ai_evaluate_trade_counter_offer(ai_index: int) -> void:
-	var ai_offered: Array[int] = _trade1_offered if ai_index == _trader1 else _trade2_offered
-	var other_offered: Array[int] = _trade2_offered if ai_index == _trader1 else _trade1_offered
-	var money1: int = int(trader1_money_edit.text)
-	var money2: int = int(trader2_money_edit.text)
-	# No spell-negotiation logic yet -- a counter-offer that touches spells
-	# at all (either side) is always declined, same as one with extra
-	# properties or money attached.
-	var acceptable: bool = ai_offered.size() == 1 and other_offered.size() == 1 and money1 == 0 and money2 == 0 and _trade1_spells_offered.is_empty() and _trade2_spells_offered.is_empty()
-	if acceptable:
-		var give_color: String = board.get_space_info(ai_offered[0]).get("color", "")
-		var get_color: String = board.get_space_info(other_offered[0]).get("color", "")
-		if give_color == get_color or _owns_full_color_group(players[ai_index].player_id, give_color):
-			acceptable = false
-	if acceptable:
-		_finalize_trade()
-	else:
-		_on_decline_trade_pressed()
+		if complete:
+			return true
+	return false
 
 
 func _end_trade() -> void:
