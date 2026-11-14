@@ -837,6 +837,9 @@ func _current_landing(roller: Node2D) -> int:
 # How much a change to the bot's own roll (from `steps` to `new_steps`) is
 # worth.
 func _move_gain(p: Node2D, new_steps: int) -> float:
+	# A jail roll that isn't doubles doesn't move anyone: nothing to gain.
+	if p.in_jail and not main._dice_are_doubles():
+		return 0.0
 	return move_value(p, new_steps) - move_value(p, _current_steps(p))
 
 
@@ -1369,7 +1372,15 @@ func _evaluate(p: Node2D, spell: String, level: int, phase: String) -> Dictionar
 				cut = mini(d1, d2)
 			elif level == 3:
 				cut = maxi(d1, d2)
+			# Double zero counts as doubles: out of Jail, or another roll.
+			var makes_doubles: bool = level == 1 and not main._dice_are_doubles()
+			if p.in_jail:
+				if not makes_doubles:
+					return {}
+				return {"value": 50.0 - jail_value(p), "why": "double zero counts as doubles -- out of Jail."}
 			var g: float = _move_gain(p, _current_steps(p) - cut)
+			if makes_doubles and p.consecutive_doubles < 2:
+				return {"value": g + 40.0, "why": "staying put beats where it's heading, and double zero is doubles: another roll."}
 			return {"value": g, "why": "zeroing dice keeps it off a bad square."}
 		"Dodge":
 			if phase != "roll_self":

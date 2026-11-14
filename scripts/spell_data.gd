@@ -495,7 +495,7 @@ const SPELLS: Dictionary = {
 	# condition on the card holds -- see _spell_free_cast_allowed() in main.gd.
 	"Deny Rights": {
 		"color": "orange",
-		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 4 Deny Rights.png",
+		"icon": "res://Magopoly Assets/Cards/AB B 4 Deny Rights.png",
 		"free_cast": true,
 		"levels": {
 			1: {"description": "Counter a spell being cast at Level 1. Free if it targets a spell cast by a player in jail.", "timings": ["spell_response"]},
@@ -537,10 +537,10 @@ const SPELLS: Dictionary = {
 	# Jail, where it only moves them on doubles) -- see _perform_roll().
 	"Siren's Song": {
 		"color": "ocean_blue",
-		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 8 Sirens Song.png",
+		"icon": "res://Magopoly Assets/Cards/AB B 8 Sirens Song.png",
 		"levels": {
-			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
-			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
+			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. If you pass Go this way, you don't collect $200 or a spell card. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
+			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. If you pass Go this way, you don't collect $200 or a spell card. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
 		},
 	},
 }
