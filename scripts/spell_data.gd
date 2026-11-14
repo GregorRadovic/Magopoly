@@ -773,9 +773,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 7 1 Ensnaring Roots.png",
 		"kind": "landmark",
 		"levels": {
-			1: {"description": "When an opponent passes this space, discard this card and subtract 2 from their roll.", "roll_penalty": 2},
-			2: {"description": "When an opponent passes this space, discard this card and subtract 4 from their roll.", "roll_penalty": 4},
-			3: {"description": "When an opponent passes this space, discard this card and subtract 6 from their roll.", "roll_penalty": 6},
+			1: {"description": "When an opponent passes this space, discard this card and subtract 2 from their remaining movement this roll (to a minimum of 0).", "roll_penalty": 2},
+			2: {"description": "When an opponent passes this space, discard this card and subtract 4 from their remaining movement this roll (to a minimum of 0).", "roll_penalty": 4},
+			3: {"description": "When an opponent passes this space, discard this card and subtract 6 from their remaining movement this roll (to a minimum of 0).", "roll_penalty": 6},
 		},
 	},
 	"Stabilized Portal": {

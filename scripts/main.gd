@@ -8482,32 +8482,40 @@ func _apply_pre_move_landmarks(player: Node2D, roll: int, simulate: bool = false
 	if _landmarks.is_empty() or roll <= 0:
 		return roll
 	var start: int = player.current_space
+	# Ensnaring Roots: the mover always reaches the Roots' space, then loses
+	# `roll_penalty` from the movement they have LEFT (never below 0) -- so
+	# they land on the Roots, or carry on past them with what's left. Another
+	# Roots further along can catch them again.
+	var travelled: int = 0
+	var remaining: int = roll
 	var sprung: Array[int] = []
 	for _guard in 40:
+		var at: int = (start + travelled) % board.TOTAL_SPACES
 		var hit: Dictionary = {}
 		var hit_dist: int = 1 << 30
 		for lm in _landmarks:
 			if lm["spell"] != "Ensnaring Roots" or int(lm["owner"]) == player.player_id or sprung.has(int(lm["id"])):
 				continue
-			var d: int = posmod(int(lm["space"]) - start, board.TOTAL_SPACES)
-			if d == 0:
+			var d: int = posmod(int(lm["space"]) - at, board.TOTAL_SPACES)
+			# Roots on the starting square only count after a full lap; a
+			# second Roots on the square just reached catches them at once.
+			if d == 0 and travelled == 0:
 				d = board.TOTAL_SPACES
-			if d <= roll and d < hit_dist:
+			if d <= remaining and d < hit_dist:
 				hit = lm
 				hit_dist = d
 		if hit.is_empty():
 			break
 		var penalty: int = int(_lvl("Ensnaring Roots", int(hit["level"]), "roll_penalty", 0))
-		roll = maxi(0, roll - penalty)
+		travelled += hit_dist
+		remaining = maxi(0, remaining - hit_dist - penalty)
 		sprung.append(int(hit["id"]))
-		if simulate:
-			if roll <= 0:
-				return roll
-			continue
-		_log("%s's Ensnaring Roots on %s catch %s: their roll is reduced by %d (now %d)." % [PLAYER_NAMES[int(hit["owner"])], _property_name(int(hit["space"])), PLAYER_NAMES[player.player_id], penalty, roll])
-		_remove_landmark(hit, "it was triggered")
-		if roll <= 0:
-			return roll
+		if not simulate:
+			_log("%s's Ensnaring Roots on %s catch %s: %d movement left after them (now %d in all)." % [PLAYER_NAMES[int(hit["owner"])], _property_name(int(hit["space"])), PLAYER_NAMES[player.player_id], remaining, travelled + remaining])
+			_remove_landmark(hit, "it was triggered")
+		if remaining <= 0:
+			break
+	roll = travelled + remaining
 	var used: Array[int] = []
 	for _guard in 40:
 		var landing: int = (start + roll) % board.TOTAL_SPACES
