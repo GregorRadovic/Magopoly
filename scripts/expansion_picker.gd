@@ -4,7 +4,8 @@ extends VBoxContainer
 # The Expansions picker on the Local Game and Host Game setup screens: an
 # "Expansions" heading, then one checkbox (with the expansion's icon) per
 # expansion this player has unlocked (see expansions.gd /
-# Saves.unlocked_expansions()), and a Select All / Unselect All button.
+# Saves.unlocked_expansions()). A "Select All" checkbox beside the heading
+# checks / unchecks them all, and is itself checked exactly when all are.
 # Checked ones add their cards to the Spell Deck when the game starts. With
 # nothing unlocked yet, it says what the next expansion takes instead.
 
@@ -22,16 +23,19 @@ const ICONS: Dictionary = {
 }
 
 var _boxes: Dictionary = {}  # expansion id -> CheckBox
-var _all_button: Button
+var _all_box: CheckBox
 
 
 func _ready() -> void:
 	add_theme_constant_override("separation", 8)
+	var heading_row := HBoxContainer.new()
+	heading_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	heading_row.add_theme_constant_override("separation", 30)
+	add_child(heading_row)
 	var heading := Label.new()
 	heading.text = "Expansions"
-	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	heading.add_theme_font_size_override("font_size", FONT_SIZE)
-	add_child(heading)
+	heading_row.add_child(heading)
 
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER  # like the mode checkboxes above
@@ -61,10 +65,11 @@ func _ready() -> void:
 		row.add_child(hint)
 		return
 
-	_all_button = Button.new()
-	_all_button.add_theme_font_size_override("font_size", FONT_SIZE - 2)
-	_all_button.pressed.connect(_on_all_pressed)
-	row.add_child(_all_button)
+	_all_box = CheckBox.new()
+	_all_box.text = "Select All"
+	_all_box.add_theme_font_size_override("font_size", FONT_SIZE - 2)
+	_all_box.toggled.connect(_on_all_toggled)
+	heading_row.add_child(_all_box)
 	_update_all_button()
 
 
@@ -88,15 +93,17 @@ func _all_selected() -> bool:
 	return true
 
 
+# Keep the Select All box in step with the expansions (without re-firing it).
 func _update_all_button() -> void:
-	if _all_button:
-		_all_button.text = "Unselect All" if _all_selected() else "Select All"
+	if _all_box:
+		_all_box.set_pressed_no_signal(_all_selected())
 
 
-func _on_all_pressed() -> void:
-	var select: bool = not _all_selected()
+# Checked: select every expansion. Unchecked (only possible while all were
+# selected): clear them all.
+func _on_all_toggled(on: bool) -> void:
 	for id in _boxes:
-		(_boxes[id] as CheckBox).button_pressed = select
+		(_boxes[id] as CheckBox).set_pressed_no_signal(on)
 	_update_all_button()
 
 
