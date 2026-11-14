@@ -299,6 +299,9 @@ var player_header_labels: Array[Label] = []
 var player_properties_flows: Array[HFlowContainer] = []
 var player_spells_flows: Array[HFlowContainer] = []
 var player_attunement_flows: Array[HFlowContainer] = []
+# Each player's ongoing effects and landmarks, on their own line under the
+# cards (built in _build_player_rows; hidden while empty).
+var player_effects_flows: Array[HFlowContainer] = []
 var player_rows: Array[VBoxContainer] = []
 var player_row_separators: Array[HSeparator] = []
 @onready var trade_hseparator: HSeparator = $UI/PlayersPanel/VBox/HSeparatorTrade
@@ -1575,6 +1578,13 @@ func _build_player_rows() -> void:
 		player_properties_flows.append(row.get_node("AssetsRow/PropertiesFlow"))
 		player_spells_flows.append(row.get_node("AssetsRow/SpellsFlow"))
 		player_attunement_flows.append(row.get_node("AssetsRow/AttunementFlow"))
+		var effects := HFlowContainer.new()
+		effects.name = "EffectsFlow"
+		effects.add_theme_constant_override("h_separation", 22)
+		effects.add_theme_constant_override("v_separation", 4)
+		effects.visible = false
+		row.add_child(effects)
+		player_effects_flows.append(effects)
 
 
 # Makes an action-panel button stand out (amber fill, gold border), or puts
@@ -9305,17 +9315,24 @@ func _update_player_panels() -> void:
 			chip.text = "%s +%d" % [color_name.capitalize(), count]
 			chip.add_theme_color_override("font_color", board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE))
 			attunement_flow.add_child(chip)
-		# Ongoing effects on this player, and
-		# a pending Fated Ending -- hover for the card text.
+		# Ongoing effects on this player, a pending Fated Ending, and their
+		# landmarks go on their own line under the cards -- hover for the
+		# card text. (The column to the right is Temporary Attunement only.)
+		var effects_flow: HFlowContainer = player_effects_flows[i]
+		for child in effects_flow.get_children():
+			child.queue_free()
+		var effect_count: int = 0
 		for e in _ongoing:
 			var shown_on: int = int(e["target"]) if int(e["target"]) != -1 else int(e["caster"])
 			if shown_on != i:
 				continue
 			var effect_chip: RichTextLabel = _spell_chip(str(e["spell"]), _ongoing_chip_text(e).substr(str(e["spell"]).length()))
 			effect_chip.tooltip_text = str(SpellData.SPELLS[e["spell"]]["levels"][int(e["level"])].get("description", ""))
-			attunement_flow.add_child(effect_chip)
+			effects_flow.add_child(effect_chip)
+			effect_count += 1
 		if not players[i].fated_ending.is_empty():
-			attunement_flow.add_child(_spell_chip("Fated Ending", " (Level %d)" % int(players[i].fated_ending.get("level", 1))))
+			effects_flow.add_child(_spell_chip("Fated Ending", " (Level %d)" % int(players[i].fated_ending.get("level", 1))))
+			effect_count += 1
 		# This player's landmarks (Buried Treasures grouped into one line).
 		var treasure_spaces: Array[String] = []
 		for lm in _landmarks:
@@ -9326,11 +9343,14 @@ func _update_player_panels() -> void:
 				continue
 			var lm_chip: RichTextLabel = _spell_chip(str(lm["spell"]), _landmark_chip_suffix(lm))
 			lm_chip.tooltip_text = str(SpellData.SPELLS[lm["spell"]]["levels"][int(lm["level"])].get("description", ""))
-			attunement_flow.add_child(lm_chip)
+			effects_flow.add_child(lm_chip)
+			effect_count += 1
 		if not treasure_spaces.is_empty():
 			var treasure_chip: RichTextLabel = _spell_chip("Buried Treasure", " x%d" % treasure_spaces.size())
 			treasure_chip.tooltip_text = "Buried Treasure on: " + ", ".join(treasure_spaces)
-			attunement_flow.add_child(treasure_chip)
+			effects_flow.add_child(treasure_chip)
+			effect_count += 1
+		effects_flow.visible = effect_count > 0
 
 	if _trading:
 		_populate_trade_flow(trader1_flow, _trade1_offered)
