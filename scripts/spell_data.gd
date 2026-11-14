@@ -495,7 +495,7 @@ const SPELLS: Dictionary = {
 	# condition on the card holds -- see _spell_free_cast_allowed() in main.gd.
 	"Deny Rights": {
 		"color": "orange",
-		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 4 Deny Rights.png",
+		"icon": "res://Magopoly Assets/Cards/AB B 4 Deny Rights.png",
 		"free_cast": true,
 		"levels": {
 			1: {"description": "Counter a spell being cast at Level 1. Free if it targets a spell cast by a player in jail.", "timings": ["spell_response"]},
@@ -537,10 +537,10 @@ const SPELLS: Dictionary = {
 	# Jail, where it only moves them on doubles) -- see _perform_roll().
 	"Siren's Song": {
 		"color": "ocean_blue",
-		"icon": "res://Magopoly Assets/Magopoly Expansions/AB B 8 Sirens Song.png",
+		"icon": "res://Magopoly Assets/Cards/AB B 8 Sirens Song.png",
 		"levels": {
-			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
-			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
+			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. If you pass Go this way, you don't collect $200 or a spell card. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
+			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. If you pass Go this way, you don't collect $200 or a spell card. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
 		},
 	},
 
@@ -741,7 +741,7 @@ const SPELLS: Dictionary = {
 	},
 	"Treasure Map": {
 		"color": "orange",
-		"icon": "res://Magopoly Assets/Magopoly Expansions/D 4 1 Treasure Map.png",
+		"icon": "res://Magopoly Assets/Cards/D 4 1 Treasure Map.png",
 		"levels": {
 			1: {"description": "Create 3 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 3},
 			2: {"description": "Create 6 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 6},
@@ -773,9 +773,9 @@ const SPELLS: Dictionary = {
 		"icon": "res://Magopoly Assets/Magopoly Expansions/D 7 1 Ensnaring Roots.png",
 		"kind": "landmark",
 		"levels": {
-			1: {"description": "When an opponent passes this space, discard this card and subtract 2 from their roll.", "roll_penalty": 2},
-			2: {"description": "When an opponent passes this space, discard this card and subtract 4 from their roll.", "roll_penalty": 4},
-			3: {"description": "When an opponent passes this space, discard this card and subtract 6 from their roll.", "roll_penalty": 6},
+			1: {"description": "When an opponent passes this space, discard this card and subtract 2 from their remaining movement this roll (to a minimum of 0).", "roll_penalty": 2},
+			2: {"description": "When an opponent passes this space, discard this card and subtract 4 from their remaining movement this roll (to a minimum of 0).", "roll_penalty": 4},
+			3: {"description": "When an opponent passes this space, discard this card and subtract 6 from their remaining movement this roll (to a minimum of 0).", "roll_penalty": 6},
 		},
 	},
 	"Stabilized Portal": {

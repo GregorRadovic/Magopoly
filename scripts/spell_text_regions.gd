@@ -431,7 +431,7 @@ const REGIONS: Dictionary = {
 		},
 		"post": [],
 	},
-	"res://Magopoly Assets/Magopoly Expansions/AB B 4 Deny Rights.png": {
+	"res://Magopoly Assets/Cards/AB B 4 Deny Rights.png": {
 		"pre": [],
 		"levels": {
 			1: [Rect2(0.0927, 0.6577, 0.7980, 0.0387)],
@@ -467,11 +467,11 @@ const REGIONS: Dictionary = {
 		},
 		"post": [Rect2(0.0927, 0.7988, 0.7107, 0.0368), Rect2(0.0907, 0.8365, 0.7440, 0.0363), Rect2(0.0927, 0.8743, 0.3133, 0.0301)],
 	},
-	"res://Magopoly Assets/Magopoly Expansions/AB B 8 Sirens Song.png": {
-		"pre": [Rect2(0.0900, 0.6310, 0.6880, 0.0330), Rect2(0.0913, 0.6654, 0.3880, 0.0330), Rect2(0.0907, 0.7146, 0.8007, 0.0330), Rect2(0.0913, 0.7486, 0.8013, 0.0335), Rect2(0.0920, 0.7820, 0.5260, 0.0330)],
+	"res://Magopoly Assets/Cards/AB B 8 Sirens Song.png": {
+		"pre": [Rect2(0.0900, 0.6319, 0.7920, 0.0301), Rect2(0.0907, 0.6673, 0.1740, 0.0253), Rect2(0.0907, 0.7055, 0.8073, 0.0306), Rect2(0.0913, 0.7361, 0.7387, 0.0301), Rect2(0.0913, 0.7658, 0.7847, 0.0301), Rect2(0.0907, 0.7964, 0.6647, 0.0301)],
 		"levels": {
-			1: [Rect2(0.0927, 0.8313, 0.2833, 0.0315)],
-			2: [Rect2(0.0927, 0.8791, 0.2833, 0.0311)],
+			1: [Rect2(0.0927, 0.8370, 0.2553, 0.0296)],
+			2: [Rect2(0.0927, 0.8810, 0.2553, 0.0292)],
 		},
 		"post": [],
 	},
@@ -641,7 +641,7 @@ const REGIONS: Dictionary = {
 		},
 		"post": [],
 	},
-	"res://Magopoly Assets/Magopoly Expansions/D 4 1 Treasure Map.png": {
+	"res://Magopoly Assets/Cards/D 4 1 Treasure Map.png": {
 		"pre": [],
 		"levels": {
 			1: [Rect2(0.0927, 0.6424, 0.6260, 0.0344), Rect2(0.0920, 0.6807, 0.6407, 0.0368)],

@@ -299,6 +299,9 @@ var player_header_labels: Array[Label] = []
 var player_properties_flows: Array[HFlowContainer] = []
 var player_spells_flows: Array[HFlowContainer] = []
 var player_attunement_flows: Array[HFlowContainer] = []
+# Each player's ongoing effects and landmarks, on their own line under the
+# cards (built in _build_player_rows; hidden while empty).
+var player_effects_flows: Array[HFlowContainer] = []
 var player_rows: Array[VBoxContainer] = []
 var player_row_separators: Array[HSeparator] = []
 @onready var trade_hseparator: HSeparator = $UI/PlayersPanel/VBox/HSeparatorTrade
@@ -431,6 +434,9 @@ var _roll_seq: int = 0
 # Knockout Punch): once the response window closes, _perform_roll() cancels
 # the move entirely. Reset at the start of every roll.
 var _roll_cancelled: bool = false
+# Siren's Song drew this roll: if its move passes Go, no $200 and no spell
+# card (the card's rider). Consumed by _move_and_land().
+var _siren_roll: bool = false
 # Set when Bribe the Guards L1 frees whoever's jail roll is in flight: they
 # move with that roll normally, but doubles don't earn an extra turn.
 var _jail_released_mid_roll: bool = false
@@ -1112,6 +1118,9 @@ func _host_take_player_turn() -> void:
 # ============================================================================
 
 func _start_tutorial() -> void:
+	# Zoomed cards have to fit above the tutorial's text box (top edge at
+	# y = 948 on the 1080-tall screen; the zoom is centred at 540).
+	spell_card.max_height = 780.0
 	_tutorial_active = true
 	_tutorial_step = -1
 	_tutorial_advance()
@@ -1572,6 +1581,13 @@ func _build_player_rows() -> void:
 		player_properties_flows.append(row.get_node("AssetsRow/PropertiesFlow"))
 		player_spells_flows.append(row.get_node("AssetsRow/SpellsFlow"))
 		player_attunement_flows.append(row.get_node("AssetsRow/AttunementFlow"))
+		var effects := HFlowContainer.new()
+		effects.name = "EffectsFlow"
+		effects.add_theme_constant_override("h_separation", 22)
+		effects.add_theme_constant_override("v_separation", 4)
+		effects.visible = false
+		row.add_child(effects)
+		player_effects_flows.append(effects)
 
 
 # Makes an action-panel button stand out (amber fill, gold border), or puts
@@ -2920,7 +2936,10 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 			# A roll's window lasts until its walk arrives (and never less
 			# than the usual window -- the tutorial's longer ones, online's
 			# extra margin).
-			var walk_done: bool = _rw_done and _rw_seq == _roll_seq if _roll_in_flight else true
+			# (With spells waiting on the stack the piece stands still -- see
+			# _roll_walk_frozen() -- so the window closes on its own deadline
+			# to resolve them; the walk runs once the stack is clear.)
+			var walk_done: bool = _rw_done and _rw_seq == _roll_seq if _roll_in_flight and _spell_stack.is_empty() else true
 			if not frozen and walk_done and GameState.now_msec() >= _window_deadline_msec:
 				break
 			await get_tree().process_frame
@@ -3220,10 +3239,12 @@ func _auto_pause_applies(opt: int, event: String, seat: int, trigger_seat: int) 
 	return false  # PAUSE_MANUAL / unknown
 
 
-# The two dice currently show the same value. A die zeroed out (Veto, Fated
-# Ending) has no value, so 0 + 0 isn't doubles.
+# The two dice currently show the same value. Double zero (Veto Level 1)
+# counts too -- by design: it can, say, get a player out of Jail. (Fated
+# Ending zeroes just one die, so it never makes doubles by itself.) -1 means
+# no dice yet.
 func _dice_are_doubles() -> bool:
-	return _die1 == _die2 and _die1 > 0
+	return _die1 == _die2 and _die1 >= 0
 
 
 func _perform_roll(die1: int, die2: int) -> void:
@@ -3283,9 +3304,11 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# Siren's Song: applied last, so it accounts for every "before rolling"
 	# change above. Anything cast during the response window can still move
 	# the roll afterwards.
+	_siren_roll = false
 	if player.siren_song_active:
 		player.siren_song_active = false
 		var extra: int = _siren_song_extra_steps(player, roll)
+		_siren_roll = extra >= 0
 		if extra > 0:
 			roll += extra
 			_log("Siren's Song draws %s's roll up by %d (now %d), toward %s." % [PLAYER_NAMES[current_player], extra, roll, _property_name((player.current_space + roll) % board.TOTAL_SPACES)])
@@ -3425,8 +3448,14 @@ var _rw_start_msec: int = -1
 var _rw_done: bool = false
 
 
+# The piece only walks in the roll's own movement window: not while anyone's
+# paused, a spell is being cast or resolved, or a cast spell is still waiting
+# on the stack for its response window. (Once the stack is clear, the walk
+# starts over from the start tile.) _spell_stack_names() reads the snapshot
+# mirror on a client, so its piece behaves the same.
 func _roll_walk_frozen() -> bool:
-	return _response_window_paused_by.has(true) or _casting_spell or _resolving_stack
+	return _response_window_paused_by.has(true) or _casting_spell or _resolving_stack \
+		or not _spell_stack_names().is_empty()
 
 
 func _update_roll_walk() -> void:
@@ -3571,7 +3600,18 @@ func _move_and_land(player: Node2D, roll: int) -> bool:
 	# a player past Go more than once in one move -- $200 and a spell draw for
 	# each pass.
 	var go_passes: int = new_space_raw / board.TOTAL_SPACES if new_space_raw > 0 else 0
-	if go_passes > 0:
+	var siren_move: bool = _siren_roll and player.player_id == current_player
+	_siren_roll = false
+	if go_passes > 0 and siren_move:
+		# Siren's Song's rider: passing Go on the move it drew pays nothing.
+		var times: String = "" if go_passes == 1 else " %d times" % go_passes
+		dice_label.text += "\nYou passed Go%s -- but Siren's Song means no $200 and no spell card." % times
+		_log("%s passed Go%s, but collects nothing (Siren's Song)." % [PLAYER_NAMES[player.player_id], times])
+		# Still a pass of Go for everything else (Lingering Magic's rotations...).
+		for _i in go_passes:
+			_on_player_passed_go(player)
+		_update_player_panels()
+	elif go_passes > 0:
 		player.money += 200 * go_passes
 		var drawn: Array[String] = []
 		for _i in go_passes:
@@ -8442,32 +8482,40 @@ func _apply_pre_move_landmarks(player: Node2D, roll: int, simulate: bool = false
 	if _landmarks.is_empty() or roll <= 0:
 		return roll
 	var start: int = player.current_space
+	# Ensnaring Roots: the mover always reaches the Roots' space, then loses
+	# `roll_penalty` from the movement they have LEFT (never below 0) -- so
+	# they land on the Roots, or carry on past them with what's left. Another
+	# Roots further along can catch them again.
+	var travelled: int = 0
+	var remaining: int = roll
 	var sprung: Array[int] = []
 	for _guard in 40:
+		var at: int = (start + travelled) % board.TOTAL_SPACES
 		var hit: Dictionary = {}
 		var hit_dist: int = 1 << 30
 		for lm in _landmarks:
 			if lm["spell"] != "Ensnaring Roots" or int(lm["owner"]) == player.player_id or sprung.has(int(lm["id"])):
 				continue
-			var d: int = posmod(int(lm["space"]) - start, board.TOTAL_SPACES)
-			if d == 0:
+			var d: int = posmod(int(lm["space"]) - at, board.TOTAL_SPACES)
+			# Roots on the starting square only count after a full lap; a
+			# second Roots on the square just reached catches them at once.
+			if d == 0 and travelled == 0:
 				d = board.TOTAL_SPACES
-			if d <= roll and d < hit_dist:
+			if d <= remaining and d < hit_dist:
 				hit = lm
 				hit_dist = d
 		if hit.is_empty():
 			break
 		var penalty: int = int(_lvl("Ensnaring Roots", int(hit["level"]), "roll_penalty", 0))
-		roll = maxi(0, roll - penalty)
+		travelled += hit_dist
+		remaining = maxi(0, remaining - hit_dist - penalty)
 		sprung.append(int(hit["id"]))
-		if simulate:
-			if roll <= 0:
-				return roll
-			continue
-		_log("%s's Ensnaring Roots on %s catch %s: their roll is reduced by %d (now %d)." % [PLAYER_NAMES[int(hit["owner"])], _property_name(int(hit["space"])), PLAYER_NAMES[player.player_id], penalty, roll])
-		_remove_landmark(hit, "it was triggered")
-		if roll <= 0:
-			return roll
+		if not simulate:
+			_log("%s's Ensnaring Roots on %s catch %s: %d movement left after them (now %d in all)." % [PLAYER_NAMES[int(hit["owner"])], _property_name(int(hit["space"])), PLAYER_NAMES[player.player_id], remaining, travelled + remaining])
+			_remove_landmark(hit, "it was triggered")
+		if remaining <= 0:
+			break
+	roll = travelled + remaining
 	var used: Array[int] = []
 	for _guard in 40:
 		var landing: int = (start + roll) % board.TOTAL_SPACES
@@ -9287,17 +9335,24 @@ func _update_player_panels() -> void:
 			chip.text = "%s +%d" % [color_name.capitalize(), count]
 			chip.add_theme_color_override("font_color", board.COLOR_GROUP_COLORS.get(color_name, Color.WHITE))
 			attunement_flow.add_child(chip)
-		# Ongoing effects on this player, and
-		# a pending Fated Ending -- hover for the card text.
+		# Ongoing effects on this player, a pending Fated Ending, and their
+		# landmarks go on their own line under the cards -- hover for the
+		# card text. (The column to the right is Temporary Attunement only.)
+		var effects_flow: HFlowContainer = player_effects_flows[i]
+		for child in effects_flow.get_children():
+			child.queue_free()
+		var effect_count: int = 0
 		for e in _ongoing:
 			var shown_on: int = int(e["target"]) if int(e["target"]) != -1 else int(e["caster"])
 			if shown_on != i:
 				continue
 			var effect_chip: RichTextLabel = _spell_chip(str(e["spell"]), _ongoing_chip_text(e).substr(str(e["spell"]).length()))
 			effect_chip.tooltip_text = str(SpellData.SPELLS[e["spell"]]["levels"][int(e["level"])].get("description", ""))
-			attunement_flow.add_child(effect_chip)
+			effects_flow.add_child(effect_chip)
+			effect_count += 1
 		if not players[i].fated_ending.is_empty():
-			attunement_flow.add_child(_spell_chip("Fated Ending", " (Level %d)" % int(players[i].fated_ending.get("level", 1))))
+			effects_flow.add_child(_spell_chip("Fated Ending", " (Level %d)" % int(players[i].fated_ending.get("level", 1))))
+			effect_count += 1
 		# This player's landmarks (Buried Treasures grouped into one line).
 		var treasure_spaces: Array[String] = []
 		for lm in _landmarks:
@@ -9308,11 +9363,14 @@ func _update_player_panels() -> void:
 				continue
 			var lm_chip: RichTextLabel = _spell_chip(str(lm["spell"]), _landmark_chip_suffix(lm))
 			lm_chip.tooltip_text = str(SpellData.SPELLS[lm["spell"]]["levels"][int(lm["level"])].get("description", ""))
-			attunement_flow.add_child(lm_chip)
+			effects_flow.add_child(lm_chip)
+			effect_count += 1
 		if not treasure_spaces.is_empty():
 			var treasure_chip: RichTextLabel = _spell_chip("Buried Treasure", " x%d" % treasure_spaces.size())
 			treasure_chip.tooltip_text = "Buried Treasure on: " + ", ".join(treasure_spaces)
-			attunement_flow.add_child(treasure_chip)
+			effects_flow.add_child(treasure_chip)
+			effect_count += 1
+		effects_flow.visible = effect_count > 0
 
 	if _trading:
 		_populate_trade_flow(trader1_flow, _trade1_offered)
