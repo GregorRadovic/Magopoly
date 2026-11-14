@@ -2811,7 +2811,10 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 			# A roll's window lasts until its walk arrives (and never less
 			# than the usual window -- the tutorial's longer ones, online's
 			# extra margin).
-			var walk_done: bool = _rw_done and _rw_seq == _roll_seq if _roll_in_flight else true
+			# (With spells waiting on the stack the piece stands still -- see
+			# _roll_walk_frozen() -- so the window closes on its own deadline
+			# to resolve them; the walk runs once the stack is clear.)
+			var walk_done: bool = _rw_done and _rw_seq == _roll_seq if _roll_in_flight and _spell_stack.is_empty() else true
 			if not frozen and walk_done and GameState.now_msec() >= _window_deadline_msec:
 				break
 			await get_tree().process_frame
