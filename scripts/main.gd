@@ -1011,9 +1011,13 @@ func _host_take_player_turn() -> void:
 # ============================================================================
 
 func _start_tutorial() -> void:
-	# Zoomed cards have to fit above the tutorial's text box (top edge at
-	# y = 948 on the 1080-tall screen; the zoom is centred at 540).
-	spell_card.max_height = 780.0
+	# Zoomed cards (and the cast-level picker) fit in the space above the
+	# tutorial's text box -- measured from the box itself, so it holds at
+	# any screen resolution -- and below the toast strip.
+	var box_top: float = tutorial_bubble.get_global_rect().position.y - 12.0
+	spell_card.keep_above = box_top
+	spell_level_picker.keep_above = box_top
+	spell_level_picker.keep_below = 110.0
 	_tutorial_active = true
 	_tutorial_step = -1
 	_tutorial_advance()

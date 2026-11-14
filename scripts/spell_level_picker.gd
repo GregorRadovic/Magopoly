@@ -39,6 +39,11 @@ var _regions: Dictionary = {}
 var _hovered: int = -999
 var _burn_index: int = -1
 var _popup_size: Vector2i = Vector2i(900, 900)
+# Tutorial: the y the popup must stay above (the top of the tutorial's text
+# box) and below (under the toast strip); 0 = use the screen-relative band.
+# Set by main.gd, so it holds at any screen resolution.
+var keep_above: float = 0.0
+var keep_below: float = 0.0
 
 
 func _ready() -> void:
@@ -92,7 +97,8 @@ func _do_open(icon_path: String, levels: Array, burn: Dictionary, sticky: bool, 
 	if _gate.is_valid():
 		# Tutorial: fit between the toast strip at the top and the
 		# instruction bubble at the bottom (see _show_popup).
-		card_h = minf(card_h, vp.y * 0.76 - MARGIN_V * 2.0 - extra_h)
+		var band: float = (keep_above - keep_below) if keep_above > 0.0 else vp.y * 0.76
+		card_h = minf(card_h, band - MARGIN_V * 2.0 - extra_h)
 	var card_w: float = card_h * CARD_ASPECT
 	card_rect.custom_minimum_size = Vector2(card_w, card_h)
 	_popup_size = Vector2i(
@@ -111,7 +117,10 @@ func _show_popup() -> void:
 		popup_centered(_popup_size)
 		return
 	var vp: Vector2 = Vector2(get_tree().root.get_visible_rect().size)
-	popup(Rect2i(Vector2i(roundi((vp.x - _popup_size.x) * 0.5), roundi(vp.y * 0.105)), _popup_size))
+	var top: float = vp.y * 0.105
+	if keep_above > 0.0:
+		top = keep_below + maxf(0.0, (keep_above - keep_below - _popup_size.y) * 0.5)
+	popup(Rect2i(Vector2i(roundi((vp.x - _popup_size.x) * 0.5), roundi(top)), _popup_size))
 
 
 func _set_hovered(index: int) -> void:

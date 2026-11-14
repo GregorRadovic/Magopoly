@@ -5,9 +5,13 @@ extends PopupPanel
 
 const FALLBACK_SIZE: Vector2i = Vector2i(660, 920)
 
-# Tallest the zoom may be. main.gd lowers it during a tutorial, so the card
-# stays clear of the tutorial's text box along the bottom of the screen.
+# Tallest the zoom may be.
 var max_height: float = 950.0
+# Tutorial: the y the card must stay above (the top of the tutorial's text
+# box; 0 = no limit). The card then fits -- and is centred -- in the space
+# above it, whatever the screen resolution. Set by main.gd.
+var keep_above: float = 0.0
+const KEEP_ABOVE_GAP: float = 14.0
 
 @onready var icon_rect: TextureRect = $Root/IconRect
 
@@ -19,6 +23,13 @@ func show_card(icon: Texture2D) -> void:
 		popup_centered(FALLBACK_SIZE)
 		return
 	# Show it as tall as it'll comfortably fit, keeping the art's aspect.
-	var target_h: float = minf(max_height, get_tree().root.get_visible_rect().size.y * 0.9)
+	var vp: Vector2 = get_tree().root.get_visible_rect().size
+	var target_h: float = minf(max_height, vp.y * 0.9)
+	if keep_above > 0.0:
+		target_h = minf(target_h, keep_above - 2.0 * KEEP_ABOVE_GAP)
 	var target_w: float = target_h * tex.x / tex.y
+	if keep_above > 0.0:
+		var top: float = (keep_above - target_h) * 0.5
+		popup(Rect2i(Vector2i(roundi((vp.x - target_w) * 0.5), roundi(top)), Vector2i(roundi(target_w), roundi(target_h))))
+		return
 	popup_centered(Vector2i(roundi(target_w), roundi(target_h)))
