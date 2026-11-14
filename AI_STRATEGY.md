@@ -158,7 +158,10 @@ value, since they're worth holding even when there's nothing to answer:
 - It reads the board, not people: it doesn't guess what's in your hand or what
   you'll cast next.
 - Spells it doesn't understand score $0, so it never casts them.
-- Trades and houses still use the older bot rules (they ignore spells).
+- Houses still use the older bot rules (they ignore spells).
+- **Trading:** bots never offer trades. When you offer one, a bot accepts only
+  if the properties it gets complete a color set it doesn't already own, and
+  only if it isn't asked to pay any money. It declines everything else.
 - "Take Player's Turn" stand-ins (online, for a disconnected player) never cast.
 
 ## Tuning
