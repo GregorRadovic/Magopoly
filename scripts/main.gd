@@ -1011,6 +1011,9 @@ func _host_take_player_turn() -> void:
 # ============================================================================
 
 func _start_tutorial() -> void:
+	# Zoomed cards have to fit above the tutorial's text box (top edge at
+	# y = 948 on the 1080-tall screen; the zoom is centred at 540).
+	spell_card.max_height = 780.0
 	_tutorial_active = true
 	_tutorial_step = -1
 	_tutorial_advance()
@@ -3299,8 +3302,14 @@ var _rw_start_msec: int = -1
 var _rw_done: bool = false
 
 
+# The piece only walks in the roll's own movement window: not while anyone's
+# paused, a spell is being cast or resolved, or a cast spell is still waiting
+# on the stack for its response window. (Once the stack is clear, the walk
+# starts over from the start tile.) _spell_stack_names() reads the snapshot
+# mirror on a client, so its piece behaves the same.
 func _roll_walk_frozen() -> bool:
-	return _response_window_paused_by.has(true) or _casting_spell or _resolving_stack
+	return _response_window_paused_by.has(true) or _casting_spell or _resolving_stack \
+		or not _spell_stack_names().is_empty()
 
 
 func _update_roll_walk() -> void:
