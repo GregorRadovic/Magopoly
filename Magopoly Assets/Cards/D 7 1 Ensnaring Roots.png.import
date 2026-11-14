@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://ed4xv3jeipm2"
-path="res://.godot/imported/C 2 1 Natural Magician.png-68ffe6bc607a432b1e36aa982c3180bb.ctex"
+uid="uid://l8b54lcewex3"
+path="res://.godot/imported/D 7 1 Ensnaring Roots.png-24bc5af20282d0120f967fc41519ed09.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Magopoly Assets/10 updated cards/C 2 1 Natural Magician.png"
-dest_files=["res://.godot/imported/C 2 1 Natural Magician.png-68ffe6bc607a432b1e36aa982c3180bb.ctex"]
+source_file="res://Magopoly Assets/Cards/D 7 1 Ensnaring Roots.png"
+dest_files=["res://.godot/imported/D 7 1 Ensnaring Roots.png-24bc5af20282d0120f967fc41519ed09.ctex"]
 
 [params]
 

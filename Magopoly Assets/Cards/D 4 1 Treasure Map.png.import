@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://bo4x5q76tgyx7"
-path="res://.godot/imported/C 8 1 Lethargy.png-7e3685d62df25593b113000e40dbdc40.ctex"
+uid="uid://dbsx54upi3gyg"
+path="res://.godot/imported/D 4 1 Treasure Map.png-bec38ed45b68d601d5b2d930e6033679.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Magopoly Assets/10 updated cards/C 8 1 Lethargy.png"
-dest_files=["res://.godot/imported/C 8 1 Lethargy.png-7e3685d62df25593b113000e40dbdc40.ctex"]
+source_file="res://Magopoly Assets/Cards/D 4 1 Treasure Map.png"
+dest_files=["res://.godot/imported/D 4 1 Treasure Map.png-bec38ed45b68d601d5b2d930e6033679.ctex"]
 
 [params]
 

@@ -543,4 +543,248 @@ const SPELLS: Dictionary = {
 			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. If you pass Go this way, you don't collect $200 or a spell card. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
 		},
 	},
+
+	# --- Expansion: Loaded Dice (B) ---------------------------------------
+	# "Doubles" follow the dice as they currently stand: changing the dice
+	# can make or break doubles (see _dice_are_doubles() in main.gd).
+	"Dodge": {
+		"color": "brown",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/B 1 1 Dodge.png",
+		"levels": {
+			1: {"description": "After you roll: reroll both dice.", "timings": ["roll_response"], "requires_current_player": true},
+			2: {"description": "After you roll: reroll one die. Then you may reroll the other die.", "timings": ["roll_response"], "requires_current_player": true},
+		},
+	},
+	"Master Plan": {
+		"color": "sky_blue",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/B 2 1 Master Plan.png",
+		"levels": {
+			1: {"description": "The next time you roll this turn: set one die to the result of your choice, then roll the other.", "requires_current_player": true, "requires_not_yet_rolled": true},
+			2: {"description": "The next time you roll this turn: roll one die, then set the other to the result of your choice.", "requires_current_player": true, "requires_not_yet_rolled": true},
+			3: {"description": "The next time you roll this turn: set both dice to the results of your choice.", "requires_current_player": true, "requires_not_yet_rolled": true},
+		},
+	},
+	"Pilgrimage": {
+		"color": "pink",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/B 3 1 Pilgrimage.png",
+		"levels": {
+			1: {"description": "Choose 1 unowned property. When you pass it while moving this turn, you may buy it.", "count": 1, "requires_current_player": true},
+			2: {"description": "Choose 2 unowned properties with different colors. When you pass them while moving this turn, you may buy them.", "count": 2, "distinct_colors": true, "requires_current_player": true},
+			3: {"description": "Choose 2 unowned properties. When you pass them while moving this turn, you may buy them.", "count": 2, "requires_current_player": true},
+		},
+	},
+	"Seize the Opportunity": {
+		"color": "orange",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/B 4 1 Seize the Opportunity.png",
+		"levels": {
+			1: {"description": "Choose an opponent who just rolled the dice. They pay you the lower die value x 30.", "timings": ["roll_response"]},
+			2: {"description": "Choose an opponent who just rolled the dice. They pay you the higher die value x 30.", "timings": ["roll_response"]},
+			3: {"description": "Choose an opponent who just rolled the dice. They pay you the combined dice value x 30.", "timings": ["roll_response"]},
+		},
+	},
+	"Critical Hit": {
+		"color": "red",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/B 5 1 Critical Hit.png",
+		"levels": {
+			1: {"description": "An opponent pays you $100 (+$100 if you rolled doubles this turn).", "amount": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "An opponent pays you $200 (+$100 if you rolled doubles this turn).", "amount": 200, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "An opponent pays you $300 (+$100 if you rolled doubles this turn).", "amount": 300, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	"Veto": {
+		"color": "yellow",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/B 6 1 Veto.png",
+		"levels": {
+			1: {"description": "After you roll: both dice become 0.", "timings": ["roll_response"], "requires_current_player": true},
+			2: {"description": "After you roll: the lower die becomes 0.", "timings": ["roll_response"], "requires_current_player": true},
+			3: {"description": "After you roll: the higher die becomes 0.", "timings": ["roll_response"], "requires_current_player": true},
+		},
+	},
+	"Go For the Kill": {
+		"color": "green",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/B 7 1 Go For the Kill.png",
+		"levels": {
+			1: {"description": "Whenever you pass other players while moving this turn, each player you pass pays you $100.", "amount": 100, "timings": ["turn", "roll_response", "spell_response"], "requires_current_player": true},
+			2: {"description": "Whenever you pass other players while moving this turn, each player you pass pays you $200.", "amount": 200, "timings": ["turn", "roll_response", "spell_response"], "requires_current_player": true},
+			3: {"description": "Whenever you pass other players while moving this turn, each player you pass pays you $300.", "amount": 300, "timings": ["turn", "roll_response", "spell_response"], "requires_current_player": true},
+		},
+	},
+	"Fated Ending": {
+		"color": "ocean_blue",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/B 8 1 Fated Ending.png",
+		"levels": {
+			1: {"description": "Choose an opponent. On their next turn, they roll 2 dice and a random one lands on 0."},
+			2: {"description": "Choose an opponent. On their next turn, instead of rolling normally, they roll 2 dice, then you choose one of them to set to 0."},
+		},
+	},
+
+	# --- Expansion: Lingering Magic (C) -- Ongoing --------------------------
+	# "kind": "ongoing" -- the card stays in play (out of the deck) until its
+	# effect ends. "rotations" counts passes over Go by the affected player
+	# (the caster for self-effects, the target otherwise). See
+	# the Ongoing section of main.gd.
+	"Word of Binding": {
+		"color": "brown",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/C 1 1 Word of Binding.png",
+		"kind": "ongoing",
+		"levels": {
+			1: {"description": "Name a property. The next time you land on it, you don't pay any money. Then discard this card."},
+			2: {"description": "Name a color. The next time you land on any property of that color, you don't pay any money. Then discard this card."},
+		},
+	},
+	"Natural Magician": {
+		"color": "sky_blue",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/C 2 1 Natural Magician.png",
+		"kind": "ongoing",
+		"levels": {
+			1: {"description": "You have +1 Attunement to all colors. Opponents can't target you or your properties when casting spells. Lasts 1 rotation.", "rotations": 1, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "You have +1 Attunement to all colors. Opponents can't target you or your properties when casting spells. Lasts 2 rotations.", "rotations": 2, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "You have +1 Attunement to all colors. Opponents can't target you or your properties when casting spells. Lasts 3 rotations.", "rotations": 3, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	"Shielded From Harm": {
+		"color": "pink",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/C 3 1 Shielded From Harm.png",
+		"kind": "ongoing",
+		"levels": {
+			1: {"description": "Reduce all money you would pay to other players by $300. Lasts 1 rotation.", "rotations": 1, "amount": 300},
+			2: {"description": "Reduce all money you would pay to other players by $300. Lasts 2 rotations.", "rotations": 2, "amount": 300},
+			3: {"description": "Reduce all money you would pay to other players by $300. Lasts 3 rotations.", "rotations": 3, "amount": 300},
+		},
+	},
+	"Fragile Goods": {
+		"color": "orange",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/C 4 1 Fragile Goods.png",
+		"kind": "ongoing",
+		"levels": {
+			1: {"description": "Whenever you pass Go, gain $100. Discard this when you lose money for any reason.", "amount": 100, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "Whenever you pass Go, gain $150. Discard this when you lose money for any reason.", "amount": 150, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "Whenever you pass Go, gain $200. Discard this when you lose money for any reason.", "amount": 200, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	"Burn Bright": {
+		"color": "red",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/C 5 1 Burn Bright .png",
+		"kind": "ongoing",
+		"levels": {
+			1: {"description": "Gain $500. At the start of your turn, pay $20 to the bank. Lasts 5 rotations.", "amount": 500, "upkeep": 20, "rotations": 5, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "Gain $500. At the start of your turn, pay $20 to the bank. Lasts 4 rotations.", "amount": 500, "upkeep": 20, "rotations": 4, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "Gain $500. At the start of your turn, pay $20 to the bank. Lasts 3 rotations.", "amount": 500, "upkeep": 20, "rotations": 3, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	"Anti-Magic Law": {
+		"color": "yellow",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/C 6 1 Anti-Magic Law.png",
+		"kind": "ongoing",
+		"levels": {
+			1: {"description": "Choose an opponent. Whenever they cast a spell, counter it. Triggers 1 time.", "triggers": 1},
+			2: {"description": "Choose an opponent. Whenever they cast a spell, counter it. Triggers 2 times.", "triggers": 2},
+			3: {"description": "Choose an opponent. Whenever they cast a spell, counter it. Triggers 3 times.", "triggers": 3},
+		},
+	},
+	# Charged at the start of each of the target's turns; its rotations count
+	# the target's passes over Go.
+	"Parasite": {
+		"color": "green",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/C 7 1 Parasite.png",
+		"kind": "ongoing",
+		"levels": {
+			1: {"description": "Choose an opponent. At the start of their turn, they pay you $20. Lasts 2 rotations.", "amount": 20, "rotations": 2, "timings": ["turn", "roll_response", "spell_response"]},
+			2: {"description": "Choose an opponent. At the start of their turn, they pay you $20. Lasts 3 rotations.", "amount": 20, "rotations": 3, "timings": ["turn", "roll_response", "spell_response"]},
+			3: {"description": "Choose an opponent. At the start of their turn, they pay you $20. Lasts 4 rotations.", "amount": 20, "rotations": 4, "timings": ["turn", "roll_response", "spell_response"]},
+		},
+	},
+	# Slow. Its rotations count the target's passes over Go.
+	"Lethargy": {
+		"color": "ocean_blue",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/C 8 1 Lethargy.png",
+		"kind": "ongoing",
+		"levels": {
+			1: {"description": "Choose an opponent. They get -1 to their rolls. Lasts 5 rotations.", "roll_penalty": 1, "rotations": 5},
+			2: {"description": "Choose an opponent. They get -2 to their rolls. Lasts 5 rotations.", "roll_penalty": 2, "rotations": 5},
+		},
+	},
+
+	# --- Expansion: Landmarks (D) --------------------------------------------
+	# "kind": "landmark" -- always Slow (turn timing only). Placed on a
+	# property space when it resolves and
+	# stays there (out of the deck) until discarded. Buried Treasure, which
+	# Treasure Map creates, is a token rather than a card -- see main.gd.
+	"Landmine": {
+		"color": "brown",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/D 1 1 Landmine.png",
+		"kind": "landmark",
+		"levels": {
+			1: {"description": "When an opponent lands on this property, discard this card and they pay you $200.", "amount": 200},
+			2: {"description": "When an opponent lands on this property, discard this card and they pay you $400.", "amount": 400},
+		},
+	},
+	"Power Sink": {
+		"color": "sky_blue",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/D 2 1 Power Sink.png",
+		"kind": "landmark",
+		"levels": {
+			1: {"description": "If this property is owned by an opponent, it provides no Attunement for them. You have +1 Attunement to this property's color. When an opponent lands on this property, discard this card.", "amount": 1},
+			2: {"description": "If this property is owned by an opponent, it provides no Attunement for them. You have +2 Attunement to this property's color. When an opponent lands on this property, discard this card.", "amount": 2},
+			3: {"description": "If this property is owned by an opponent, it provides no Attunement for them. You have +3 Attunement to this property's color. When an opponent lands on this property, discard this card.", "amount": 3},
+		},
+	},
+	"Outland Settlements": {
+		"color": "pink",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/D 3 1 Outland Settlements.png",
+		"kind": "landmark",
+		"levels": {
+			1: {"description": "During your turn, you may buy houses on this property as though you owned the color set. When you do, move this landmark to the property you own with the fewest houses. Triggers 3 times.", "triggers": 3},
+			2: {"description": "During your turn, you may buy houses on this property as though you owned the color set. When you do, move this landmark to the property you own with the fewest houses. Triggers 6 times.", "triggers": 6},
+			3: {"description": "During your turn, you may buy houses on this property as though you owned the color set. When you do, move this landmark to the property you own with the fewest houses. Triggers 10 times.", "triggers": 10},
+		},
+	},
+	"Treasure Map": {
+		"color": "orange",
+		"icon": "res://Magopoly Assets/Cards/D 4 1 Treasure Map.png",
+		"levels": {
+			1: {"description": "Create 3 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 3},
+			2: {"description": "Create 6 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 6},
+			3: {"description": "Create 10 Buried Treasure landmarks on random properties. (When you land on one, discard it and gain $100.)", "count": 10},
+		},
+	},
+	"Contested Battlefield": {
+		"color": "red",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/D 5 1 Contested Battlefield.png",
+		"kind": "landmark",
+		"levels": {
+			1: {"description": "Play this on a property without houses owned by an opponent. When played, gain that property. When this card is discarded, return it to its original owner. Discard this card after opponents land on this property 1 time.", "triggers": 1},
+			2: {"description": "Play this on a property without houses owned by an opponent. When played, gain that property. When this card is discarded, return it to its original owner. Discard this card after opponents land on this property 2 times.", "triggers": 2},
+			3: {"description": "Play this on a property without houses owned by an opponent. When played, gain that property. When this card is discarded, return it to its original owner. Discard this card after opponents land on this property 3 times.", "triggers": 3},
+		},
+	},
+	"Toll Road": {
+		"color": "yellow",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/D 6 1 Toll Road.png",
+		"kind": "landmark",
+		"levels": {
+			1: {"description": "When an opponent passes this space, they pay you $20. Triggers 10 times.", "amount": 20, "triggers": 10},
+			2: {"description": "When an opponent passes this space, they pay you $20. Triggers 20 times.", "amount": 20, "triggers": 20},
+			3: {"description": "When an opponent passes this space, they pay you $20. Triggers 30 times.", "amount": 20, "triggers": 30},
+		},
+	},
+	"Ensnaring Roots": {
+		"color": "green",
+		"icon": "res://Magopoly Assets/Cards/D 7 1 Ensnaring Roots.png",
+		"kind": "landmark",
+		"levels": {
+			1: {"description": "When an opponent passes this location, discard this and subtract their remaining movement by 2 (to a minimum of 0).", "roll_penalty": 2},
+			2: {"description": "When an opponent passes this location, discard this and subtract their remaining movement by 4 (to a minimum of 0).", "roll_penalty": 4},
+			3: {"description": "When an opponent passes this location, discard this and subtract their remaining movement by 6 (to a minimum of 0).", "roll_penalty": 6},
+		},
+	},
+	"Stabilized Portal": {
+		"color": "ocean_blue",
+		"icon": "res://Magopoly Assets/Magopoly Expansions/D 8 1 Stabilized Portal.png",
+		"kind": "landmark",
+		"levels": {
+			1: {"description": "When played, name a property. When an opponent would land on this property, increase their roll so that they land on the named property instead. Triggers once.", "triggers": 1},
+			2: {"description": "When played, name a property. When an opponent would land on this property, increase their roll so that they land on the named property instead. Triggers three times.", "triggers": 3},
+		},
+	},
 }
