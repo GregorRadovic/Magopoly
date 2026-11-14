@@ -41,8 +41,8 @@ const SPELL_SHOP_SKIP_INDEX: int = -2
 
 # How long a response window (see _ensure_response_window()) lasts before
 # automatically continuing, if nobody pauses it (or extends it by casting
-# another spell in response). Doubled online (see _response_window_seconds())
-# to cover the round trip of a remote player's pause.
+# another spell in response). Now set in Settings (Roll / Spell Response
+# Window -- see _response_window_seconds()); this is only the fallback.
 const RESPONSE_WINDOW_SECONDS: float = 1.5
 
 # Up to GameState.MAX_PLAYERS (8) of each. Colours are the four classic
@@ -455,14 +455,30 @@ func _clear_wv_landing_highlight() -> void:
 	_wv_landing_index = -1
 
 
-# Response Time (Settings): how long a roll's walk -- and its reaction window
-# -- lasts after the dice. Online, everyone uses the host's (snapshot).
+# Roll Response Window (Settings, saved as "response_time"): how long a
+# roll's walk -- and so its reaction window -- lasts after the dice.
+# Spell Response Window (Settings): how long the reaction window lasts when a
+# spell is cast or resolves. Online, both are the host's: the windows only
+# ever run on the host, and clients get the host's values in the snapshot
+# (shown, locked, in their Settings).
 var _response_time: float = ROLL_WALK_SEC
 var _net_response_time: float = -1.0
+var _spell_response_time: float = 2.0
+var _net_spell_response_time: float = -1.0
 
 
 func _on_response_time_changed(sec: float) -> void:
 	_response_time = sec
+
+
+func _on_spell_response_time_changed(sec: float) -> void:
+	_spell_response_time = sec
+
+
+func _spell_window_seconds() -> float:
+	if GameState.online and not GameState.is_authority() and _net_spell_response_time > 0.0:
+		return _net_spell_response_time
+	return _spell_response_time
 
 
 func _walk_seconds() -> float:
@@ -667,6 +683,10 @@ func _ready() -> void:
 	pause_settings_menu.wizard_vision_changed.connect(_on_wizard_vision_changed)
 	_response_time = pause_settings_menu.load_response_time()
 	pause_settings_menu.response_time_changed.connect(_on_response_time_changed)
+	_spell_response_time = pause_settings_menu.load_spell_response_time()
+	pause_settings_menu.spell_response_time_changed.connect(_on_spell_response_time_changed)
+	# Online, both response windows are the host's call.
+	pause_settings_menu.set_host_controlled(GameState.online and not GameState.is_authority())
 	if GameState.online and not GameState.is_authority():
 		_net_report_pause_option.rpc_id(1, _pause_option)
 	pause_menu.set_settings_menu(pause_settings_menu)
@@ -2712,25 +2732,25 @@ func _ai_house_check(player: Node2D) -> void:
 # spent), and while a roll is still in flight each spell coming *off* the
 # stack opens another one, so everyone gets a chance to answer every spell
 # and to react to what each one did before the roll finally resolves.
-func _response_window_seconds() -> float:
+# `trigger` "roll": the dice plus the walk (Roll Response Window). Anything
+# else -- a cast, or a spell resolving -- is a Spell Response Window.
+func _response_window_seconds(trigger: String = "") -> float:
 	if _tutorial_active:
 		# A generous window for the moments the player has to react to; snappier
 		# for the tutorial's own auto-resolutions (Migraine, Manastone, etc.).
 		if GameState.tutorial_kind == "basic":
 			return 0.5  # no spells in this one -- the roll's walk sets the pace
 		return 5.0 if _tutorial_expected_action == "press_space" else 1.5
-	# A spell's reaction window follows Response Time too, but never drops
-	# below half a second (a spell has no dice to buy that time). Online,
-	# widen it so a remote player's pause has time to reach the host.
-	var seconds: float = maxf(DICE_TUMBLE_SEC, _walk_seconds())
-	return seconds * 2.0 if GameState.online else seconds
+	if trigger == "roll":
+		return DICE_TUMBLE_SEC + _walk_seconds()
+	return _spell_window_seconds()
 
 
 # trigger / trigger_seat drive auto-pause (Pause Options) -- "roll" from
 # _perform_roll, "cast" from _finish_cast, "resolve" is applied by the loop
 # itself as each spell comes off the stack.
 func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> void:
-	var seconds: float = _response_window_seconds()
+	var seconds: float = _response_window_seconds(trigger)
 	_window_deadline_msec = GameState.now_msec() + int(seconds * 1000.0)
 	# When a spell's resolution has stalled inside Raise Money mode -- it
 	# charged someone who can't pay and is now awaiting `debt_resolved` -- the
@@ -2750,7 +2770,7 @@ func _ensure_response_window(trigger: String = "", trigger_seat: int = -1) -> vo
 	_apply_auto_pause(trigger, trigger_seat)
 	_ai_react_dirty = true
 	_refresh_action_buttons()
-	dice_label.text += "\n(Press Space or your player number within %ds to pause from that player's perspective and react with an Instant spell.)" % int(seconds)
+	dice_label.text += "\n(Press Space or your player number within %ss to pause from that player's perspective and react with an Instant spell.)" % String.num(seconds, 1)
 
 	# window -> resolve one spell -> (maybe) another window -> ... until the
 	# stack is empty and there's nothing left to react to.
@@ -8227,6 +8247,7 @@ func _build_snapshot() -> Dictionary:
 		"spell_stack": _spell_stack_names(),
 		"spell_target_marks": _all_stack_target_marks(),
 		"response_time": _response_time,
+		"spell_response_time": _spell_response_time,
 		"spell_stack_targets": _spell_stack_targets(),
 		"awaiting_buy": _awaiting_buy_decision,
 		"casting_spell": _casting_spell,
@@ -8332,7 +8353,12 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_debt_cancellable = snap.get("debt_cancellable", false)
 	_net_spell_stack_names = snap.get("spell_stack", [])
 	_net_spell_target_marks = snap.get("spell_target_marks", [])
-	_net_response_time = float(snap.get("response_time", -1.0))
+	var roll_rt: float = float(snap.get("response_time", -1.0))
+	var spell_rt: float = float(snap.get("spell_response_time", -1.0))
+	if roll_rt != _net_response_time or spell_rt != _net_spell_response_time:
+		pause_settings_menu.show_host_values(roll_rt, spell_rt)
+	_net_response_time = roll_rt
+	_net_spell_response_time = spell_rt
 	_net_spell_stack_targets = snap.get("spell_stack_targets", [])
 	_awaiting_buy_decision = snap.get("awaiting_buy", false)
 	_casting_spell = snap.get("casting_spell", false)

@@ -103,9 +103,25 @@ alignment = 1
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 24
-text = "Response Time"
+text = "Roll Response Window"
 
 [node name="ResponseTimeOption" type="OptionButton" parent="VBox/ResponseTimeRow"]
+layout_mode = 2
+custom_minimum_size = Vector2(240, 48)
+theme_override_font_sizes/font_size = 24
+
+[node name="SpellResponseRow" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 16
+alignment = 1
+
+[node name="SpellResponseLabel" type="Label" parent="VBox/SpellResponseRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 24
+text = "Spell Response Window"
+
+[node name="SpellResponseOption" type="OptionButton" parent="VBox/SpellResponseRow"]
 layout_mode = 2
 custom_minimum_size = Vector2(240, 48)
 theme_override_font_sizes/font_size = 24
