@@ -106,7 +106,7 @@ func _ready() -> void:
 	wizard_vision_check.toggled.connect(_on_wizard_vision_toggled)
 
 	for sec in RESPONSE_TIMES:
-		response_time_option.add_item((String.num(sec) + "s") if sec > 0.0 else "0s (dice only)")
+		response_time_option.add_item(_seconds_label(sec) if sec > 0.0 else "0s (dice only)")
 	response_time_option.selected = maxi(0, RESPONSE_TIMES.find(load_response_time()))
 	response_time_option.tooltip_text = ROLL_TIP
 	response_time_option.item_selected.connect(func(i: int) -> void:
@@ -115,7 +115,7 @@ func _ready() -> void:
 		response_time_changed.emit(sec))
 
 	for sec in SPELL_RESPONSE_TIMES:
-		spell_response_option.add_item(String.num(sec) + "s")
+		spell_response_option.add_item(_seconds_label(sec))
 	spell_response_option.selected = maxi(0, SPELL_RESPONSE_TIMES.find(load_spell_response_time()))
 	spell_response_option.tooltip_text = SPELL_TIP
 	spell_response_option.item_selected.connect(func(i: int) -> void:
@@ -139,6 +139,11 @@ func _ready() -> void:
 
 const ROLL_TIP: String = "How long the piece walks after the dice land -- the time everyone has to pause and react. (The dice always take 0.5 s on top.)"
 const SPELL_TIP: String = "How long everyone has to pause and react when a spell is cast, and again as each one resolves."
+
+
+# "1s", "0.5s" (never "1.0s").
+static func _seconds_label(sec: float) -> String:
+	return ("%d" % int(sec) if is_equal_approx(sec, roundf(sec)) else "%.1f" % sec) + "s"
 
 
 # Called by main.gd in a multiplayer game, on the host only.
