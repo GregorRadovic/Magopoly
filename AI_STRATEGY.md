@@ -89,7 +89,10 @@ worth $150 more". The bot casts them first, then the better spell.
    - Veto, Dodge, Go For the Kill.
 
    It also uses Counterfeit Currency / Misplaced Payment if it's about to pay
-   rent, and Haggling if it's about to buy.
+   rent, and Haggling if it's about to buy. Veto Level 1 makes a double
+   zero, which counts as doubles: the bot uses it to get out of Jail when
+   Jail is costing it, or to stay put and roll again. While it's stuck in
+   Jail (no doubles), it knows other roll spells won't move it.
 3. **Its turn, after the roll.** Turn spells again, with the roll known
    (Critical Hit's doubles bonus, Haggling before building houses).
 4. **Someone else's roll.** Price Gouging if they're about to land on its

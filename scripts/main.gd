@@ -431,6 +431,9 @@ var _roll_seq: int = 0
 # Knockout Punch): once the response window closes, _perform_roll() cancels
 # the move entirely. Reset at the start of every roll.
 var _roll_cancelled: bool = false
+# Siren's Song drew this roll: if its move passes Go, no $200 and no spell
+# card (the card's rider). Consumed by _move_and_land().
+var _siren_roll: bool = false
 # Set when Bribe the Guards L1 frees whoever's jail roll is in flight: they
 # move with that roll normally, but doubles don't earn an extra turn.
 var _jail_released_mid_roll: bool = false
@@ -3220,10 +3223,12 @@ func _auto_pause_applies(opt: int, event: String, seat: int, trigger_seat: int) 
 	return false  # PAUSE_MANUAL / unknown
 
 
-# The two dice currently show the same value. A die zeroed out (Veto, Fated
-# Ending) has no value, so 0 + 0 isn't doubles.
+# The two dice currently show the same value. Double zero (Veto Level 1)
+# counts too -- by design: it can, say, get a player out of Jail. (Fated
+# Ending zeroes just one die, so it never makes doubles by itself.) -1 means
+# no dice yet.
 func _dice_are_doubles() -> bool:
-	return _die1 == _die2 and _die1 > 0
+	return _die1 == _die2 and _die1 >= 0
 
 
 func _perform_roll(die1: int, die2: int) -> void:
@@ -3283,9 +3288,11 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# Siren's Song: applied last, so it accounts for every "before rolling"
 	# change above. Anything cast during the response window can still move
 	# the roll afterwards.
+	_siren_roll = false
 	if player.siren_song_active:
 		player.siren_song_active = false
 		var extra: int = _siren_song_extra_steps(player, roll)
+		_siren_roll = extra >= 0
 		if extra > 0:
 			roll += extra
 			_log("Siren's Song draws %s's roll up by %d (now %d), toward %s." % [PLAYER_NAMES[current_player], extra, roll, _property_name((player.current_space + roll) % board.TOTAL_SPACES)])
@@ -3571,7 +3578,18 @@ func _move_and_land(player: Node2D, roll: int) -> bool:
 	# a player past Go more than once in one move -- $200 and a spell draw for
 	# each pass.
 	var go_passes: int = new_space_raw / board.TOTAL_SPACES if new_space_raw > 0 else 0
-	if go_passes > 0:
+	var siren_move: bool = _siren_roll and player.player_id == current_player
+	_siren_roll = false
+	if go_passes > 0 and siren_move:
+		# Siren's Song's rider: passing Go on the move it drew pays nothing.
+		var times: String = "" if go_passes == 1 else " %d times" % go_passes
+		dice_label.text += "\nYou passed Go%s -- but Siren's Song means no $200 and no spell card." % times
+		_log("%s passed Go%s, but collects nothing (Siren's Song)." % [PLAYER_NAMES[player.player_id], times])
+		# Still a pass of Go for everything else (Lingering Magic's rotations...).
+		for _i in go_passes:
+			_on_player_passed_go(player)
+		_update_player_panels()
+	elif go_passes > 0:
 		player.money += 200 * go_passes
 		var drawn: Array[String] = []
 		for _i in go_passes:
