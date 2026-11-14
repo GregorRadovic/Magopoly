@@ -1,7 +1,8 @@
 extends PopupPanel
 
 # Small settings window opened from the Start Menu and the in-game pause menu.
-# Controls: Resolution, Music Volume, and Pause Options. All are applied
+# Controls: Resolution, Music Volume, Pause Options, Wizard Vision and the
+# Roll / Spell Response Windows. All are applied
 # immediately, saved to user://settings.cfg, and restored on the next launch
 # (resolution via apply_saved() from start_menu.gd; music volume by the Music
 # autoload; pause option read by main.gd, live via pause_option_changed).
@@ -24,20 +25,29 @@ signal unpause_player_requested
 signal pause_option_changed(option: int)
 # Fired when the Wizard Vision checkbox is toggled (main.gd reacts live).
 signal wizard_vision_changed(on: bool)
-# Fired when Response Time changes (main.gd reacts live).
+# Fired when the Roll Response Window changes (main.gd reacts live).
 signal response_time_changed(seconds: float)
+# Fired when the Spell Response Window changes (main.gd reacts live).
+signal spell_response_time_changed(seconds: float)
 
-# Response Time: how long a rolled piece walks -- and so how long everyone
-# has to pause and react -- after the dice's fixed 0.5 s tumble. In an
-# online game the host's choice is the one that counts.
+# Roll Response Window ("response_time" in the config): how long a rolled
+# piece walks -- and so how long everyone has to pause and react -- after the
+# dice's fixed 0.5 s tumble.
 const RESPONSE_TIMES: Array[float] = [0.0, 0.5, 1.0, 1.5]
 const DEFAULT_RESPONSE_TIME: float = 1.5
+# Spell Response Window: how long everyone has to react to a spell being
+# cast (and to each one resolving).
+const SPELL_RESPONSE_TIMES: Array[float] = [1.0, 2.0, 3.0]
+const DEFAULT_SPELL_RESPONSE_TIME: float = 2.0
+# In an online game both windows are the host's to set: a client's dropdowns
+# show the host's values and are locked (set_host_controlled()).
+const HOST_CONTROLLED_TIP: String = "Set by the host in an online game."
 
 enum PauseOption { MANUAL, HALF_CONTROL, FULL_CONTROL }
 const PAUSE_OPTION_LABELS: Array[String] = ["Manual", "Half-Control", "Full Control"]
 
 const CONFIG_PATH: String = "user://settings.cfg"
-const POPUP_SIZE: Vector2i = Vector2i(560, 490)
+const POPUP_SIZE: Vector2i = Vector2i(600, 554)
 # Extra height when the Host tools section is showing.
 const HOST_TOOLS_EXTRA_HEIGHT: int = 270
 
@@ -60,6 +70,7 @@ const RESOLUTIONS: Array[Vector2i] = [
 @onready var pause_option_button: OptionButton = $VBox/PauseOptionsRow/PauseOptionButton
 @onready var wizard_vision_check: CheckBox = $VBox/WizardVisionRow/WizardVisionCheck
 @onready var response_time_option: OptionButton = $VBox/ResponseTimeRow/ResponseTimeOption
+@onready var spell_response_option: OptionButton = $VBox/SpellResponseRow/SpellResponseOption
 @onready var host_tools: VBoxContainer = $VBox/HostTools
 @onready var kick_player_button: Button = $VBox/HostTools/KickPlayerButton
 @onready var take_player_turn_button: Button = $VBox/HostTools/TakePlayerTurnButton
@@ -95,13 +106,22 @@ func _ready() -> void:
 	wizard_vision_check.toggled.connect(_on_wizard_vision_toggled)
 
 	for sec in RESPONSE_TIMES:
-		response_time_option.add_item((String.num(sec) + "s") if sec > 0.0 else "0s (dice only)")
+		response_time_option.add_item(_seconds_label(sec) if sec > 0.0 else "0s (dice only)")
 	response_time_option.selected = maxi(0, RESPONSE_TIMES.find(load_response_time()))
-	response_time_option.tooltip_text = "How long the piece walks after the dice land -- the time everyone has to pause and react. (The dice always take 0.5 s on top.)"
+	response_time_option.tooltip_text = ROLL_TIP
 	response_time_option.item_selected.connect(func(i: int) -> void:
 		var sec: float = RESPONSE_TIMES[i]
 		_save_response_time(sec)
 		response_time_changed.emit(sec))
+
+	for sec in SPELL_RESPONSE_TIMES:
+		spell_response_option.add_item(_seconds_label(sec))
+	spell_response_option.selected = maxi(0, SPELL_RESPONSE_TIMES.find(load_spell_response_time()))
+	spell_response_option.tooltip_text = SPELL_TIP
+	spell_response_option.item_selected.connect(func(i: int) -> void:
+		var sec: float = SPELL_RESPONSE_TIMES[i]
+		_save_spell_response_time(sec)
+		spell_response_time_changed.emit(sec))
 
 	host_tools.visible = false
 	kick_player_button.pressed.connect(func() -> void:
@@ -117,9 +137,38 @@ func _ready() -> void:
 	close_button.pressed.connect(hide)
 
 
+const ROLL_TIP: String = "How long the piece walks after the dice land -- the time everyone has to pause and react. (The dice always take 0.5 s on top.)"
+const SPELL_TIP: String = "How long everyone has to pause and react when a spell is cast, and again as each one resolves."
+
+
+# "1s", "0.5s" (never "1.0s").
+static func _seconds_label(sec: float) -> String:
+	return ("%d" % int(sec) if is_equal_approx(sec, roundf(sec)) else "%.1f" % sec) + "s"
+
+
 # Called by main.gd in a multiplayer game, on the host only.
 func enable_host_tools() -> void:
 	host_tools.visible = true
+
+
+# Online client: both response windows belong to the host -- lock the
+# dropdowns. Their selections then follow show_host_values().
+func set_host_controlled(locked: bool) -> void:
+	response_time_option.disabled = locked
+	spell_response_option.disabled = locked
+	response_time_option.tooltip_text = HOST_CONTROLLED_TIP if locked else ROLL_TIP
+	spell_response_option.tooltip_text = HOST_CONTROLLED_TIP if locked else SPELL_TIP
+
+
+# Shows the host's values on a client (not saved -- the client's own saved
+# choices come back once it plays offline or hosts).
+func show_host_values(roll_seconds: float, spell_seconds: float) -> void:
+	var r: int = RESPONSE_TIMES.find(roll_seconds)
+	if r != -1:
+		response_time_option.selected = r
+	var s: int = SPELL_RESPONSE_TIMES.find(spell_seconds)
+	if s != -1:
+		spell_response_option.selected = s
 
 
 func _on_music_volume_changed(value: float) -> void:
@@ -211,6 +260,21 @@ static func _save_response_time(sec: float) -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(CONFIG_PATH)
 	cfg.set_value("gameplay", "response_time", sec)
+	cfg.save(CONFIG_PATH)
+
+
+static func load_spell_response_time() -> float:
+	var cfg := ConfigFile.new()
+	if cfg.load(CONFIG_PATH) != OK:
+		return DEFAULT_SPELL_RESPONSE_TIME
+	var sec: float = float(cfg.get_value("gameplay", "spell_response_time", DEFAULT_SPELL_RESPONSE_TIME))
+	return sec if SPELL_RESPONSE_TIMES.has(sec) else DEFAULT_SPELL_RESPONSE_TIME
+
+
+static func _save_spell_response_time(sec: float) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(CONFIG_PATH)
+	cfg.set_value("gameplay", "spell_response_time", sec)
 	cfg.save(CONFIG_PATH)
 
 
