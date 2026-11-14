@@ -109,8 +109,8 @@ func _apply_slide(s: Dictionary) -> void:
 	# Nudge the Settings panel left when the cards are up, so the two balance;
 	# centre it again on the text-only / dropdown-only slides.
 	var shift: float = -190.0 if cards.size() == 2 else 0.0
-	settings_mock.offset_left = -300.0 + shift
-	settings_mock.offset_right = 300.0 + shift
+	settings_mock.offset_left = -330.0 + shift
+	settings_mock.offset_right = 330.0 + shift
 
 	if dropdown.visible:
 		# Line the opened dropdown up under the Pause Options value box, once
