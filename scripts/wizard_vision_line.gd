@@ -20,10 +20,20 @@ const HEAD_HALF_W: float = 14.0
 var points: PackedVector2Array = PackedVector2Array()
 var line_color: Color = Color.RED
 var active: bool = false
+# Short extra arrows, each [from, to] -- a teleport is shown as one pointing
+# from the square the dice reach in towards the board's centre, and one
+# pointing into the destination (no line across the board).
+var extra_arrows: Array = []
+const SMALL_HEAD_LEN: float = 16.0
+const SMALL_HEAD_HALF_W: float = 10.0
 
 
 func _draw() -> void:
-	if not active or points.size() < 2:
+	if not active:
+		return
+	for arrow in extra_arrows:
+		_draw_arrow(arrow[0], arrow[1], SMALL_HEAD_LEN, SMALL_HEAD_HALF_W)
+	if points.size() < 2:
 		return
 	var tip: Vector2 = points[points.size() - 1]
 	var last_from: Vector2 = points[points.size() - 2]
@@ -48,6 +58,20 @@ func _draw() -> void:
 	draw_colored_polygon(PackedVector2Array([tip, left, right]), line_color)
 
 
+# A straight arrow (cased like the route) from `from` to `to`.
+func _draw_arrow(from: Vector2, to: Vector2, head_len: float, head_half_w: float) -> void:
+	var dir: Vector2 = (to - from).normalized()
+	var base: Vector2 = to - dir * head_len
+	draw_line(from, base, CASING_COLOR, CASING_WIDTH)
+	draw_line(from, base, line_color, LINE_WIDTH)
+	var perp: Vector2 = Vector2(-dir.y, dir.x)
+	var left: Vector2 = base + perp * head_half_w
+	var right: Vector2 = base - perp * head_half_w
+	var pad: Vector2 = dir * 3.0
+	draw_colored_polygon(PackedVector2Array([to + pad, left + perp * 2.5 - pad, right - perp * 2.5 - pad]), CASING_COLOR)
+	draw_colored_polygon(PackedVector2Array([to, left, right]), line_color)
+
+
 # A polyline with round joints, so the corners turn cleanly.
 func _draw_route(route: PackedVector2Array, color: Color, width: float) -> void:
 	for i in route.size() - 1:
@@ -65,15 +89,17 @@ func _route_length() -> float:
 
 # `route`: the token's position, then every point where the route turns,
 # ending on the landing spot.
-func show_path(route: PackedVector2Array, color: Color = Color.RED) -> void:
+# `arrows`: extra short [from, to] arrows (a teleport's -- see extra_arrows).
+func show_path(route: PackedVector2Array, color: Color = Color.RED, arrows: Array = []) -> void:
 	points = route
+	extra_arrows = arrows
 	line_color = color
 	active = true
 	queue_redraw()
 
 
-func show_line(new_from: Vector2, new_to: Vector2, color: Color = Color.RED) -> void:
-	show_path(PackedVector2Array([new_from, new_to]), color)
+func show_line(new_from: Vector2, new_to: Vector2, color: Color = Color.RED, arrows: Array = []) -> void:
+	show_path(PackedVector2Array([new_from, new_to]), color, arrows)
 
 
 func hide_line() -> void:

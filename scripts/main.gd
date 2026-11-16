@@ -495,17 +495,19 @@ func _update_wizard_vision() -> void:
 		return
 	var roller: Node2D = players[current_player]
 	# Where the roll will really end up: the dice's path (after any Ensnaring
-	# Roots on the way), then a straight jump if a teleport (Escape Plan,
-	# Stabilized Portal...) takes over. Predicted only -- nothing used up.
+	# Roots on the way), then a teleport if one (Escape Plan, Stabilized
+	# Portal...) takes over. Predicted only -- nothing used up.
 	var steps: int = _apply_pre_move_landmarks(roller, _current_roll, true)
 	var landing_index: int = _roll_landing(roller)
 	var col: Color = PLAYER_COLORS[current_player]
-	var path: PackedVector2Array = _wizard_vision_path(roller, steps) if steps > 0 else PackedVector2Array([roller.position])
+	# The dice's path ends where they take the piece; a teleport then shows
+	# as two short arrows (out towards the board's centre, then into the
+	# destination) instead of a line across the board.
 	var natural: int = (roller.current_space + steps) % board.TOTAL_SPACES
-	if landing_index != natural:
-		path.append(board.get_space_center(landing_index))
-	if path.size() > 1:
-		wizard_vision_line.show_path(path, col)
+	var arrows: Array = _wv_teleport_arrows(natural, landing_index) if landing_index != natural else []
+	var path: PackedVector2Array = _wizard_vision_path(roller, steps) if steps > 0 else PackedVector2Array([roller.position])
+	if path.size() > 1 or not arrows.is_empty():
+		wizard_vision_line.show_path(path, col, arrows)
 	else:
 		wizard_vision_line.hide_line()
 	if landing_index != _wv_landing_index:
@@ -576,6 +578,34 @@ func _wv_inward(index: int) -> Vector2:
 	if index % 10 == 0:
 		return side_in[side % 4] + side_in[(side + 3) % 4]
 	return side_in[side]
+
+
+# Wizard Vision's teleport arrows: a short one from square `from_space`
+# pointing straight in towards the board's centre, and one pointing straight
+# into square `to_space` from the board side.
+const WV_TELEPORT_NEAR: float = 22.0
+const WV_TELEPORT_FAR: float = 78.0
+
+
+func _wv_teleport_arrows(from_space: int, to_space: int) -> Array:
+	var out_dir: Vector2 = _wv_toward_centre(from_space)
+	var in_dir: Vector2 = _wv_toward_centre(to_space)
+	var a: Vector2 = board.get_space_center(from_space)
+	var b: Vector2 = board.get_space_center(to_space)
+	return [
+		[a + out_dir * WV_TELEPORT_NEAR, a + out_dir * WV_TELEPORT_FAR],
+		[b + in_dir * WV_TELEPORT_FAR, b + in_dir * WV_TELEPORT_NEAR],
+	]
+
+
+# Unit vector from square `index` straight towards the board's centre
+# (perpendicular to its side; corners lean along the nearer axis).
+func _wv_toward_centre(index: int) -> Vector2:
+	var middle: Vector2 = (board.get_space_center(0) + board.get_space_center(20)) * 0.5
+	var v: Vector2 = middle - board.get_space_center(index)
+	if absf(v.x) >= absf(v.y):
+		return Vector2(signf(v.x), 0.0)
+	return Vector2(0.0, signf(v.y))
 
 
 func _clear_wv_landing_highlight() -> void:
