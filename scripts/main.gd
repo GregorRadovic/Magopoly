@@ -437,6 +437,25 @@ var _roll_cancelled: bool = false
 # Siren's Song drew this roll: if its move passes Go, no $200 and no spell
 # card (the card's rider). Consumed by _move_and_land().
 var _siren_roll: bool = false
+# Spells that send a roll to a particular space (Escape Plan, King's Escape
+# Tunnel, Siren's Song...) don't lengthen it any more: the dice move the
+# piece as rolled, then it TELEPORTS here -- passing nothing in between (no
+# Go, no $200). -1 = no teleport. Reset each roll; used by _move_player().
+var _roll_teleport_to: int = -1
+# Set by _apply_pre_move_landmarks(): where a Stabilized Portal teleports the
+# mover (-1 = none) for the roll it just looked at.
+var _landmark_teleport_to: int = -1
+
+
+# Where the roll in flight will finally put `roller`: the teleport
+# destination if a spell set one, else where the dice take them.
+func _roll_landing(roller: Node2D) -> int:
+	if _roll_teleport_to >= 0:
+		return _roll_teleport_to
+	var steps: int = _apply_pre_move_landmarks(roller, _current_roll, true)
+	if _landmark_teleport_to >= 0:
+		return _landmark_teleport_to
+	return (roller.current_space + steps) % board.TOTAL_SPACES
 # Set when Bribe the Guards L1 frees whoever's jail roll is in flight: they
 # move with that roll normally, but doubles don't earn an extra turn.
 var _jail_released_mid_roll: bool = false
@@ -475,13 +494,18 @@ func _update_wizard_vision() -> void:
 		_clear_wv_landing_highlight()
 		return
 	var roller: Node2D = players[current_player]
-	# Where the roll will really end up, after any Ensnaring Roots / Stabilized
-	# Portal on the way (predicted only -- nothing is used up here).
+	# Where the roll will really end up: the dice's path (after any Ensnaring
+	# Roots on the way), then a straight jump if a teleport (Escape Plan,
+	# Stabilized Portal...) takes over. Predicted only -- nothing used up.
 	var steps: int = _apply_pre_move_landmarks(roller, _current_roll, true)
-	var landing_index: int = (roller.current_space + steps) % board.TOTAL_SPACES
+	var landing_index: int = _roll_landing(roller)
 	var col: Color = PLAYER_COLORS[current_player]
-	if steps > 0:
-		wizard_vision_line.show_path(_wizard_vision_path(roller, steps), col)
+	var path: PackedVector2Array = _wizard_vision_path(roller, steps) if steps > 0 else PackedVector2Array([roller.position])
+	var natural: int = (roller.current_space + steps) % board.TOTAL_SPACES
+	if landing_index != natural:
+		path.append(board.get_space_center(landing_index))
+	if path.size() > 1:
+		wizard_vision_line.show_path(path, col)
 	else:
 		wizard_vision_line.hide_line()
 	if landing_index != _wv_landing_index:
@@ -3311,13 +3335,16 @@ func _perform_roll(die1: int, die2: int) -> void:
 	# change above. Anything cast during the response window can still move
 	# the roll afterwards.
 	_siren_roll = false
+	_roll_teleport_to = -1
 	if player.siren_song_active:
 		player.siren_song_active = false
 		var extra: int = _siren_song_extra_steps(player, roll)
 		_siren_roll = extra >= 0
 		if extra > 0:
-			roll += extra
-			_log("Siren's Song draws %s's roll up by %d (now %d), toward %s." % [PLAYER_NAMES[current_player], extra, roll, _property_name((player.current_space + roll) % board.TOTAL_SPACES)])
+			# The dice move them as rolled; then the Siren pulls them straight
+			# to the costliest space (a teleport -- nothing in between passed).
+			_roll_teleport_to = (player.current_space + roll + extra) % board.TOTAL_SPACES
+			_log("Siren's Song: %s will be drawn to %s after the roll." % [PLAYER_NAMES[current_player], _property_name(_roll_teleport_to)])
 		elif extra == 0:
 			_log("Siren's Song: %s's roll already lands on %s." % [PLAYER_NAMES[current_player], _property_name((player.current_space + roll) % board.TOTAL_SPACES)])
 		else:
@@ -3584,11 +3611,24 @@ var _walks: Dictionary = {}
 
 
 func _move_player(player: Node2D, roll: int) -> bool:
-	# Ensnaring Roots / Stabilized Portal adjust the roll before anything moves.
-	roll = _apply_pre_move_landmarks(player, roll)
+	# A teleport set on this roll (Escape Plan, King's Escape Tunnel, Siren's
+	# Song...) is taken after the dice's own move; consumed here.
+	var teleport_to: int = -1
+	if player.player_id == current_player and _roll_teleport_to >= 0:
+		teleport_to = _roll_teleport_to
+		_roll_teleport_to = -1
+	# Ensnaring Roots cut the roll before anything moves; a Stabilized
+	# Portal where the dice end sets a teleport (unless a spell's teleport
+	# already takes them elsewhere).
+	roll = _apply_pre_move_landmarks(player, roll, false, teleport_to < 0)
+	if teleport_to < 0 and _landmark_teleport_to >= 0:
+		teleport_to = _landmark_teleport_to
 	# A roll cut to 0 (never below) means the player stays put: no move, and
-	# no second landing on the space they're already on.
+	# no second landing on the space they're already on (unless a teleport
+	# sends them somewhere).
 	if roll <= 0:
+		if teleport_to >= 0 and teleport_to != player.current_space:
+			return await _land_after_teleport(player, teleport_to, roll)
 		dice_label.text += "\nThe roll is 0 -- no movement."
 		_log("%s's roll is 0, so they don't move." % PLAYER_NAMES[player.player_id])
 		return false
@@ -3647,6 +3687,33 @@ func _move_and_land(player: Node2D, roll: int) -> bool:
 		await _walk_player(player, from_space, roll)
 	if _returning_to_menu or not is_inside_tree():
 		return true
+	if teleport_to >= 0 and teleport_to != player.current_space:
+		return await _land_after_teleport(player, teleport_to, roll)
+	return await _land_on_current_space(player, roll)
+
+
+# Teleport (no spaces passed: no Go, nothing triggered on the way), then the
+# usual landing on the destination.
+func _land_after_teleport(player: Node2D, dest: int, roll: int) -> bool:
+	var from_space: int = player.current_space
+	_log("%s teleports from %s to %s." % [PLAYER_NAMES[player.player_id], _property_name(from_space), _property_name(dest)])
+	dice_label.text += "\nTeleported to %s." % _property_name(dest)
+	player.current_space = dest
+	var target: Vector2 = board.get_space_center(dest) + MARKER_OFFSETS[player.player_id]
+	var tween := create_tween()
+	tween.tween_property(player, "modulate:a", 0.0, 0.15)
+	tween.tween_callback(func() -> void: player.position = target)
+	tween.tween_property(player, "modulate:a", 1.0, 0.15)
+	await tween.finished
+	if _returning_to_menu or not is_inside_tree():
+		return true
+	return await _land_on_current_space(player, roll)
+
+
+# Everything that happens on arriving at player.current_space (rent, taxes,
+# buying, Free Parking...). `roll`: the dice roll (utility rent uses it).
+# Returns true if the player went bankrupt.
+func _land_on_current_space(player: Node2D, roll: int) -> bool:
 	_log("%s landed on %s." % [PLAYER_NAMES[player.player_id], _property_name(player.current_space)])
 
 	# Pilgrimage purchases come first, then whatever the landing does.
@@ -5527,7 +5594,7 @@ func _level_timing_allowed(caster: Node2D, spell_name: String, level: int) -> bo
 # to block on, or the rejection message to show instead.
 func _spell_extra_validation(caster: Node2D, spell_name: String, level: int) -> String:
 	if spell_name == "Divine Protection" and level != 3:
-		var landing_index: int = (caster.current_space + _current_roll) % board.TOTAL_SPACES
+		var landing_index: int = _roll_landing(caster)
 		var info: Dictionary = board.get_space_info(landing_index)
 		if info.get("type", "") != "property":
 			return "%s's current roll wouldn't land them on a property." % _player_display_name(caster.player_id)
@@ -6555,7 +6622,7 @@ func _resolve_art_of_the_deal(caster: Node2D, level: int, target_index: int, amo
 # the caster to land. Level 1 additionally excludes whatever color the
 # caster's *original*, unmodified roll would have landed them on (if any).
 func _escape_plan_condition(caster: Node2D, level: int) -> Callable:
-	var original_landing: int = (caster.current_space + _current_roll) % board.TOTAL_SPACES
+	var original_landing: int = _roll_landing(caster)
 	var original_color: String = board.get_space_info(original_landing).get("color", "")
 	match level:
 		1:
@@ -6583,7 +6650,7 @@ func _escape_plan_condition(caster: Node2D, level: int) -> Callable:
 # out given that guarantee).
 func _prepare_escape_plan(caster: Node2D, level: int) -> Callable:
 	var condition: Callable = _escape_plan_condition(caster, level)
-	var landing: int = (caster.current_space + _current_roll) % board.TOTAL_SPACES
+	var landing: int = _roll_landing(caster)
 	var steps: int = 0
 	for i in board.TOTAL_SPACES:
 		steps += 1
@@ -6594,11 +6661,11 @@ func _prepare_escape_plan(caster: Node2D, level: int) -> Callable:
 	return _resolve_escape_plan.bind(caster, level, steps, landing)
 
 
-func _resolve_escape_plan(caster: Node2D, level: int, steps: int, landing_index: int) -> void:
-	_current_roll += steps
+func _resolve_escape_plan(caster: Node2D, level: int, _steps: int, landing_index: int) -> void:
+	_roll_teleport_to = landing_index
 	var destination: String = _property_name(landing_index)
-	dice_label.text = "%s's Escape Plan (Level %d) resolves! Roll increased by %d to land on %s (now %d)." % [_player_display_name(caster.player_id), level, steps, destination, _current_roll]
-	_log("%s's Escape Plan modified the dice roll." % PLAYER_NAMES[caster.player_id])
+	dice_label.text = "%s's Escape Plan (Level %d) resolves! After moving, they'll teleport to %s." % [_player_display_name(caster.player_id), level, destination]
+	_log("%s's Escape Plan: they'll teleport to %s after the roll (passing nothing on the way)." % [PLAYER_NAMES[caster.player_id], destination])
 	_update_player_panels()
 
 
@@ -7636,7 +7703,7 @@ func _resolve_rocket_boost(caster: Node2D, level: int, bonus: int) -> void:
 func _kings_escape_tunnel_condition_met(caster: Node2D, level: int) -> bool:
 	if not _roll_in_flight:
 		return false
-	var landing: int = (caster.current_space + _current_roll) % board.TOTAL_SPACES
+	var landing: int = _roll_landing(caster)
 	if board.get_space_info(landing).get("type", "") != "property":
 		return false
 	var owner_id: int = board.spaces[landing].owner_id
@@ -7658,10 +7725,8 @@ func _prepare_kings_escape_tunnel(caster: Node2D, level: int) -> Callable:
 # The distance to Free Parking is measured at resolution, so it still lands
 # there even if other roll changes resolved first.
 func _resolve_kings_escape_tunnel(caster: Node2D, level: int) -> void:
-	var landing: int = (caster.current_space + _current_roll) % board.TOTAL_SPACES
-	var steps: int = posmod(_free_parking_index() - landing, board.TOTAL_SPACES)
-	_current_roll += steps
-	_log("%s's King's Escape Tunnel (Level %d) increases the roll by %d to land on Free Parking (now %d)." % [PLAYER_NAMES[caster.player_id], level, steps, _current_roll])
+	_roll_teleport_to = _free_parking_index()
+	_log("%s's King's Escape Tunnel (Level %d): they'll teleport to Free Parking after the roll (passing nothing on the way)." % [PLAYER_NAMES[caster.player_id], level])
 	_update_player_panels()
 
 
@@ -8418,7 +8483,8 @@ func _landmark_label(lm: Dictionary) -> String:
 # redirects the landing forward to its named property; a chain is followed,
 # but no portal fires twice in one move). Returns the adjusted roll.
 # `simulate`: just predict it (Wizard Vision) -- no logging, nothing used up.
-func _apply_pre_move_landmarks(player: Node2D, roll: int, simulate: bool = false) -> int:
+func _apply_pre_move_landmarks(player: Node2D, roll: int, simulate: bool = false, portals: bool = true) -> int:
+	_landmark_teleport_to = -1
 	if _landmarks.is_empty() or roll <= 0:
 		return roll
 	var start: int = player.current_space
@@ -8456,26 +8522,31 @@ func _apply_pre_move_landmarks(player: Node2D, roll: int, simulate: bool = false
 		if remaining <= 0:
 			break
 	roll = travelled + remaining
+	# Stabilized Portal: where the dice end on one, the mover teleports to its
+	# destination (passing nothing -- the roll itself is unchanged); a portal
+	# there sends them on again. Recorded in _landmark_teleport_to.
+	if not portals:
+		return roll
 	var used: Array[int] = []
+	var at: int = (start + roll) % board.TOTAL_SPACES
 	for _guard in 40:
-		var landing: int = (start + roll) % board.TOTAL_SPACES
 		var portal: Dictionary = {}
 		for lm in _landmarks:
-			if lm["spell"] == "Stabilized Portal" and int(lm["owner"]) != player.player_id and int(lm["space"]) == landing and not used.has(int(lm["id"])):
+			if lm["spell"] == "Stabilized Portal" and int(lm["owner"]) != player.player_id and int(lm["space"]) == at and not used.has(int(lm["id"])):
 				portal = lm
 				break
 		if portal.is_empty():
 			break
 		used.append(int(portal["id"]))
-		var destination: int = int(portal["data"].get("destination", landing))
-		var extra: int = posmod(destination - landing, board.TOTAL_SPACES)
-		roll += extra
-		if simulate:
-			continue
-		_log("%s's Stabilized Portal on %s sends %s on to %s (roll +%d, now %d)." % [PLAYER_NAMES[int(portal["owner"])], _property_name(landing), PLAYER_NAMES[player.player_id], _property_name(destination), extra, roll])
-		portal["triggers"] = int(portal["triggers"]) - 1
-		if int(portal["triggers"]) <= 0:
-			_remove_landmark(portal, "its last trigger was used")
+		var destination: int = int(portal["data"].get("destination", at))
+		if not simulate:
+			_log("%s's Stabilized Portal on %s sends %s to %s (a teleport)." % [PLAYER_NAMES[int(portal["owner"])], _property_name(at), PLAYER_NAMES[player.player_id], _property_name(destination)])
+			portal["triggers"] = int(portal["triggers"]) - 1
+			if int(portal["triggers"]) <= 0:
+				_remove_landmark(portal, "its last trigger was used")
+		at = destination
+	if at != (start + roll) % board.TOTAL_SPACES:
+		_landmark_teleport_to = at
 	return roll
 
 

@@ -833,7 +833,21 @@ func _current_steps(roller: Node2D) -> int:
 
 
 func _current_landing(roller: Node2D) -> int:
+	# A teleport already set on this roll (Escape Plan...) decides it.
+	if main.has_method("_roll_landing"):
+		return int(main._roll_landing(roller))
 	return (roller.current_space + _current_steps(roller)) % _total_spaces()
+
+
+func _teleport_set() -> bool:
+	var t = main.get("_roll_teleport_to")
+	return t != null and int(t) >= 0
+
+
+# Worth of teleporting from where the roll lands to `dest` (nothing passed:
+# no Go money for the jump).
+func _teleport_gain(p: Node2D, dest: int) -> float:
+	return space_value(p, dest) - space_value(p, _current_landing(p))
 
 
 # How much a change to the bot's own roll (from `steps` to `new_steps`) is
@@ -841,6 +855,9 @@ func _current_landing(roller: Node2D) -> int:
 func _move_gain(p: Node2D, new_steps: int) -> float:
 	# A jail roll that isn't doubles doesn't move anyone: nothing to gain.
 	if p.in_jail and not main._dice_are_doubles():
+		return 0.0
+	# Once a teleport is set, changing the dice doesn't change where it ends.
+	if _teleport_set():
 		return 0.0
 	return move_value(p, new_steps) - move_value(p, _current_steps(p))
 
@@ -1350,20 +1367,20 @@ func _evaluate(p: Node2D, spell: String, level: int, phase: String) -> Dictionar
 		"Escape Plan":
 			if phase != "roll_self":
 				return {}
+			# A teleport ahead to the nearest qualifying square.
 			var cond: Callable = main._escape_plan_condition(p, level)
-			var steps: int = _current_steps(p)
+			var landing: int = _current_landing(p)
 			for k in range(1, _total_spaces() + 1):
-				if cond.call((p.current_space + steps + k) % _total_spaces()):
-					var g: float = _move_gain(p, steps + k)
-					return {"value": g, "why": "moves on %d to a better square (+$%d)." % [k, int(g)]}
+				var dest: int = (landing + k) % _total_spaces()
+				if cond.call(dest):
+					var g: float = _teleport_gain(p, dest)
+					return {"value": g, "why": "teleports to %s, a better square (+$%d)." % [main._property_name(dest), int(g)]}
 			return {}
 		"King's Escape Tunnel":
 			if phase != "roll_self":
 				return {}
-			var landing: int = _current_landing(p)
-			var extra: int = posmod(20 - landing, _total_spaces())
-			var g: float = _move_gain(p, _current_steps(p) + extra)
-			return {"value": g, "why": "goes to Free Parking ($%d) instead." % main.free_parking_amount}
+			var g: float = _teleport_gain(p, main._free_parking_index())
+			return {"value": g, "why": "teleports to Free Parking ($%d) instead." % main.free_parking_amount}
 		"Veto":
 			if phase != "roll_self":
 				return {}
