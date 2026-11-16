@@ -476,7 +476,7 @@ func _update_wizard_vision() -> void:
 # pointing straight in towards the board's centre, and one pointing straight
 # into square `to_space` from the board side.
 const WV_TELEPORT_NEAR: float = 22.0
-const WV_TELEPORT_FAR: float = 78.0
+const WV_TELEPORT_FAR: float = 110.0
 
 
 func _wv_teleport_arrows(from_space: int, to_space: int) -> Array:
