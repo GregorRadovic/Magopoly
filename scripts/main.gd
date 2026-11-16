@@ -3628,11 +3628,13 @@ func _move_player(player: Node2D, roll: int) -> bool:
 	# sends them somewhere).
 	if roll <= 0:
 		if teleport_to >= 0 and teleport_to != player.current_space:
-			return await _land_after_teleport(player, teleport_to, roll)
+			if await _land_after_teleport(player, teleport_to, roll):
+				return true
+			return await _process_landing_landmarks(player)
 		dice_label.text += "\nThe roll is 0 -- no movement."
 		_log("%s's roll is 0, so they don't move." % PLAYER_NAMES[player.player_id])
 		return false
-	if await _move_and_land(player, roll):
+	if await _move_and_land(player, roll, teleport_to):
 		return true
 	# Landmarks on the space landed on react once the landing has resolved.
 	return await _process_landing_landmarks(player)
@@ -3640,7 +3642,7 @@ func _move_player(player: Node2D, roll: int) -> bool:
 
 # The move itself and the normal landing (rent, tax, buying, ...). Returns
 # true if the move ended the player's turn early (bankrupt, or Go To Jail).
-func _move_and_land(player: Node2D, roll: int) -> bool:
+func _move_and_land(player: Node2D, roll: int, teleport_to: int = -1) -> bool:
 	var new_space_raw: int = player.current_space + roll
 	# A big enough roll (roll-multiplier spells like Unstable Portal) can carry
 	# a player past Go more than once in one move -- $200 and a spell draw for
