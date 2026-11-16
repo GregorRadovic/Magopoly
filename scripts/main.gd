@@ -441,7 +441,10 @@ var _siren_roll: bool = false
 # Tunnel, Siren's Song...) don't lengthen it any more: the dice move the
 # piece as rolled, then it TELEPORTS here -- passing nothing in between (no
 # Go, no $200). -1 = no teleport. Reset each roll; used by _move_player().
-var _roll_teleport_to: int = -1
+var _roll_teleport_to: int = -1:
+	set(value):
+		_roll_teleport_to = value
+		_update_wizard_vision()
 # Set by _apply_pre_move_landmarks(): where a Stabilized Portal teleports the
 # mover (-1 = none) for the roll it just looked at.
 var _landmark_teleport_to: int = -1
