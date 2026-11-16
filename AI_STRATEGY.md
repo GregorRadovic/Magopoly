@@ -85,7 +85,10 @@ worth $150 more". The bot casts them first, then the better spell.
    land and compares that with where each roll spell would put it:
    - Adrenaline, Rocket Boost, Hasty Exit Level 2.
    - Divine Protection, Escape Into Custody.
-   - Escape Plan, King's Escape Tunnel.
+   - Escape Plan, King's Escape Tunnel. These teleport the piece rather
+     than lengthen the roll, so the bot scores them as "this square instead
+     of that one", with no Go money for the jump. Once a teleport is set,
+     it knows changing the dice won't change where the piece ends up.
    - Veto, Dodge, Go For the Kill.
 
    It also uses Counterfeit Currency / Misplaced Payment if it's about to pay

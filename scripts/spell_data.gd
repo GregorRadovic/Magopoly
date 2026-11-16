@@ -167,9 +167,9 @@ const SPELLS: Dictionary = {
 		"color": "orange",
 		"icon": "res://Magopoly Assets/Cards/4 2 Escape Plan.png",
 		"levels": {
-			1: {"description": "Increase your roll until you land on the nearest property owned by an opponent, excluding the color set you would have landed on.", "timings": ["roll_response"], "requires_current_player": true},
-			2: {"description": "Increase your roll until you land on the nearest property you own.", "timings": ["roll_response"], "requires_current_player": true},
-			3: {"description": "Increase your roll until you land on the nearest unowned property.", "timings": ["roll_response"], "requires_current_player": true},
+			1: {"description": "Instead of stopping where you'd land, teleport ahead to the nearest property owned by an opponent, excluding the color set you would have landed on. (You don't pass anything on the way.)", "timings": ["roll_response"], "requires_current_player": true},
+			2: {"description": "Instead of stopping where you'd land, teleport ahead to the nearest property you own. (You don't pass anything on the way.)", "timings": ["roll_response"], "requires_current_player": true},
+			3: {"description": "Instead of stopping where you'd land, teleport ahead to the nearest unowned property. (You don't pass anything on the way.)", "timings": ["roll_response"], "requires_current_player": true},
 		},
 	},
 	"Offer You Can't Refuse": {
@@ -436,9 +436,9 @@ const SPELLS: Dictionary = {
 		"color": "yellow",
 		"icon": "res://Magopoly Assets/Magopoly Expansions/AB A 6 Kings Escape Tunnel.png",
 		"levels": {
-			1: {"description": "Increase your roll until you land on Free Parking. Play this only if you would land on an unowned property.", "timings": ["roll_response"], "requires_current_player": true},
-			2: {"description": "Increase your roll until you land on Free Parking. Play this only if you would land on a property you own.", "timings": ["roll_response"], "requires_current_player": true},
-			3: {"description": "Increase your roll until you land on Free Parking. Play this only if you would land on a property owned by an opponent.", "timings": ["roll_response"], "requires_current_player": true},
+			1: {"description": "Instead of stopping where you'd land, teleport to Free Parking (passing nothing on the way). Play this only if you would land on an unowned property.", "timings": ["roll_response"], "requires_current_player": true},
+			2: {"description": "Instead of stopping where you'd land, teleport to Free Parking (passing nothing on the way). Play this only if you would land on a property you own.", "timings": ["roll_response"], "requires_current_player": true},
+			3: {"description": "Instead of stopping where you'd land, teleport to Free Parking (passing nothing on the way). Play this only if you would land on a property owned by an opponent.", "timings": ["roll_response"], "requires_current_player": true},
 		},
 	},
 	# "Before Roll" on the type line: your own turn, before rolling.
@@ -539,8 +539,8 @@ const SPELLS: Dictionary = {
 		"color": "ocean_blue",
 		"icon": "res://Magopoly Assets/Cards/AB B 8 Sirens Song.png",
 		"levels": {
-			1: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. If you pass Go this way, you don't collect $200 or a spell card. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
-			2: {"description": "Before rolling: when you roll this turn, increase your roll until you land on the space that would cost you the most money. If you pass Go this way, you don't collect $200 or a spell card. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
+			1: {"description": "Before rolling: when you roll this turn, after you move, teleport to the space that would cost you the most money (passing nothing on the way). If you pass Go this way, you don't collect $200 or a spell card. Gain $300.", "amount": 300, "requires_current_player": true, "requires_not_yet_rolled": true},
+			2: {"description": "Before rolling: when you roll this turn, after you move, teleport to the space that would cost you the most money (passing nothing on the way). If you pass Go this way, you don't collect $200 or a spell card. Gain $500.", "amount": 500, "requires_current_player": true, "requires_not_yet_rolled": true},
 		},
 	},
 }
