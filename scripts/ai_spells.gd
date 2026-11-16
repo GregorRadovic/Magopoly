@@ -296,13 +296,15 @@ func _default_answer(q: Dictionary) -> Variant:
 		"confirm":
 			if p == null:
 				return false
-			if text.begins_with("Dodge:"):
-				return _dodge_reroll_other(p, text)
 			if text.to_lower().contains("buy "):
 				return _confirm_buy(p, text)
 			return false
 		"die":
 			if text.begins_with("Dodge:") and p != null:
+				if q.get("cancellable", false):
+					# The optional second die: reroll it only if that's better
+					# on average than where the roll now goes.
+					return int(q.get("only", 0)) if _dodge_reroll_other(p, text) else 0
 				return _dodge_pick_die(p)
 			if text.contains("Fated Ending"):
 				return _fated_ending_pick(seat, text)

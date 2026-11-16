@@ -3281,6 +3281,7 @@ func _perform_roll(die1: int, die2: int) -> void:
 	_die1 = die1
 	_die2 = die2
 	_roll_seq += 1
+	_dice_anim = [3, DICE_TUMBLE_SEC]
 	dice_roller.roll(die1, die2, DICE_TUMBLE_SEC)
 	dice_label.text = "%s rolled: %d + %d = %d" % [_player_display_name(current_player), die1, die2, roll]
 	_log("%s rolled %d + %d = %d." % [PLAYER_NAMES[current_player], die1, die2, roll])
@@ -8084,11 +8085,21 @@ func _build_face_row() -> void:
 # Changes the dice of the roll in flight (Dodge, Veto) and re-shows them --
 # a fresh _roll_seq so online clients re-animate too. A 0 die (Veto) just
 # shows blank.
-func _set_roll_dice(d1: int, d2: int) -> void:
+# A spell changed the dice in play: show it. `mask` = which dice tumble
+# (1 / 2 / 3 = both) and for how long -- mirrored to clients (snapshot
+# "dice_anim").
+func _set_roll_dice(d1: int, d2: int, mask: int = 3, seconds: float = 0.3) -> void:
 	_die1 = d1
 	_die2 = d2
 	_roll_seq += 1
-	dice_roller.roll(d1, d2, 0.3)
+	_dice_anim = [mask, seconds]
+	dice_roller.roll(d1, d2, seconds, mask)
+
+
+# How the latest dice change animates: [mask, seconds] (see _set_roll_dice).
+var _dice_anim: Array = [3, DICE_TUMBLE_SEC]
+# A single die being rerolled (Dodge): long enough to watch it tumble.
+const DIE_REROLL_SEC: float = 0.5
 
 
 # Natural Magician: opponents can't target a player who has it (a player can
@@ -8717,31 +8728,41 @@ func _resolve_dodge(caster: Node2D, level: int) -> void:
 	if not _roll_in_flight or current_player != caster.player_id:
 		_log("%s's Dodge fizzles -- their roll is already over." % PLAYER_NAMES[caster.player_id])
 		return
-	var old_sum: int = _die1 + _die2
 	var d1: int = _die1
 	var d2: int = _die2
 	if level == 1:
 		d1 = randi_range(1, 6)
 		d2 = randi_range(1, 6)
+		await _dodge_reroll(d1, d2, 3)
 	else:
+		# Click a die: it rerolls on its own. Then click the other one to
+		# reroll it too, or Cancel to keep it.
 		_prompt_slot = caster.player_id
-		var which: int = await _pick_die("Dodge: click a die to reroll.")
+		var which: int = await _pick_die("Dodge: choose a die to reroll.")
 		if which == 2:
 			d2 = randi_range(1, 6)
 		else:
 			d1 = randi_range(1, 6)
-		var other: int = d1 if which == 2 else d2
-		_cf_open("Dodge: you rerolled a %d. Reroll the other die (showing %d) too?" % [d2 if which == 2 else d1, other])
-		if await _cf_result():
-			if which == 2:
-				d1 = randi_range(1, 6)
-			else:
+		await _dodge_reroll(d1, d2, which)
+		var other: int = 3 - which
+		var again: int = await _pick_die("Dodge: you rolled a %d. Click the other die (showing %d) to reroll it too, or Cancel." % [d2 if which == 2 else d1, d1 if which == 2 else d2], true, other)
+		if again != 0:
+			if other == 2:
 				d2 = randi_range(1, 6)
+			else:
+				d1 = randi_range(1, 6)
+			await _dodge_reroll(d1, d2, other)
 		_prompt_slot = -1
-	_set_roll_dice(d1, d2)
-	_current_roll = maxi(0, _current_roll + (d1 + d2 - old_sum))
 	_log("%s's Dodge (Level %d): the dice are now %d + %d (roll now %d)." % [PLAYER_NAMES[caster.player_id], level, d1, d2, _current_roll])
 	_update_player_panels()
+
+
+# One Dodge reroll: the `mask` dice tumble to (d1, d2) and the roll changes
+# by the difference (doubles still count from the original dice).
+func _dodge_reroll(d1: int, d2: int, mask: int) -> void:
+	_current_roll = maxi(0, _current_roll + (d1 + d2 - _die1 - _die2))
+	_set_roll_dice(d1, d2, mask, DIE_REROLL_SEC)
+	await get_tree().create_timer(DIE_REROLL_SEC).timeout
 
 
 func _prepare_master_plan(caster: Node2D, level: int) -> Callable:
@@ -9623,6 +9644,7 @@ func _build_snapshot() -> Dictionary:
 		"die1": _die1,
 		"die2": _die2,
 		"roll_seq": _roll_seq,
+		"dice_anim": _dice_anim,
 		"trading": _trading,
 		"trader1": _trader1,
 		"trader2": _trader2,
@@ -9772,7 +9794,7 @@ func _apply_snapshot(snap: Dictionary) -> void:
 	_current_roll = snap.get("current_roll", 0)
 	_roll_in_flight = snap.get("roll_in_flight", false)
 
-	_apply_dice_animation(snap.get("die1", -1), snap.get("die2", -1), snap.get("roll_seq", 0))
+	_apply_dice_animation(snap.get("die1", -1), snap.get("die2", -1), snap.get("roll_seq", 0), snap.get("dice_anim", [3, DICE_TUMBLE_SEC]))
 
 	_update_player_panels()
 	_refresh_action_buttons()
@@ -9780,14 +9802,14 @@ func _apply_snapshot(snap: Dictionary) -> void:
 
 
 # Client: mirror the host's dice-rolling animation from the snapshot.
-func _apply_dice_animation(d1: int, d2: int, seq: int) -> void:
+func _apply_dice_animation(d1: int, d2: int, seq: int, anim: Array = [3, DICE_TUMBLE_SEC]) -> void:
 	if d1 < 0:
 		dice_roller.clear_dice()
 		_roll_seq = seq
 		return
 	if seq != _roll_seq:
 		_roll_seq = seq
-		dice_roller.roll(d1, d2, DICE_TUMBLE_SEC)
+		dice_roller.roll(d1, d2, float(anim[1]) if anim.size() > 1 else DICE_TUMBLE_SEC, int(anim[0]) if anim.size() > 0 else 3)
 	if not _roll_in_flight:
 		dice_roller.finish_now()
 
@@ -9936,14 +9958,22 @@ func _pick_board_space(text: String, spaces: Array[int], cancellable: bool = tru
 
 
 # Which die (1 or 2) the deciding player clicks. Can't be cancelled.
-func _pick_die(text: String) -> int:
+# The player clicks one of the dice in play. `only`: 1 or 2 to offer just
+# that die. Returns 1 or 2 -- or 0 if `cancellable` and they press Cancel.
+func _pick_die(text: String, cancellable: bool = false, only: int = 0) -> int:
+	var which: int
 	if _prompt_is_ai():
-		_ai_prompt_open("die", {"text": text})
-		return 2 if int(_ai_prompt_take()) == 2 else 1
-	if _prompt_is_local():
-		return await _die_pick_local(text)
-	_net_open_remote("die", {"text": text})
-	var which: int = int(await _net_await_reply())
+		_ai_prompt_open("die", {"text": text, "cancellable": cancellable, "only": only})
+		which = int(_ai_prompt_take())
+	elif _prompt_is_local():
+		which = await _die_pick_local(text, cancellable, only)
+	else:
+		_net_open_remote("die", {"text": text, "cancellable": cancellable, "only": only})
+		which = int(await _net_await_reply())
+	if which == 0 and cancellable:
+		return 0
+	if only != 0:
+		return only
 	return 2 if which == 2 else 1
 
 
@@ -9967,13 +9997,19 @@ func _board_pick_end(index: int) -> void:
 	board_pick_chosen.emit(index)
 
 
-func _die_pick_local(text: String) -> int:
-	_show_pick_banner(text, false)
-	dice_roller.start_pick()
+func _die_pick_local(text: String, cancellable: bool = false, only: int = 0) -> int:
+	_show_pick_banner(text, cancellable)
+	_die_picking = true
+	dice_roller.start_pick(only)
 	var which: int = await dice_roller.die_picked
+	_die_picking = false
 	dice_roller.stop_pick()
 	_hide_pick_banner()
 	return which
+
+
+# A die pick waiting on this machine (its banner's Cancel answers 0).
+var _die_picking: bool = false
 
 
 # A picker entry that names board spaces (Word of Binding's colors) lights
@@ -10010,6 +10046,9 @@ func _on_landmark_badge_clicked(index: int, spell: String) -> void:
 
 
 func _on_pick_banner_cancel() -> void:
+	if _die_picking:
+		dice_roller.die_picked.emit(0)
+		return
 	if not _player_pick_ids.is_empty():
 		_player_pick_end(-1)
 		return
@@ -10295,7 +10334,7 @@ func _net_client_run_prompt(kind: String, payload: Dictionary) -> Variant:
 			return await _board_pick_local(str(payload.get("text", "")),
 				_net_int_array(payload.get("spaces", [])), bool(payload.get("cancellable", true)))
 		"die":
-			return await _die_pick_local(str(payload.get("text", "")))
+			return await _die_pick_local(str(payload.get("text", "")), bool(payload.get("cancellable", false)), int(payload.get("only", 0)))
 		"face":
 			return await _face_pick_local(str(payload.get("text", "")))
 		"card":
