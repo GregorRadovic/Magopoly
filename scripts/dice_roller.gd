@@ -26,6 +26,8 @@ var _visible_dice: bool = false
 var _end_msec: int = 0
 var _next_shuffle_msec: int = 0
 var _jitter: Array[Vector2] = [Vector2.ZERO, Vector2.ZERO]
+# Which dice are tumbling (a spell like Dodge rerolls just one).
+var _tumbling: Array[bool] = [false, false]
 
 # Die pick (main.gd's _pick_die): both dice get a gold frame and the one
 # clicked is reported as 1 or 2.
@@ -33,11 +35,18 @@ signal die_picked(which: int)
 const PICK_COLOR: Color = Color(1.0, 0.82, 0.25)
 var _picking: bool = false
 var _pick_hover: int = 0
+# 0: either die can be picked; 1 or 2: only that one.
+var _pick_only: int = 0
 
 
-func roll(die1: int, die2: int, duration_sec: float) -> void:
+# Tumbles the dice for `duration_sec` and settles on (die1, die2). `mask`
+# picks which dice tumble -- 1 = the first, 2 = the second, 3 = both; the
+# other just shows its value (Dodge rerolling one die).
+func roll(die1: int, die2: int, duration_sec: float, mask: int = 3) -> void:
 	_final = [die1, die2]
-	_shown = [randi_range(1, 6), randi_range(1, 6)]
+	for i in 2:
+		_tumbling[i] = (mask & (1 << i)) != 0
+		_shown[i] = randi_range(1, 6) if _tumbling[i] else _final[i]
 	_rolling = true
 	_visible_dice = true
 	_end_msec = GameState.now_msec() + int(maxf(0.05, duration_sec) * 1000.0)
@@ -49,15 +58,19 @@ func finish_now() -> void:
 	if not _rolling:
 		return
 	_rolling = false
+	_tumbling = [false, false]
 	_shown = _final.duplicate()
 	_jitter = [Vector2.ZERO, Vector2.ZERO]
 	queue_redraw()
 
 
-func start_pick() -> void:
+# Lets the player click a die (gold frames). `only`: 1 or 2 to offer just
+# that die; 0 for either.
+func start_pick(only: int = 0) -> void:
 	finish_now()
 	_visible_dice = true
 	_picking = true
+	_pick_only = only
 	_pick_hover = 0
 	queue_redraw()
 
@@ -73,6 +86,8 @@ func stop_pick() -> void:
 func _die_at(screen_pos: Vector2) -> int:
 	var local: Vector2 = get_global_transform_with_canvas().affine_inverse() * screen_pos
 	for i in 2:
+		if _pick_only != 0 and _pick_only != i + 1:
+			continue
 		var rect := Rect2(Vector2(i * (DIE_SIZE + GAP), 0.0), Vector2(DIE_SIZE, DIE_SIZE)).grow(6.0)
 		if rect.has_point(local):
 			return i + 1
@@ -112,11 +127,10 @@ func _process(_delta: float) -> void:
 		return
 	if now >= _next_shuffle_msec:
 		_next_shuffle_msec = now + SHUFFLE_MS
-		_shown = [randi_range(1, 6), randi_range(1, 6)]
-		_jitter = [
-			Vector2(randf_range(-3.0, 3.0), randf_range(-3.0, 3.0)),
-			Vector2(randf_range(-3.0, 3.0), randf_range(-3.0, 3.0)),
-		]
+		for i in 2:
+			if _tumbling[i]:
+				_shown[i] = randi_range(1, 6)
+				_jitter[i] = Vector2(randf_range(-3.0, 3.0), randf_range(-3.0, 3.0))
 		queue_redraw()
 
 
@@ -126,16 +140,16 @@ func _draw() -> void:
 	for i in 2:
 		var origin: Vector2 = Vector2(i * (DIE_SIZE + GAP), 0.0) + _jitter[i]
 		_draw_die(origin, _shown[i])
-		if _picking:
+		if _picking and (_pick_only == 0 or _pick_only == i + 1):
 			var frame := Rect2(origin, Vector2(DIE_SIZE, DIE_SIZE)).grow(6.0)
 			if _pick_hover == i + 1:
 				draw_rect(frame, Color(PICK_COLOR.r, PICK_COLOR.g, PICK_COLOR.b, 0.35))
 				_draw_die(origin, _shown[i])
 			draw_rect(frame, PICK_COLOR, false, 5.0 if _pick_hover == i + 1 else 3.0)
-	# "Doubles!" for as long as the settled dice match (a zeroed die has no
-	# value, so blank + blank doesn't count) -- it follows any spell that
-	# changes the dice, since those re-roll() them.
-	if not _rolling and _shown[0] == _shown[1] and _shown[0] > 0:
+	# "Doubles!" for as long as the settled dice match -- double zero (Veto)
+	# counts too -- it follows any spell that changes the dice, since those
+	# re-roll() them.
+	if not _rolling and _shown[0] == _shown[1] and _shown[0] >= 0:
 		var font: Font = ThemeDB.fallback_font
 		var text: String = "Doubles!"
 		var width: float = 2.0 * DIE_SIZE + GAP

@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://ctguor10w6uvm"
-path="res://.godot/imported/C 7 1 Parasite.png-f76594ab5009526754466c0a70a02be1.ctex"
+path="res://.godot/imported/C 7 1 Parasite.png-2943ff7f5ffd7baecf8e982b29ba1a5f.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Magopoly Assets/10 updated cards/C 7 1 Parasite.png"
-dest_files=["res://.godot/imported/C 7 1 Parasite.png-f76594ab5009526754466c0a70a02be1.ctex"]
+source_file="res://Magopoly Assets/Magopoly Expansions/C 7 1 Parasite.png"
+dest_files=["res://.godot/imported/C 7 1 Parasite.png-2943ff7f5ffd7baecf8e982b29ba1a5f.ctex"]
 
 [params]
 

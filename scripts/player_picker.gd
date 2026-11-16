@@ -3,6 +3,10 @@ extends PopupPanel
 # -1 means no player was chosen (Cancel, or dismissed some other way --
 # never emitted for a mandatory picker, see open()).
 signal player_chosen(index: int)
+# The mouse moved onto (true) / off (false) an entry's button -- the whole
+# entry dictionary is passed, so callers can preview what it refers to
+# (main.gd highlights an entry's "spaces" on the board).
+signal entry_hovered(entry: Dictionary, on: bool)
 
 # Points at the current session's own one-element "answered" box (see open()
 # for why it's a boxed value rather than a plain bool).
@@ -85,6 +89,8 @@ func _do_open(prompt: String, entries: Array, mandatory: bool, sticky: bool, gat
 		btn.text = entry["name"]
 		btn.add_theme_color_override("font_color", entry["color"])
 		btn.pressed.connect(_on_pick.bind(entry["index"], answered_box))
+		btn.mouse_entered.connect(func() -> void: entry_hovered.emit(entry, true))
+		btn.mouse_exited.connect(func() -> void: entry_hovered.emit(entry, false))
 		button_container.add_child(btn)
 	# As tall as the list needs, up to what fits on screen with the prompt
 	# and Cancel button; past that it scrolls.
@@ -93,6 +99,17 @@ func _do_open(prompt: String, entries: Array, mandatory: bool, sticky: bool, gat
 	_scroll.custom_minimum_size = Vector2(0, mini(list_height, maxi(max_height, ENTRY_HEIGHT * 3)))
 	_scroll.scroll_vertical = 0
 	popup_centered(POPUP_SIZE)
+	# Entries that light up board spaces when hovered (see entry_hovered):
+	# open over the right-hand players panel instead, so the list doesn't
+	# cover the board it's previewing.
+	var previews_board: bool = false
+	for entry in entries:
+		if entry.has("spaces"):
+			previews_board = true
+			break
+	if previews_board:
+		var view: Vector2 = get_parent().get_viewport().get_visible_rect().size
+		position = Vector2i(int(view.x * 0.72 - size.x / 2.0), int((view.y - size.y) / 2.0))
 	set_process(_mandatory or _sticky or _gate.is_valid())
 	popup_hide.connect(_on_popup_hide.bind(answered_box), CONNECT_ONE_SHOT)
 

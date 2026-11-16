@@ -17,7 +17,17 @@ const STARTING_MONEY: int = 1500
 var player_id: int = 0
 var player_color: Color = Color.WHITE
 var current_space: int = 0
-var money: int = STARTING_MONEY
+
+# Emitted whenever money goes down, for any reason (Fragile Goods discards
+# itself on this -- see main.gd's _on_player_money_lost()).
+signal money_lost(player_id: int)
+
+var money: int = STARTING_MONEY:
+	set(value):
+		var lost: bool = value < money
+		money = value
+		if lost:
+			money_lost.emit(player_id)
 var in_jail: bool = false
 var jail_turns_left: int = 0
 var consecutive_doubles: int = 0
@@ -75,6 +85,21 @@ var misplaced_payment_percent: int = 0
 # lands on the opponent's property with the highest rent. Consumed by that
 # roll.
 var siren_song_active: bool = false
+
+# Loaded Dice -- "this turn" state, cleared at the end of the turn:
+# Master Plan level (0 = none) applied to this player's next roll.
+var master_plan_level: int = 0
+# Pilgrimage: space indices this player may buy as they pass them.
+var pilgrimage_spaces: Array[int] = []
+# Go For the Kill: what each player passed while moving pays this player
+# (summed across casts).
+var go_for_the_kill_amount: int = 0
+# Critical Hit's "if you rolled doubles this turn".
+var rolled_doubles_this_turn: bool = false
+
+# Fated Ending -- NOT a "this turn" buff: applied to this player's next roll
+# on a later turn. {} = none, else {"level": int, "caster": player id}.
+var fated_ending: Dictionary = {}
 
 # Cramped Cell -- NOT a "this turn" buff: lasts for as long as this player
 # stays in jail. One entry per resolved cast: {"creditor": player id,

@@ -1,6 +1,8 @@
 extends Node2D
 
 signal space_clicked(index: int)
+# A landmark badge on space `index` was clicked; `spell` is its card.
+signal landmark_clicked(index: int, spell: String)
 
 const SPACE_SCENE: PackedScene = preload("res://scenes/board_space.tscn")
 
@@ -164,6 +166,7 @@ func _generate_board() -> void:
 		if CORNER_TILE_TEXTURES.has(i):
 			space.tile_texture = CORNER_TILE_TEXTURES[i]
 		space.clicked.connect(space_clicked.emit)
+		space.landmark_clicked.connect(landmark_clicked.emit)
 		add_child(space)
 		spaces.append(space)
 
