@@ -458,11 +458,46 @@ func _update_wizard_vision() -> void:
 	var roller: Node2D = players[current_player]
 	var landing_index: int = _roll_landing(roller)
 	var col: Color = PLAYER_COLORS[current_player]
-	wizard_vision_line.show_line(roller.position, board.get_space_center(landing_index), col)
+	# A teleport: the line stops where the dice take the piece; two short
+	# arrows show the jump (out towards the board's centre, then into the
+	# destination) instead of a line across the board.
+	var natural: int = (roller.current_space + _current_roll) % board.TOTAL_SPACES
+	if landing_index != natural:
+		wizard_vision_line.show_line(roller.position, board.get_space_center(natural), col, _wv_teleport_arrows(natural, landing_index))
+	else:
+		wizard_vision_line.show_line(roller.position, board.get_space_center(landing_index), col)
 	if landing_index != _wv_landing_index:
 		_clear_wv_landing_highlight()
 		board.spaces[landing_index].set_landing_highlight(true, col)
 		_wv_landing_index = landing_index
+
+
+# Wizard Vision's teleport arrows: a short one from square `from_space`
+# pointing straight in towards the board's centre, and one pointing straight
+# into square `to_space` from the board side.
+const WV_TELEPORT_NEAR: float = 22.0
+const WV_TELEPORT_FAR: float = 78.0
+
+
+func _wv_teleport_arrows(from_space: int, to_space: int) -> Array:
+	var out_dir: Vector2 = _wv_toward_centre(from_space)
+	var in_dir: Vector2 = _wv_toward_centre(to_space)
+	var a: Vector2 = board.get_space_center(from_space)
+	var b: Vector2 = board.get_space_center(to_space)
+	return [
+		[a + out_dir * WV_TELEPORT_NEAR, a + out_dir * WV_TELEPORT_FAR],
+		[b + in_dir * WV_TELEPORT_FAR, b + in_dir * WV_TELEPORT_NEAR],
+	]
+
+
+# Unit vector from square `index` straight towards the board's centre
+# (perpendicular to its side; corners lean along the nearer axis).
+func _wv_toward_centre(index: int) -> Vector2:
+	var middle: Vector2 = (board.get_space_center(0) + board.get_space_center(20)) * 0.5
+	var v: Vector2 = middle - board.get_space_center(index)
+	if absf(v.x) >= absf(v.y):
+		return Vector2(signf(v.x), 0.0)
+	return Vector2(0.0, signf(v.y))
 
 
 func _clear_wv_landing_highlight() -> void:
